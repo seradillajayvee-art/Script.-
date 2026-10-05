@@ -1,4 +1,4 @@
--- JAYVEE | STEAL AN EGG UI V3
+-- JAYVEE | STEAL AN EGG  V3
 -- Clean accordion-style UI inspired by the supplied reference.
 -- The controls are UI-only and are intended to be connected to your own Roblox game's systems.
 
