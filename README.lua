@@ -284,11 +284,15 @@ pcall(function() RunService:UnbindFromRenderStep("UIJ_Aimbot") end)
 local radius, enabled, showBox, counter = 12, true, true, true
 local aimOn, aimSmooth, aimHead, teamCheck, soundOn = false, 0.4, true, true, true
 local cooldown, lastDodge = 0.9, 0
-local dodgeMode, busy = "RANDOM", false
+local dodgeMode, busy = "NORMAL", false
+local backSide = "RANDOM"
 local LOCK_TIME, lockOn, fxOn = 5, true, true
+local freeMove = true
 local returnDelay = 0.04
 local lockTarget, lockUntil = nil, 0
 local dodgeCount = 0
+local activePower = nil
+local powerStates = {}
 
 local function getRoot(c) return c and c:FindFirstChild("HumanoidRootPart") end
 
@@ -608,8 +612,20 @@ end
 -- Character only FACES the enemy (rotation only). Joystick/WASD and camera stay 100% yours.
 local function releaseLock()
 	lockTarget = nil
+	lockUntil = 0
 	local h = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
 	if h then h.AutoRotate = true end
+end
+
+local function faceTarget(char, target)
+	if not freeMove or not lockOn then return end
+	local r, er = getRoot(char), getRoot(target)
+	if not r or not er then return end
+	local p = r.Position
+	local flat = Vector3.new(er.Position.X, p.Y, er.Position.Z)
+	if (flat - p).Magnitude > 0.1 then
+		r.CFrame = CFrame.lookAt(p, flat)
+	end
 end
 
 track(RunService.Heartbeat:Connect(function()
@@ -644,9 +660,19 @@ local function dodge(eChar)
 	pcall(function()
 		local startCF = r.CFrame
 		local list = snapshot(char)
-		local useTP = dodgeMode == "TELEPORT" or (dodgeMode == "RANDOM" and math.random() < 0.5)
-		-- BACK dodge only: always behind the enemy, randomly back-left or back-right
-		local side = math.random(0, 1) == 0 and -1 or 1
+		local useTP = dodgeMode == "TELEPORT"
+		local side
+		if dodgeMode == "NORMAL" then
+			if backSide == "LEFT" then
+				side = -1
+			elseif backSide == "RIGHT" then
+				side = 1
+			else
+				side = math.random(0, 1) == 0 and -1 or 1
+			end
+		else
+			side = math.random(0, 1) == 0 and -1 or 1
+		end
 		local sx = side * (math.random(25, 40) / 10)
 		local back = math.random(32, 45) / 10
 		local goal = (er.CFrame * CFrame.new(sx, 0, back)).Position
@@ -1063,6 +1089,7 @@ local function buildUI()
 
 	local function powerCard(page, p)
 		n = n + 1
+		powerStates[p.name] = false
 		local card = new("TextButton", {BackgroundColor3 = WHITE, BorderSizePixel = 0, Text = "",
 			AutoButtonColor = false, LayoutOrder = n}, page)
 		round(card, 14)
@@ -1110,7 +1137,28 @@ local function buildUI()
 		card.MouseButton1Down:Connect(function() sz(0.95) end)
 		card.MouseButton1Up:Connect(function() sz(1) end)
 		card.MouseButton1Click:Connect(function()
-			if p.ready and p.open then p.open() else toast(p.name .. "  •  Coming soon") end
+			if not p.ready then
+				toast(p.name .. "  •  Coming soon")
+				return
+			end
+			if activePower == p.name then
+				powerStates[p.name] = false
+				activePower = nil
+				if p.onDisable then pcall(p.onDisable) end
+				toast(p.name .. "  •  OFF")
+				return
+			end
+			if activePower then
+				powerStates[activePower] = false
+				local oldName = activePower
+				activePower = nil
+				toast(oldName .. "  •  OFF")
+			end
+			powerStates[p.name] = true
+			activePower = p.name
+			if p.onEnable then pcall(p.onEnable) end
+			if p.open then p.open() end
+			toast(p.name .. "  •  ON")
 		end)
 	end
 
@@ -1192,9 +1240,11 @@ local function buildUI()
 	local dp = subs.Dodge
 	toggle(dp, "Ultra Instinct", function() return enabled end, function(v) enabled = v end)
 	slider(dp, "Dodge Radius", 3, 60, 1, function() return radius end, function(v) radius = v end)
-	cycle(dp, "Dodge Mode", {"RANDOM", "TELEPORT", "NORMAL"}, function() return dodgeMode end, function(v) dodgeMode = v end)
+	cycle(dp, "Dodge Mode", {"NORMAL", "TELEPORT"}, function() return dodgeMode end, function(v) dodgeMode = v end)
 	toggle(dp, "Auto Counter", function() return counter end, function(v) counter = v end)
-	toggle(dp, "Target Lock (free move)", function() return lockOn end, function(v) lockOn = v; if not v then releaseLock() end end)
+	toggle(dp, "Target Lock", function() return lockOn end, function(v) lockOn = v; if not v then releaseLock() end end)
+	toggle(dp, "Free Move", function() return freeMove end, function(v) freeMove = v; if not v then releaseLock() end end)
+	cycle(dp, "Back Dodge", {"RANDOM", "LEFT", "RIGHT"}, function() return backSide end, function(v) backSide = v end)
 	slider(dp, "Lock Time", 1, 10, 1, function() return LOCK_TIME end, function(v) LOCK_TIME = v end, function(v) return v .. "s" end)
 	slider(dp, "Return Delay", 0, 0.3, 0.01, function() return returnDelay end, function(v) returnDelay = v end, function(v) return string.format("%.2fs", v) end)
 	slider(dp, "Dodge Cooldown", 0.3, 3, 0.1, function() return cooldown end, function(v) cooldown = v end, function(v) return string.format("%.1fs", v) end)
@@ -1214,7 +1264,9 @@ local function buildUI()
 	-- ===== GOKU POWERS =====
 	local gokuPowers = {
 		{name = "Ultra Instinct", icon = "🌀", a = rgb(190, 215, 255), b = rgb(120, 90, 220), ready = true,
-			open = function() showPage(uiView) end},
+			open = function() showPage(uiView) end,
+			onEnable = function() enabled = true end,
+			onDisable = function() enabled = false; releaseLock() end},
 		{name = "Mastered Ultra Instinct", icon = "🌌", a = rgb(230, 235, 255), b = rgb(110, 120, 200)},
 		{name = "Kamehameha", icon = "💥", a = rgb(90, 190, 255), b = rgb(40, 90, 220)},
 		{name = "Instant Transmission", icon = "⚡", a = rgb(255, 230, 90), b = rgb(255, 150, 40)},
@@ -1384,7 +1436,7 @@ local function buildUI()
 		acc = acc + dt
 		if acc > 0.2 and main.Visible then
 			acc = 0
-			sPower.Text = enabled and "Ultra Instinct" or "None"
+			sPower.Text = activePower or (enabled and "Ultra Instinct" or "None")
 			sDodge.Text = tostring(dodgeCount)
 			local left = lockUntil - tick()
 			if lockTarget and left > 0 then
