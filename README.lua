@@ -740,12 +740,51 @@ RunService:BindToRenderStep("UIJ_Aimbot", Enum.RenderPriority.Camera.Value + 1, 
 end)
 
 -- ================= MENU =================
+local ICON_B64 = "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"
+
+local function loadIcon()
+	local ok, res = pcall(function()
+		local B = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+		local map = {}
+		for i = 1, 64 do map[B:byte(i)] = i - 1 end
+		local s = ICON_B64:gsub('[^%w%+/=]', '')
+		local out, n = {}, 0
+		for i = 1, #s, 4 do
+			local a, b, c, d = s:byte(i, i + 3)
+			local v = (map[a] or 0) * 262144 + (map[b] or 0) * 4096 + (map[c] or 0) * 64 + (map[d] or 0)
+			local x1, x2, x3 = math.floor(v / 65536) % 256, math.floor(v / 256) % 256, v % 256
+			n = n + 1
+			if d == 61 and c == 61 then out[n] = string.char(x1)
+			elseif d == 61 then out[n] = string.char(x1, x2)
+			else out[n] = string.char(x1, x2, x3) end
+		end
+		local file = "UI_jayvee_icon_v1.jpg"
+		if not isfile(file) then writefile(file, table.concat(out)) end
+		return (getcustomasset or getsynasset)(file)
+	end)
+	return ok and res or nil
+end
+
 local function buildUI()
-	local ACC, ACC2 = Color3.fromRGB(108, 87, 175), Color3.fromRGB(165, 135, 250)
+	local C = {acc = Color3.fromRGB(108, 87, 175), acc2 = Color3.fromRGB(165, 135, 250)}
 	local BG, CARD = Color3.fromRGB(13, 13, 19), Color3.fromRGB(23, 23, 34)
 	local TXT, DIM = Color3.fromRGB(225, 225, 235), Color3.fromRGB(140, 140, 165)
-	local OFF = Color3.fromRGB(50, 50, 68)
-	local W, H, HEAD = 480, 340, 62
+	local OFF, LINE = Color3.fromRGB(50, 50, 68), Color3.fromRGB(44, 42, 66)
+	local W, H, HEAD = 450, 330, 54
+	local PY = HEAD + 44
+	local PH = H - PY - 14
+
+	-- ===== theme registry =====
+	local themed, repaints = {}, {}
+	local function reg(obj, prop, fn)
+		obj[prop] = fn()
+		table.insert(themed, {obj, prop, fn})
+	end
+	local function applyTheme()
+		for _, t in ipairs(themed) do pcall(function() t[1][t[2]] = t[3]() end) end
+		for _, f in ipairs(repaints) do pcall(f) end
+	end
+	local function seq(a, b) return function() return ColorSequence.new(C[a], C[b]) end end
 
 	local function new(class, props, parent)
 		local o = Instance.new(class)
@@ -757,15 +796,23 @@ local function buildUI()
 	local function isPress(i) return i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch end
 	local function isMove(i) return i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch end
 
+	-- ===== icon (your photo, falls back to the diamond) =====
+	local iconImgs, iconAsset = {}, nil
 	local function logo(parent, sz, pos)
 		local c = new("Frame", {Size = UDim2.fromOffset(sz, sz), Position = pos, BackgroundTransparency = 1}, parent)
 		local d = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
 			Size = UDim2.fromScale(0.6, 0.6), Rotation = 45, BackgroundColor3 = WHITE, BorderSizePixel = 0}, c)
 		round(d, math.floor(sz * 0.12))
-		new("UIGradient", {Color = ColorSequence.new(ACC2, ACC), Rotation = 90}, d)
+		local dg = new("UIGradient", {Rotation = 90}, d); reg(dg, "Color", seq("acc2", "acc"))
 		local d2 = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
 			Size = UDim2.fromScale(0.24, 0.24), Rotation = 45, BackgroundColor3 = BG, BorderSizePixel = 0}, c)
 		round(d2, 2)
+		local im = new("ImageLabel", {Size = UDim2.fromScale(1, 1), BackgroundColor3 = BG, BorderSizePixel = 0,
+			ScaleType = Enum.ScaleType.Crop, Image = "", Visible = false}, c)
+		round(im, sz)
+		local ims = new("UIStroke", {Thickness = 2}, im); reg(ims, "Color", function() return C.acc2 end)
+		table.insert(iconImgs, im)
+		if iconAsset then im.Image = iconAsset; im.Visible = true end
 		return c
 	end
 
@@ -796,9 +843,18 @@ local function buildUI()
 	round(main, 18)
 	new("UIGradient", {Color = ColorSequence.new(Color3.fromRGB(24, 20, 40), Color3.fromRGB(10, 10, 15)), Rotation = 90}, main)
 	local stroke = new("UIStroke", {Thickness = 1.8, Color = WHITE, Transparency = 0.1}, main)
-	local stg = new("UIGradient", {Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, ACC2), ColorSequenceKeypoint.new(0.35, Color3.fromRGB(35, 32, 60)),
-		ColorSequenceKeypoint.new(0.65, Color3.fromRGB(35, 32, 60)), ColorSequenceKeypoint.new(1, ACC2)})}, stroke)
+	local rainbow, spin, toastOn, userScale = false, true, true, 1
+	local function kp(t, c) return ColorSequenceKeypoint.new(t, c) end
+	local stg = new("UIGradient", {}, stroke)
+	reg(stg, "Color", function()
+		if rainbow then
+			return ColorSequence.new({kp(0, Color3.fromRGB(255, 70, 70)), kp(0.2, Color3.fromRGB(255, 220, 70)),
+				kp(0.4, Color3.fromRGB(70, 255, 120)), kp(0.6, Color3.fromRGB(70, 200, 255)),
+				kp(0.8, Color3.fromRGB(170, 90, 255)), kp(1, Color3.fromRGB(255, 70, 70))})
+		end
+		local dark = Color3.fromRGB(35, 32, 60)
+		return ColorSequence.new({kp(0, C.acc2), kp(0.35, dark), kp(0.65, dark), kp(1, C.acc2)})
+	end)
 
 	local base = math.min(1, (gui.AbsoluteSize.X - 30) / W, (gui.AbsoluteSize.Y - 30) / H)
 	if base ~= base or base <= 0.3 then base = 1 end
@@ -808,21 +864,23 @@ local function buildUI()
 
 	-- ===== header =====
 	local header = new("Frame", {Size = UDim2.new(1, 0, 0, HEAD), BackgroundTransparency = 1}, main)
-	logo(header, 40, UDim2.fromOffset(18, 11))
-	local title = new("TextLabel", {Size = UDim2.fromOffset(150, 26), Position = UDim2.fromOffset(66, 18), BackgroundTransparency = 1,
+	logo(header, 38, UDim2.fromOffset(16, 8))
+	local title = new("TextLabel", {Size = UDim2.fromOffset(150, 26), Position = UDim2.fromOffset(62, 14), BackgroundTransparency = 1,
 		Text = "ULTRA INSTINCT", TextColor3 = WHITE, Font = Enum.Font.GothamBlack, TextSize = 17,
 		TextXAlignment = Enum.TextXAlignment.Left}, header)
-	new("UIGradient", {Color = ColorSequence.new(WHITE, ACC2)}, title)
-	local pill = new("TextLabel", {Size = UDim2.fromOffset(104, 30), Position = UDim2.fromOffset(222, 16),
+	local tgr = new("UIGradient", {}, title)
+	reg(tgr, "Color", function() return ColorSequence.new(WHITE, C.acc2) end)
+	local pill = new("TextLabel", {Size = UDim2.fromOffset(100, 28), Position = UDim2.fromOffset(218, 13),
 		BackgroundColor3 = Color3.fromRGB(52, 52, 64), Text = "JAYVEE 👑", TextColor3 = WHITE,
-		Font = Enum.Font.GothamBold, TextSize = 15}, header)
-	round(pill, 15)
+		Font = Enum.Font.GothamBold, TextSize = 14}, header)
+	round(pill, 14)
 	local pst = new("UIStroke", {Thickness = 1.6, Color = WHITE}, pill)
-	local pg = new("UIGradient", {Color = ColorSequence.new(ACC, ACC2, ACC)}, pst)
+	local pg = new("UIGradient", {}, pst)
+	reg(pg, "Color", function() return ColorSequence.new({kp(0, C.acc), kp(0.5, C.acc2), kp(1, C.acc)}) end)
 
-	local minB = new("TextButton", {Size = UDim2.fromOffset(32, 28), Position = UDim2.new(1, -86, 0, 17), BackgroundTransparency = 1,
+	local minB = new("TextButton", {Size = UDim2.fromOffset(32, 28), Position = UDim2.new(1, -82, 0, 13), BackgroundTransparency = 1,
 		Text = "—", TextColor3 = DIM, Font = Enum.Font.GothamBold, TextSize = 18, AutoButtonColor = false}, main)
-	local xB = new("TextButton", {Size = UDim2.fromOffset(32, 28), Position = UDim2.new(1, -48, 0, 17), BackgroundTransparency = 1,
+	local xB = new("TextButton", {Size = UDim2.fromOffset(32, 28), Position = UDim2.new(1, -46, 0, 13), BackgroundTransparency = 1,
 		Text = "✕", TextColor3 = DIM, Font = Enum.Font.GothamBold, TextSize = 17, AutoButtonColor = false}, main)
 	for _, b in ipairs({minB, xB}) do
 		b.MouseEnter:Connect(function() TS:Create(b, TweenInfo.new(0.15), {TextColor3 = WHITE}):Play() end)
@@ -830,51 +888,65 @@ local function buildUI()
 	end
 
 	-- ===== tabs =====
-	local order = {"Home", "Dodge", "Aim", "Visual"}
+	local order = {"Home", "Goku Power", "Luffy Power", "Settings"}
 	local TW = (W - 24) / #order
-	local tabPill = new("Frame", {Size = UDim2.fromOffset(TW - 10, 36), Position = UDim2.fromOffset(17, HEAD + 4),
-		BackgroundColor3 = ACC, BorderSizePixel = 0}, main)
+	local tabPill = new("Frame", {Size = UDim2.fromOffset(TW - 10, 34), Position = UDim2.fromOffset(17, HEAD + 4),
+		BackgroundColor3 = WHITE, BorderSizePixel = 0}, main)
 	round(tabPill, 12)
-	new("UIGradient", {Color = ColorSequence.new(ACC, Color3.fromRGB(125, 100, 200)), Rotation = 90}, tabPill)
+	local tpg = new("UIGradient", {Rotation = 90}, tabPill)
+	reg(tpg, "Color", function() return ColorSequence.new(C.acc, C.acc:Lerp(WHITE, 0.15)) end)
+
 	local tabs, pages = {}, {}
-	for i, n in ipairs(order) do
-		tabs[n] = new("TextButton", {Size = UDim2.fromOffset(TW, 36), Position = UDim2.fromOffset(12 + (i - 1) * TW, HEAD + 4),
-			BackgroundTransparency = 1, Text = n, TextColor3 = DIM, Font = Enum.Font.GothamMedium, TextSize = 17,
+	local function scrollPage(visible)
+		local sf = new("ScrollingFrame", {Size = UDim2.fromOffset(W - 32, PH), Position = UDim2.fromOffset(16, PY),
+			BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3,
+			CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, Visible = visible or false}, main)
+		reg(sf, "ScrollBarImageColor3", function() return C.acc end)
+		return sf
+	end
+	for i, nm in ipairs(order) do
+		tabs[nm] = new("TextButton", {Size = UDim2.fromOffset(TW, 34), Position = UDim2.fromOffset(12 + (i - 1) * TW, HEAD + 4),
+			BackgroundTransparency = 1, Text = nm, TextColor3 = DIM, Font = Enum.Font.GothamMedium, TextSize = 14,
 			AutoButtonColor = false}, main)
-		local pg2 = new("ScrollingFrame", {Size = UDim2.fromOffset(W - 32, H - HEAD - 62), Position = UDim2.fromOffset(16, HEAD + 48),
-			BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3, ScrollBarImageColor3 = ACC,
-			CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, Visible = false}, main)
-		new("UIListLayout", {Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder}, pg2)
-		new("UIPadding", {PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 8)}, pg2)
-		pages[n] = pg2
+		pages[nm] = scrollPage()
+		if nm == "Goku Power" or nm == "Luffy Power" then
+			new("UIGridLayout", {CellSize = UDim2.new(0.5, -5, 0, 60), CellPadding = UDim2.fromOffset(8, 8),
+				SortOrder = Enum.SortOrder.LayoutOrder}, pages[nm])
+		else
+			new("UIListLayout", {Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder}, pages[nm])
+		end
+		new("UIPadding", {PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 8)}, pages[nm])
 	end
 
-	local current
+	local shown
+	local function showPage(obj)
+		if shown then shown.Visible = false end
+		shown = obj
+		obj.Visible = true
+		obj.Position = UDim2.fromOffset(16, PY + 16)
+		TS:Create(obj, TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Position = UDim2.fromOffset(16, PY)}):Play()
+	end
 	local function goTab(name, instant)
-		for i, n in ipairs(order) do
-			local on = n == name
-			TS:Create(tabs[n], TweenInfo.new(0.25), {TextColor3 = on and WHITE or DIM}):Play()
+		for i, nm in ipairs(order) do
+			local on = nm == name
+			TS:Create(tabs[nm], TweenInfo.new(0.25), {TextColor3 = on and WHITE or DIM}):Play()
 			if on then
 				TS:Create(tabPill, TweenInfo.new(instant and 0 or 0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
 					{Position = UDim2.fromOffset(12 + (i - 1) * TW + 5, HEAD + 4)}):Play()
 			end
 		end
-		if current then pages[current].Visible = false end
-		current = name
-		local p = pages[name]
-		p.Visible = true
-		p.Position = UDim2.fromOffset(16, HEAD + 66)
-		TS:Create(p, TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Position = UDim2.fromOffset(16, HEAD + 48)}):Play()
+		showPage(pages[name])
 	end
-	for _, n in ipairs(order) do tabs[n].MouseButton1Click:Connect(function() goTab(n) end) end
+	for _, nm in ipairs(order) do tabs[nm].MouseButton1Click:Connect(function() goTab(nm) end) end
 
 	-- ===== toast =====
 	local function toast(msg)
-		local t = new("TextLabel", {Size = UDim2.fromOffset(230, 34), AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, -50),
+		if not toastOn then return end
+		local t = new("TextLabel", {Size = UDim2.fromOffset(240, 34), AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, -50),
 			BackgroundColor3 = BG, TextColor3 = TXT, Font = Enum.Font.GothamBold, TextSize = 14, Text = msg,
 			BorderSizePixel = 0, ZIndex = 20}, gui)
 		round(t, 17)
-		new("UIStroke", {Color = ACC, Thickness = 1.5}, t)
+		new("UIStroke", {Color = C.acc, Thickness = 1.5}, t)
 		TS:Create(t, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(0.5, 0, 0, 40)}):Play()
 		task.delay(1.5, function()
 			TS:Create(t, TweenInfo.new(0.3), {Position = UDim2.new(0.5, 0, 0, -50)}):Play()
@@ -890,15 +962,15 @@ local function buildUI()
 			BorderSizePixel = 0, LayoutOrder = n}, page)
 		if isBtn then r.Text = ""; r.AutoButtonColor = false end
 		round(r, 12)
-		local s = new("UIStroke", {Color = Color3.fromRGB(44, 42, 66), Thickness = 1}, r)
+		local s = new("UIStroke", {Color = LINE, Thickness = 1}, r)
 		if isBtn then
 			r.MouseEnter:Connect(function()
 				TS:Create(r, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(31, 30, 46)}):Play()
-				TS:Create(s, TweenInfo.new(0.15), {Color = ACC}):Play()
+				TS:Create(s, TweenInfo.new(0.15), {Color = C.acc}):Play()
 			end)
 			r.MouseLeave:Connect(function()
 				TS:Create(r, TweenInfo.new(0.15), {BackgroundColor3 = CARD}):Play()
-				TS:Create(s, TweenInfo.new(0.15), {Color = Color3.fromRGB(44, 42, 66)}):Play()
+				TS:Create(s, TweenInfo.new(0.15), {Color = LINE}):Play()
 			end)
 		end
 		return r
@@ -907,6 +979,15 @@ local function buildUI()
 		return new("TextLabel", {Size = UDim2.new(0.62, 0, 0, h or 44), Position = UDim2.fromOffset(14, y or 0),
 			BackgroundTransparency = 1, Text = text, TextColor3 = TXT, Font = Enum.Font.GothamMedium, TextSize = 15,
 			TextXAlignment = Enum.TextXAlignment.Left}, parent)
+	end
+	local function listPage(parent, y, h, visible)
+		local sf = new("ScrollingFrame", {Size = UDim2.fromOffset(W - 32, h), Position = UDim2.fromOffset(0, y),
+			BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3,
+			CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, Visible = visible or false}, parent)
+		reg(sf, "ScrollBarImageColor3", function() return C.acc end)
+		new("UIListLayout", {Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder}, sf)
+		new("UIPadding", {PaddingTop = UDim.new(0, 2), PaddingBottom = UDim.new(0, 8)}, sf)
+		return sf
 	end
 
 	local function toggle(page, text, get, set)
@@ -919,10 +1000,11 @@ local function buildUI()
 		local function paint(instant)
 			local on = get()
 			local ti = TweenInfo.new(instant and 0 or 0.22, Enum.EasingStyle.Quad)
-			TS:Create(tr, ti, {BackgroundColor3 = on and ACC or OFF}):Play()
+			TS:Create(tr, ti, {BackgroundColor3 = on and C.acc or OFF}):Play()
 			TS:Create(kn, ti, {Position = on and UDim2.fromOffset(25, 3) or UDim2.fromOffset(3, 3)}):Play()
 		end
 		paint(true)
+		table.insert(repaints, function() paint(true) end)
 		r.MouseButton1Click:Connect(function()
 			set(not get()); paint()
 			toast(text .. (get() and "  •  ON" or "  •  OFF"))
@@ -933,13 +1015,14 @@ local function buildUI()
 		local r = row(page, 58, false)
 		lbl(r, text, 4, 28)
 		local val = new("TextLabel", {Size = UDim2.new(0.38, -14, 0, 28), Position = UDim2.new(0.62, 0, 0, 4), BackgroundTransparency = 1,
-			TextColor3 = ACC2, Font = Enum.Font.GothamBold, TextSize = 15, TextXAlignment = Enum.TextXAlignment.Right, Text = ""}, r)
+			Font = Enum.Font.GothamBold, TextSize = 15, TextXAlignment = Enum.TextXAlignment.Right, Text = ""}, r)
+		reg(val, "TextColor3", function() return C.acc2 end)
 		local bar = new("TextButton", {Text = "", AutoButtonColor = false, Size = UDim2.new(1, -32, 0, 8), Position = UDim2.new(0, 16, 1, -20),
 			BackgroundColor3 = OFF, BorderSizePixel = 0}, r)
 		round(bar, 4)
 		local fill = new("Frame", {BackgroundColor3 = WHITE, BorderSizePixel = 0, Size = UDim2.fromScale(0, 1)}, bar)
 		round(fill, 4)
-		new("UIGradient", {Color = ColorSequence.new(ACC, ACC2)}, fill)
+		local fg = new("UIGradient", {}, fill); reg(fg, "Color", seq("acc", "acc2"))
 		local kn = new("Frame", {Size = UDim2.fromOffset(16, 16), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(1, 0.5),
 			BackgroundColor3 = WHITE, BorderSizePixel = 0, ZIndex = 3}, fill)
 		round(kn, 8)
@@ -968,9 +1051,9 @@ local function buildUI()
 		local r = row(page, 44, true)
 		lbl(r, text)
 		local pl = new("TextLabel", {Size = UDim2.fromOffset(108, 26), Position = UDim2.new(1, -122, 0.5, -13),
-			BackgroundColor3 = Color3.fromRGB(46, 40, 80), Text = get(), TextColor3 = WHITE, Font = Enum.Font.GothamBold, TextSize = 13}, r)
+			BackgroundColor3 = Color3.fromRGB(34, 30, 58), Text = get(), TextColor3 = WHITE, Font = Enum.Font.GothamBold, TextSize = 13}, r)
 		round(pl, 13)
-		new("UIStroke", {Color = ACC, Thickness = 1.2}, pl)
+		local ps = new("UIStroke", {Thickness = 1.2}, pl); reg(ps, "Color", function() return C.acc end)
 		r.MouseButton1Click:Connect(function()
 			local idx = (table.find(opts, get()) or 0) % #opts + 1
 			set(opts[idx]); pl.Text = opts[idx]
@@ -981,27 +1064,101 @@ local function buildUI()
 	local function stat(page, text)
 		local r = row(page, 40, false)
 		lbl(r, text, 0, 40)
-		return new("TextLabel", {Size = UDim2.new(0.38, -14, 1, 0), Position = UDim2.new(0.62, 0, 0, 0), BackgroundTransparency = 1,
-			TextColor3 = ACC2, Font = Enum.Font.GothamBold, TextSize = 15, TextXAlignment = Enum.TextXAlignment.Right, Text = "-"}, r)
+		local v = new("TextLabel", {Size = UDim2.new(0.38, -14, 1, 0), Position = UDim2.new(0.62, 0, 0, 0), BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold, TextSize = 15, TextXAlignment = Enum.TextXAlignment.Right, Text = "-"}, r)
+		reg(v, "TextColor3", function() return C.acc2 end)
+		return v
+	end
+
+	-- ===== power cards =====
+	local function powerCard(page, p)
+		n = n + 1
+		local card = new("TextButton", {BackgroundColor3 = CARD, BorderSizePixel = 0, Text = "", AutoButtonColor = false, LayoutOrder = n}, page)
+		round(card, 12)
+		local st = new("UIStroke", {Thickness = p.ready and 1.6 or 1, Color = LINE}, card)
+		if p.ready then reg(st, "Color", function() return C.acc end) end
+		local badge = new("Frame", {Size = UDim2.fromOffset(40, 40), Position = UDim2.fromOffset(10, 10), BackgroundColor3 = WHITE,
+			BorderSizePixel = 0, BackgroundTransparency = p.ready and 0 or 0.5}, card)
+		round(badge, 20)
+		new("UIGradient", {Color = ColorSequence.new(p.a, p.b), Rotation = 45}, badge)
+		new("TextLabel", {Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = p.icon, TextSize = 22,
+			Font = Enum.Font.GothamBold, TextColor3 = WHITE, TextTransparency = p.ready and 0 or 0.25}, badge)
+		if p.sub then
+			local sb = new("TextLabel", {Size = UDim2.fromOffset(18, 18), Position = UDim2.fromOffset(26, 26), BackgroundColor3 = BG,
+				Text = p.sub, TextSize = 11, Font = Enum.Font.GothamBold, TextColor3 = WHITE, ZIndex = 3}, card)
+			round(sb, 9)
+			new("UIStroke", {Thickness = 1, Color = LINE}, sb)
+		end
+		new("TextLabel", {Size = UDim2.new(1, -64, 0, 20), Position = UDim2.fromOffset(58, 9), BackgroundTransparency = 1, Text = p.name,
+			TextColor3 = p.ready and WHITE or DIM, Font = Enum.Font.GothamBold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd}, card)
+		local tag = new("TextLabel", {Size = UDim2.fromOffset(p.ready and 70 or 84, 16), Position = UDim2.fromOffset(58, 33),
+			BackgroundColor3 = p.ready and C.acc or Color3.fromRGB(38, 38, 52), Text = p.ready and "AVAILABLE" or "COMING SOON",
+			TextColor3 = p.ready and WHITE or DIM, Font = Enum.Font.GothamBold, TextSize = 9}, card)
+		round(tag, 8)
+		if p.ready then reg(tag, "BackgroundColor3", function() return C.acc end) end
+		card.MouseEnter:Connect(function()
+			if p.ready then TS:Create(card, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(31, 30, 46)}):Play() end
+		end)
+		card.MouseLeave:Connect(function() TS:Create(card, TweenInfo.new(0.15), {BackgroundColor3 = CARD}):Play() end)
+		card.MouseButton1Click:Connect(function()
+			if p.ready and p.open then p.open() else toast(p.name .. "  •  Coming soon") end
+		end)
 	end
 
 	-- ===== HOME =====
-	local hp = pages.Home
+	local hp = pages["Home"]
 	local banner = row(hp, 74, false)
 	banner.BackgroundColor3 = WHITE
-	new("UIGradient", {Color = ColorSequence.new(Color3.fromRGB(78, 60, 140), Color3.fromRGB(20, 18, 34)), Rotation = 20}, banner)
-	logo(banner, 50, UDim2.fromOffset(12, 12))
-	new("TextLabel", {Size = UDim2.new(1, -80, 0, 28), Position = UDim2.fromOffset(70, 10), BackgroundTransparency = 1,
+	local bg = new("UIGradient", {Rotation = 20}, banner)
+	reg(bg, "Color", function() return ColorSequence.new(C.acc:Lerp(Color3.new(0, 0, 0), 0.35), Color3.fromRGB(20, 18, 34)) end)
+	logo(banner, 54, UDim2.fromOffset(12, 10))
+	new("TextLabel", {Size = UDim2.new(1, -84, 0, 28), Position = UDim2.fromOffset(74, 10), BackgroundTransparency = 1,
 		Text = "ULTRA INSTINCT", TextColor3 = WHITE, Font = Enum.Font.GothamBlack, TextSize = 20, TextXAlignment = Enum.TextXAlignment.Left}, banner)
-	new("TextLabel", {Size = UDim2.new(1, -80, 0, 20), Position = UDim2.fromOffset(70, 40), BackgroundTransparency = 1,
+	new("TextLabel", {Size = UDim2.new(1, -84, 0, 20), Position = UDim2.fromOffset(74, 40), BackgroundTransparency = 1,
 		Text = "Admin 👑 JAYVEE", TextColor3 = Color3.fromRGB(255, 215, 90), Font = Enum.Font.GothamBold, TextSize = 14,
 		TextXAlignment = Enum.TextXAlignment.Left}, banner)
+	local sPower = stat(hp, "Active Power")
 	local sDodge = stat(hp, "Total Dodges")
 	local sLock = stat(hp, "Target Lock")
 	local sFps = stat(hp, "FPS")
 
-	-- ===== DODGE =====
-	local dp = pages.Dodge
+	-- ===== ULTRA INSTINCT view (inside Goku Power) =====
+	local uiView = new("Frame", {Size = UDim2.fromOffset(W - 32, PH), Position = UDim2.fromOffset(16, PY), BackgroundTransparency = 1,
+		Visible = false}, main)
+	local back = new("TextButton", {Size = UDim2.fromOffset(34, 30), BackgroundColor3 = CARD, Text = "‹", TextColor3 = WHITE,
+		Font = Enum.Font.GothamBold, TextSize = 22, AutoButtonColor = false}, uiView)
+	round(back, 10)
+	new("TextLabel", {Size = UDim2.fromOffset(140, 30), Position = UDim2.fromOffset(42, 0), BackgroundTransparency = 1,
+		Text = "🌀 Ultra Instinct", TextColor3 = WHITE, Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left}, uiView)
+	local segBox = new("Frame", {Size = UDim2.fromOffset(228, 30), Position = UDim2.fromOffset(W - 32 - 228, 0), BackgroundColor3 = CARD,
+		BorderSizePixel = 0}, uiView)
+	round(segBox, 10)
+	local segPill = new("Frame", {Size = UDim2.fromOffset(72, 24), Position = UDim2.fromOffset(3, 3), BackgroundColor3 = WHITE, BorderSizePixel = 0}, segBox)
+	round(segPill, 8)
+	local sgg = new("UIGradient", {Rotation = 90}, segPill); reg(sgg, "Color", seq("acc", "acc"))
+	local segNames = {"Dodge", "Aim", "Visual"}
+	local subs, segBtns, curSub = {}, {}, nil
+	for i, nm in ipairs(segNames) do
+		segBtns[nm] = new("TextButton", {Size = UDim2.fromOffset(74, 30), Position = UDim2.fromOffset((i - 1) * 74, 0), BackgroundTransparency = 1,
+			Text = nm, TextColor3 = DIM, Font = Enum.Font.GothamBold, TextSize = 13, AutoButtonColor = false}, segBox)
+		subs[nm] = listPage(uiView, 38, PH - 38, false)
+	end
+	local function goSub(name)
+		for i, nm in ipairs(segNames) do
+			TS:Create(segBtns[nm], TweenInfo.new(0.2), {TextColor3 = nm == name and WHITE or DIM}):Play()
+			if nm == name then
+				TS:Create(segPill, TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Position = UDim2.fromOffset(3 + (i - 1) * 74, 3)}):Play()
+			end
+		end
+		if curSub then subs[curSub].Visible = false end
+		curSub = name
+		subs[name].Visible = true
+	end
+	for _, nm in ipairs(segNames) do segBtns[nm].MouseButton1Click:Connect(function() goSub(nm) end) end
+	back.MouseButton1Click:Connect(function() showPage(pages["Goku Power"]) end)
+
+	local dp = subs.Dodge
 	toggle(dp, "Ultra Instinct", function() return enabled end, function(v) enabled = v end)
 	slider(dp, "Dodge Radius", 3, 60, 1, function() return radius end, function(v) radius = v end)
 	cycle(dp, "Dodge Mode", {"RANDOM", "TELEPORT", "NORMAL"}, function() return dodgeMode end, function(v) dodgeMode = v end)
@@ -1011,18 +1168,94 @@ local function buildUI()
 	slider(dp, "Return Delay", 0, 0.3, 0.01, function() return returnDelay end, function(v) returnDelay = v end, function(v) return string.format("%.2fs", v) end)
 	slider(dp, "Dodge Cooldown", 0.3, 3, 0.1, function() return cooldown end, function(v) cooldown = v end, function(v) return string.format("%.1fs", v) end)
 
-	-- ===== AIM =====
-	local ap = pages.Aim
+	local ap = subs.Aim
 	toggle(ap, "Aimbot", function() return aimOn end, function(v) aimOn = v end)
 	slider(ap, "Smoothness", 0.1, 1, 0.1, function() return aimSmooth end, function(v) aimSmooth = v end, function(v) return string.format("%.1f", v) end)
 	cycle(ap, "Aim Target", {"HEAD", "BODY"}, function() return aimHead and "HEAD" or "BODY" end, function(v) aimHead = v == "HEAD" end)
 	toggle(ap, "Team Check", function() return teamCheck end, function(v) teamCheck = v end)
 
-	-- ===== VISUAL =====
-	local vp = pages.Visual
+	local vp = subs.Visual
 	toggle(vp, "Show Hitbox", function() return showBox end, function(v) showBox = v end)
 	toggle(vp, "Dodge Sounds", function() return soundOn end, function(v) soundOn = v end)
 	toggle(vp, "Screen Effects", function() return fxOn end, function(v) fxOn = v end)
+	goSub("Dodge")
+
+	-- ===== GOKU POWER =====
+	local function rgb(r, g, b) return Color3.fromRGB(r, g, b) end
+	local gokuPowers = {
+		{name = "Ultra Instinct", icon = "🌀", a = rgb(190, 215, 255), b = rgb(120, 90, 220), ready = true,
+			open = function() showPage(uiView) end},
+		{name = "Mastered Ultra Instinct", icon = "🌌", a = rgb(230, 235, 255), b = rgb(110, 120, 200)},
+		{name = "Kamehameha", icon = "💥", a = rgb(90, 190, 255), b = rgb(40, 90, 220)},
+		{name = "Instant Transmission", icon = "⚡", a = rgb(255, 230, 90), b = rgb(255, 150, 40)},
+		{name = "Kaioken", icon = "🔴", a = rgb(255, 110, 90), b = rgb(190, 30, 40)},
+		{name = "Super Saiyan", icon = "🌟", a = rgb(255, 235, 110), b = rgb(240, 170, 30)},
+		{name = "Super Saiyan 2", icon = "✨", a = rgb(255, 240, 150), b = rgb(250, 190, 40)},
+		{name = "Super Saiyan 3", icon = "🔥", a = rgb(255, 220, 90), b = rgb(230, 120, 20)},
+		{name = "Super Saiyan God", icon = "🩸", a = rgb(255, 120, 120), b = rgb(170, 20, 50)},
+		{name = "Super Saiyan Blue", icon = "🔷", a = rgb(120, 220, 255), b = rgb(30, 110, 230)},
+		{name = "Spirit Bomb", icon = "🌍", a = rgb(140, 220, 255), b = rgb(60, 130, 210)},
+		{name = "Dragon Fist", icon = "🐉", a = rgb(255, 190, 80), b = rgb(200, 70, 30)},
+	}
+	for _, p in ipairs(gokuPowers) do powerCard(pages["Goku Power"], p) end
+
+	-- ===== LUFFY POWER =====
+	local luffyPowers = {
+		{name = "Gomu Gomu Pistol", sub = "👊"}, {name = "Gatling", sub = "💥"},
+		{name = "Gear Second", sub = "💨"}, {name = "Gear Third", sub = "🦾"},
+		{name = "Gear Fourth", sub = "🦍"}, {name = "Gear Fifth", sub = "🌞"},
+		{name = "Observation Haki", sub = "👁"}, {name = "Armament Haki", sub = "⚫"},
+		{name = "Conqueror's Haki", sub = "👑"}, {name = "Elephant Gun", sub = "🐘"},
+		{name = "Red Hawk", sub = "🔥"}, {name = "Bajrang Gun", sub = "🏔"},
+	}
+	for _, p in ipairs(luffyPowers) do
+		p.icon = "👒"; p.a = rgb(255, 120, 90); p.b = rgb(200, 40, 50)
+		powerCard(pages["Luffy Power"], p)
+	end
+
+	-- ===== SETTINGS =====
+	local sp = pages["Settings"]
+	local presets = {
+		{"Purple", rgb(108, 87, 175), rgb(165, 135, 250)}, {"Blue", rgb(55, 115, 220), rgb(120, 180, 255)},
+		{"Cyan", rgb(30, 160, 185), rgb(110, 230, 240)}, {"Green", rgb(45, 165, 105), rgb(110, 235, 170)},
+		{"Gold", rgb(200, 150, 40), rgb(255, 210, 100)}, {"Orange", rgb(215, 110, 40), rgb(255, 170, 100)},
+		{"Red", rgb(195, 55, 75), rgb(255, 120, 135)}, {"Pink", rgb(205, 75, 155), rgb(255, 140, 210)},
+	}
+	local tr = row(sp, 74, false)
+	lbl(tr, "Menu Color", 4, 28)
+	local swatches = {}
+	for i, ps in ipairs(presets) do
+		local sw = new("TextButton", {Size = UDim2.fromOffset(30, 30), Position = UDim2.fromOffset(14 + (i - 1) * 38, 36), BackgroundColor3 = ps[2],
+			Text = "", AutoButtonColor = false}, tr)
+		round(sw, 15)
+		local ss = new("UIStroke", {Thickness = 2, Color = WHITE, Transparency = i == 1 and 0 or 1}, sw)
+		swatches[i] = ss
+		new("UIGradient", {Color = ColorSequence.new(ps[3], ps[2]), Rotation = 45}, sw)
+		sw.MouseButton1Click:Connect(function()
+			C.acc, C.acc2 = ps[2], ps[3]
+			for j, st in ipairs(swatches) do st.Transparency = j == i and 0 or 1 end
+			applyTheme()
+			toast("Menu Color  •  " .. ps[1])
+		end)
+	end
+	toggle(sp, "Rainbow Border", function() return rainbow end, function(v) rainbow = v; applyTheme() end)
+	toggle(sp, "Spinning Border", function() return spin end, function(v) spin = v end)
+	slider(sp, "Menu Size", 0.7, 1.2, 0.05, function() return userScale end, function(v) userScale = v; sc.Scale = base * v end,
+		function(v) return string.format("%d%%", math.floor(v * 100 + 0.5)) end)
+	slider(sp, "Menu Transparency", 0, 0.6, 0.05, function() return main.BackgroundTransparency end,
+		function(v) main.BackgroundTransparency = v end, function(v) return string.format("%d%%", math.floor(v * 100 + 0.5)) end)
+	toggle(sp, "Notifications", function() return toastOn end, function(v) toastOn = v end)
+	local rp = row(sp, 44, true)
+	lbl(rp, "Reset Menu Position")
+	local rbtn = new("TextLabel", {Size = UDim2.fromOffset(60, 26), Position = UDim2.new(1, -74, 0.5, -13), BackgroundColor3 = Color3.fromRGB(34, 30, 58),
+		Text = "RESET", TextColor3 = WHITE, Font = Enum.Font.GothamBold, TextSize = 12}, rp)
+	round(rbtn, 13)
+	rp.MouseButton1Click:Connect(function()
+		TS:Create(main, TweenInfo.new(0.4, Enum.EasingStyle.Quint), {Position = UDim2.fromScale(0.5, 0.5)}):Play()
+		toast("Menu position reset")
+	end)
+	local sKey = stat(sp, "Menu Key")
+	sKey.Text = "RightShift"
 
 	goTab("Home", true)
 
@@ -1037,16 +1270,15 @@ local function buildUI()
 	local openB = new("TextButton", {Size = UDim2.fromOffset(54, 54), Position = UDim2.new(0, 12, 0.5, 0), BackgroundColor3 = BG,
 		Text = "", AutoButtonColor = false, Visible = false, ZIndex = 10}, gui)
 	round(openB, 27)
-	new("UIStroke", {Color = ACC, Thickness = 2}, openB)
 	logo(openB, 54, UDim2.fromOffset(0, 0))
 
 	local function show(v)
 		if v then
 			main.Visible = true; openB.Visible = false
-			sc.Scale = base * 0.85
-			TS:Create(sc, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale = base}):Play()
+			sc.Scale = base * userScale * 0.85
+			TS:Create(sc, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale = base * userScale}):Play()
 		else
-			TS:Create(sc, TweenInfo.new(0.2), {Scale = base * 0.85}):Play()
+			TS:Create(sc, TweenInfo.new(0.2), {Scale = base * userScale * 0.85}):Play()
 			task.delay(0.2, function() main.Visible = false; openB.Visible = true end)
 		end
 	end
@@ -1065,22 +1297,31 @@ local function buildUI()
 		if not gp and i.KeyCode == Enum.KeyCode.RightShift then show(not main.Visible) end
 	end))
 
+	-- ===== load photo icon =====
+	task.spawn(function()
+		iconAsset = loadIcon()
+		if iconAsset then
+			for _, im in ipairs(iconImgs) do im.Image = iconAsset; im.Visible = true end
+		end
+	end)
+
 	-- ===== live loop =====
 	local t0, fps, acc = os.clock(), 60, 0
 	track(RunService.Heartbeat:Connect(function(dt)
 		local t = os.clock() - t0
-		stg.Rotation = (t * 70) % 360
+		if spin then stg.Rotation = (t * 70) % 360 end
 		pg.Rotation = (t * 140) % 360
 		fps = fps * 0.92 + (1 / math.max(dt, 1e-3)) * 0.08
 		acc = acc + dt
 		if acc > 0.2 and main.Visible then
 			acc = 0
+			sPower.Text = enabled and "Ultra Instinct" or "None"
 			sDodge.Text = tostring(dodgeCount)
 			local left = lockUntil - tick()
 			if lockTarget and left > 0 then
 				sLock.Text = string.format("LOCKED %.1fs", left); sLock.TextColor3 = Color3.fromRGB(255, 120, 130)
 			else
-				sLock.Text = "IDLE"; sLock.TextColor3 = ACC2
+				sLock.Text = "IDLE"; sLock.TextColor3 = C.acc2
 			end
 			sFps.Text = tostring(math.floor(fps + 0.5))
 		end
