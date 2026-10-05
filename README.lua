@@ -605,12 +605,9 @@ local function doCounter(n, gap)
 end
 
 -- ================= SOFT LOCK (free movement + free camera) =================
--- Character only FACES the enemy. Joystick/WASD and camera stay 100% yours.
-local lockAO, lockAtt
+-- Character only FACES the enemy (rotation only). Joystick/WASD and camera stay 100% yours.
 local function releaseLock()
 	lockTarget = nil
-	if lockAO then pcall(function() lockAO:Destroy() end); lockAO = nil end
-	if lockAtt then pcall(function() lockAtt:Destroy() end); lockAtt = nil end
 	local h = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
 	if h then h.AutoRotate = true end
 end
@@ -623,21 +620,12 @@ track(RunService.Heartbeat:Connect(function()
 	if not lockOn or tick() > lockUntil or not r or not er or not hum or hum.Health <= 0 then
 		releaseLock(); return
 	end
-	if not lockAO or not lockAO.Parent then
-		lockAtt = Instance.new("Attachment"); lockAtt.Name = "UIJ_LockAtt"; lockAtt.Parent = r
-		lockAO = Instance.new("AlignOrientation")
-		lockAO.Mode = Enum.OrientationAlignmentMode.OneAttachment
-		lockAO.Attachment0 = lockAtt
-		lockAO.RigidityEnabled = false
-		lockAO.MaxTorque = 1e9
-		lockAO.MaxAngularVelocity = math.huge
-		lockAO.Responsiveness = 60
-		lockAO.Parent = r
-	end
 	hum.AutoRotate = false
 	local p = r.Position
 	local flat = Vector3.new(er.Position.X, p.Y, er.Position.Z)
-	if (flat - p).Magnitude > 0.1 then lockAO.CFrame = CFrame.lookAt(p, flat) end
+	if (flat - p).Magnitude > 0.1 then
+		r.CFrame = CFrame.lookAt(p, flat) -- rotation only, position/velocity untouched
+	end
 end))
 
 local function returnFX(list, fromCF, toCF)
@@ -740,7 +728,7 @@ RunService:BindToRenderStep("UIJ_Aimbot", Enum.RenderPriority.Camera.Value + 1, 
 end)
 
 -- ================= MENU =================
-local ICON_B64 = "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"
+local ICON_B64 = "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCACAAIADASIAAhEBAxEB/8QAHAAAAgMAAwEAAAAAAAAAAAAABQYDBAcBAggA/8QANhAAAgEDAgMGBQMEAQUAAAAAAQIDAAQRBSEGEjEHEyJBUWEycYGRoRQjscEjQlLRFTNigvDx/8QAGgEAAwEBAQEAAAAAAAAAAAAAAQIDBAAFBv/EACARAAICAgMBAQEBAAAAAAAAAAABAhEDIRIxQQRRFCL/2gAMAwEAAhEDEQA/AGpwvR9qqSxgSYOy1YBDM5fceXzqtdyMfCMED3rwT6P0IXa40+yK+jDI+dCblS2GK9POiu7aNZMevM436c1TvdkoUA2TQFkUsSR0qtOQP91ffKlm6j0odql3aWdv3l5KkSnpk7n5U0bbpAlS2wZIpLnrVS5IC7npVIa/JdzclpakqTjnc/wKF6jKyTn9dqigD+yJOU1tx/PN96MWT6oLS2GVbAGa7MH5v3+GCOfiTMHn+Az4r+SSkE=" -- (see note below)
 
 local function loadIcon()
 	local ok, res = pcall(function()
@@ -795,6 +783,8 @@ local function buildUI()
 	local function round(o, r) return new("UICorner", {CornerRadius = UDim.new(0, r)}, o) end
 	local function isPress(i) return i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch end
 	local function isMove(i) return i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch end
+	local function rgb(r, g, b) return Color3.fromRGB(r, g, b) end
+	local function kp(t, c) return ColorSequenceKeypoint.new(t, c) end
 
 	-- ===== icon (your photo, falls back to the diamond) =====
 	local iconImgs, iconAsset = {}, nil
@@ -844,7 +834,6 @@ local function buildUI()
 	new("UIGradient", {Color = ColorSequence.new(Color3.fromRGB(24, 20, 40), Color3.fromRGB(10, 10, 15)), Rotation = 90}, main)
 	local stroke = new("UIStroke", {Thickness = 1.8, Color = WHITE, Transparency = 0.1}, main)
 	local rainbow, spin, toastOn, userScale = false, true, true, 1
-	local function kp(t, c) return ColorSequenceKeypoint.new(t, c) end
 	local stg = new("UIGradient", {}, stroke)
 	reg(stg, "Color", function()
 		if rainbow then
@@ -866,7 +855,7 @@ local function buildUI()
 	local header = new("Frame", {Size = UDim2.new(1, 0, 0, HEAD), BackgroundTransparency = 1}, main)
 	logo(header, 38, UDim2.fromOffset(16, 8))
 	local title = new("TextLabel", {Size = UDim2.fromOffset(150, 26), Position = UDim2.fromOffset(62, 14), BackgroundTransparency = 1,
-		Text = "ULTRA INSTINCT", TextColor3 = WHITE, Font = Enum.Font.GothamBlack, TextSize = 17,
+		Text = "ALL POWERS", TextColor3 = WHITE, Font = Enum.Font.GothamBlack, TextSize = 17,
 		TextXAlignment = Enum.TextXAlignment.Left}, header)
 	local tgr = new("UIGradient", {}, title)
 	reg(tgr, "Color", function() return ColorSequence.new(WHITE, C.acc2) end)
@@ -888,7 +877,7 @@ local function buildUI()
 	end
 
 	-- ===== tabs =====
-	local order = {"Home", "Goku Power", "Luffy Power", "Settings"}
+	local order = {"Home", "Powers", "Settings"}
 	local TW = (W - 24) / #order
 	local tabPill = new("Frame", {Size = UDim2.fromOffset(TW - 10, 34), Position = UDim2.fromOffset(17, HEAD + 4),
 		BackgroundColor3 = WHITE, BorderSizePixel = 0}, main)
@@ -909,12 +898,7 @@ local function buildUI()
 			BackgroundTransparency = 1, Text = nm, TextColor3 = DIM, Font = Enum.Font.GothamMedium, TextSize = 14,
 			AutoButtonColor = false}, main)
 		pages[nm] = scrollPage()
-		if nm == "Goku Power" or nm == "Luffy Power" then
-			new("UIGridLayout", {CellSize = UDim2.new(0.5, -5, 0, 60), CellPadding = UDim2.fromOffset(8, 8),
-				SortOrder = Enum.SortOrder.LayoutOrder}, pages[nm])
-		else
-			new("UIListLayout", {Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder}, pages[nm])
-		end
+		new("UIListLayout", {Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder}, pages[nm])
 		new("UIPadding", {PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 8)}, pages[nm])
 	end
 
@@ -1070,37 +1054,61 @@ local function buildUI()
 		return v
 	end
 
-	-- ===== power cards =====
+	-- ===== power cards (cooler) =====
+	local glowers = {}
+	track(RunService.Heartbeat:Connect(function()
+		local t = os.clock()
+		for _, g in ipairs(glowers) do g.Rotation = (t * 120) % 360 end
+	end))
+
 	local function powerCard(page, p)
 		n = n + 1
-		local card = new("TextButton", {BackgroundColor3 = CARD, BorderSizePixel = 0, Text = "", AutoButtonColor = false, LayoutOrder = n}, page)
-		round(card, 12)
-		local st = new("UIStroke", {Thickness = p.ready and 1.6 or 1, Color = LINE}, card)
-		if p.ready then reg(st, "Color", function() return C.acc end) end
-		local badge = new("Frame", {Size = UDim2.fromOffset(40, 40), Position = UDim2.fromOffset(10, 10), BackgroundColor3 = WHITE,
+		local card = new("TextButton", {BackgroundColor3 = WHITE, BorderSizePixel = 0, Text = "",
+			AutoButtonColor = false, LayoutOrder = n}, page)
+		round(card, 14)
+		new("UIGradient", {Color = ColorSequence.new(p.a:Lerp(Color3.new(0, 0, 0), p.ready and 0.7 or 0.85),
+			Color3.fromRGB(15, 15, 24)), Rotation = 35}, card)
+		local us = new("UIScale", {}, card)
+		local st = new("UIStroke", {Thickness = p.ready and 2 or 1, Color = WHITE, Transparency = p.ready and 0 or 0.3}, card)
+		local sg = new("UIGradient", {}, st)
+		if p.ready then
+			sg.Color = ColorSequence.new({kp(0, p.a), kp(0.5, p.b), kp(1, p.a)})
+			table.insert(glowers, sg)
+		else
+			sg.Color = ColorSequence.new(LINE, LINE)
+		end
+
+		local halo = new("Frame", {Size = UDim2.fromOffset(54, 54), Position = UDim2.fromOffset(6, 6), BackgroundColor3 = WHITE,
+			BorderSizePixel = 0, BackgroundTransparency = p.ready and 0.75 or 0.92}, card)
+		round(halo, 27)
+		new("UIGradient", {Color = ColorSequence.new(p.a, p.b), Rotation = 45}, halo)
+		local badge = new("Frame", {Size = UDim2.fromOffset(44, 44), Position = UDim2.fromOffset(11, 11), BackgroundColor3 = WHITE,
 			BorderSizePixel = 0, BackgroundTransparency = p.ready and 0 or 0.5}, card)
-		round(badge, 20)
+		round(badge, 22)
 		new("UIGradient", {Color = ColorSequence.new(p.a, p.b), Rotation = 45}, badge)
-		new("TextLabel", {Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = p.icon, TextSize = 22,
-			Font = Enum.Font.GothamBold, TextColor3 = WHITE, TextTransparency = p.ready and 0 or 0.25}, badge)
+		new("TextLabel", {Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = p.icon, TextSize = 24,
+			Font = Enum.Font.GothamBold, TextColor3 = WHITE, TextTransparency = p.ready and 0 or 0.3}, badge)
 		if p.sub then
-			local sb = new("TextLabel", {Size = UDim2.fromOffset(18, 18), Position = UDim2.fromOffset(26, 26), BackgroundColor3 = BG,
-				Text = p.sub, TextSize = 11, Font = Enum.Font.GothamBold, TextColor3 = WHITE, ZIndex = 3}, card)
-			round(sb, 9)
+			local sb = new("TextLabel", {Size = UDim2.fromOffset(20, 20), Position = UDim2.fromOffset(38, 38), BackgroundColor3 = BG,
+				Text = p.sub, TextSize = 12, Font = Enum.Font.GothamBold, TextColor3 = WHITE, ZIndex = 3}, card)
+			round(sb, 10)
 			new("UIStroke", {Thickness = 1, Color = LINE}, sb)
 		end
-		new("TextLabel", {Size = UDim2.new(1, -64, 0, 20), Position = UDim2.fromOffset(58, 9), BackgroundTransparency = 1, Text = p.name,
-			TextColor3 = p.ready and WHITE or DIM, Font = Enum.Font.GothamBold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
-			TextTruncate = Enum.TextTruncate.AtEnd}, card)
-		local tag = new("TextLabel", {Size = UDim2.fromOffset(p.ready and 70 or 84, 16), Position = UDim2.fromOffset(58, 33),
-			BackgroundColor3 = p.ready and C.acc or Color3.fromRGB(38, 38, 52), Text = p.ready and "AVAILABLE" or "COMING SOON",
-			TextColor3 = p.ready and WHITE or DIM, Font = Enum.Font.GothamBold, TextSize = 9}, card)
-		round(tag, 8)
+
+		new("TextLabel", {Size = UDim2.new(1, -74, 0, 22), Position = UDim2.fromOffset(68, 10), BackgroundTransparency = 1,
+			Text = p.name, TextColor3 = p.ready and WHITE or DIM, Font = Enum.Font.GothamBlack, TextSize = 12,
+			TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd}, card)
+		local tag = new("TextLabel", {Size = UDim2.fromOffset(p.ready and 78 or 70, 18), Position = UDim2.fromOffset(68, 36),
+			BackgroundColor3 = p.ready and C.acc or Color3.fromRGB(34, 34, 48), TextColor3 = p.ready and WHITE or DIM,
+			Text = p.ready and "● AVAILABLE" or "🔒 SOON", Font = Enum.Font.GothamBold, TextSize = 9}, card)
+		round(tag, 9)
 		if p.ready then reg(tag, "BackgroundColor3", function() return C.acc end) end
-		card.MouseEnter:Connect(function()
-			if p.ready then TS:Create(card, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(31, 30, 46)}):Play() end
-		end)
-		card.MouseLeave:Connect(function() TS:Create(card, TweenInfo.new(0.15), {BackgroundColor3 = CARD}):Play() end)
+
+		local function sz(s) TS:Create(us, TweenInfo.new(0.12, Enum.EasingStyle.Quad), {Scale = s}):Play() end
+		card.MouseEnter:Connect(function() if p.ready then sz(1.03) end end)
+		card.MouseLeave:Connect(function() sz(1) end)
+		card.MouseButton1Down:Connect(function() sz(0.95) end)
+		card.MouseButton1Up:Connect(function() sz(1) end)
 		card.MouseButton1Click:Connect(function()
 			if p.ready and p.open then p.open() else toast(p.name .. "  •  Coming soon") end
 		end)
@@ -1123,7 +1131,30 @@ local function buildUI()
 	local sLock = stat(hp, "Target Lock")
 	local sFps = stat(hp, "FPS")
 
-	-- ===== ULTRA INSTINCT view (inside Goku Power) =====
+	-- ===== character power views (Goku / Luffy grids) =====
+	local function charView(titleText)
+		local v = new("Frame", {Size = UDim2.fromOffset(W - 32, PH), Position = UDim2.fromOffset(16, PY),
+			BackgroundTransparency = 1, Visible = false}, main)
+		local bk = new("TextButton", {Size = UDim2.fromOffset(34, 30), BackgroundColor3 = CARD, Text = "‹", TextColor3 = WHITE,
+			Font = Enum.Font.GothamBold, TextSize = 22, AutoButtonColor = false}, v)
+		round(bk, 10)
+		new("TextLabel", {Size = UDim2.fromOffset(240, 30), Position = UDim2.fromOffset(44, 0), BackgroundTransparency = 1,
+			Text = titleText, TextColor3 = WHITE, Font = Enum.Font.GothamBlack, TextSize = 15,
+			TextXAlignment = Enum.TextXAlignment.Left}, v)
+		local sf = new("ScrollingFrame", {Size = UDim2.fromOffset(W - 32, PH - 38), Position = UDim2.fromOffset(0, 38),
+			BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3, CanvasSize = UDim2.new(),
+			AutomaticCanvasSize = Enum.AutomaticSize.Y}, v)
+		reg(sf, "ScrollBarImageColor3", function() return C.acc end)
+		new("UIGridLayout", {CellSize = UDim2.new(0.5, -5, 0, 66), CellPadding = UDim2.fromOffset(8, 8),
+			SortOrder = Enum.SortOrder.LayoutOrder}, sf)
+		new("UIPadding", {PaddingTop = UDim.new(0, 2), PaddingBottom = UDim.new(0, 8)}, sf)
+		bk.MouseButton1Click:Connect(function() showPage(pages["Powers"]) end)
+		return v, sf
+	end
+	local gokuView, gokuGrid = charView("🐉  GOKU POWERS")
+	local luffyView, luffyGrid = charView("👒  LUFFY POWERS")
+
+	-- ===== ULTRA INSTINCT view (inside Goku Powers) =====
 	local uiView = new("Frame", {Size = UDim2.fromOffset(W - 32, PH), Position = UDim2.fromOffset(16, PY), BackgroundTransparency = 1,
 		Visible = false}, main)
 	local back = new("TextButton", {Size = UDim2.fromOffset(34, 30), BackgroundColor3 = CARD, Text = "‹", TextColor3 = WHITE,
@@ -1156,7 +1187,7 @@ local function buildUI()
 		subs[name].Visible = true
 	end
 	for _, nm in ipairs(segNames) do segBtns[nm].MouseButton1Click:Connect(function() goSub(nm) end) end
-	back.MouseButton1Click:Connect(function() showPage(pages["Goku Power"]) end)
+	back.MouseButton1Click:Connect(function() showPage(gokuView) end)
 
 	local dp = subs.Dodge
 	toggle(dp, "Ultra Instinct", function() return enabled end, function(v) enabled = v end)
@@ -1180,8 +1211,7 @@ local function buildUI()
 	toggle(vp, "Screen Effects", function() return fxOn end, function(v) fxOn = v end)
 	goSub("Dodge")
 
-	-- ===== GOKU POWER =====
-	local function rgb(r, g, b) return Color3.fromRGB(r, g, b) end
+	-- ===== GOKU POWERS =====
 	local gokuPowers = {
 		{name = "Ultra Instinct", icon = "🌀", a = rgb(190, 215, 255), b = rgb(120, 90, 220), ready = true,
 			open = function() showPage(uiView) end},
@@ -1197,9 +1227,9 @@ local function buildUI()
 		{name = "Spirit Bomb", icon = "🌍", a = rgb(140, 220, 255), b = rgb(60, 130, 210)},
 		{name = "Dragon Fist", icon = "🐉", a = rgb(255, 190, 80), b = rgb(200, 70, 30)},
 	}
-	for _, p in ipairs(gokuPowers) do powerCard(pages["Goku Power"], p) end
+	for _, p in ipairs(gokuPowers) do powerCard(gokuGrid, p) end
 
-	-- ===== LUFFY POWER =====
+	-- ===== LUFFY POWERS =====
 	local luffyPowers = {
 		{name = "Gomu Gomu Pistol", sub = "👊"}, {name = "Gatling", sub = "💥"},
 		{name = "Gear Second", sub = "💨"}, {name = "Gear Third", sub = "🦾"},
@@ -1210,8 +1240,47 @@ local function buildUI()
 	}
 	for _, p in ipairs(luffyPowers) do
 		p.icon = "👒"; p.a = rgb(255, 120, 90); p.b = rgb(200, 40, 50)
-		powerCard(pages["Luffy Power"], p)
+		powerCard(luffyGrid, p)
 	end
+
+	-- ===== POWERS TAB (Goku / Luffy + icon) =====
+	local function charCard(name, emoji, a, b, total, readyCount, view)
+		local r = row(pages["Powers"], 98, true)
+		local bgf = new("Frame", {Size = UDim2.fromScale(1, 1), BackgroundColor3 = WHITE, BorderSizePixel = 0, ZIndex = 1}, r)
+		round(bgf, 12)
+		new("UIGradient", {Color = ColorSequence.new(a:Lerp(Color3.new(0, 0, 0), 0.6), Color3.fromRGB(16, 16, 26)), Rotation = 20}, bgf)
+
+		local ringF = new("Frame", {Size = UDim2.fromOffset(72, 72), Position = UDim2.fromOffset(14, 13), BackgroundTransparency = 1, ZIndex = 2}, r)
+		round(ringF, 36)
+		local rs = new("UIStroke", {Thickness = 3, Color = WHITE}, ringF)
+		local rg = new("UIGradient", {Color = ColorSequence.new({kp(0, a), kp(0.5, b), kp(1, a)})}, rs)
+		local face = new("Frame", {Size = UDim2.fromOffset(60, 60), Position = UDim2.fromOffset(6, 6), BackgroundColor3 = WHITE,
+			BorderSizePixel = 0, ZIndex = 2}, ringF)
+		round(face, 30)
+		new("UIGradient", {Color = ColorSequence.new(a, b), Rotation = 45}, face)
+		new("TextLabel", {Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = emoji, TextSize = 34,
+			Font = Enum.Font.GothamBold, TextColor3 = WHITE, ZIndex = 3}, face)
+
+		new("TextLabel", {Size = UDim2.new(1, -150, 0, 28), Position = UDim2.fromOffset(100, 20), BackgroundTransparency = 1,
+			Text = name, TextColor3 = WHITE, Font = Enum.Font.GothamBlack, TextSize = 24,
+			TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 2}, r)
+		new("TextLabel", {Size = UDim2.new(1, -150, 0, 16), Position = UDim2.fromOffset(100, 52), BackgroundTransparency = 1,
+			Text = total .. " POWERS  •  " .. readyCount .. " AVAILABLE", TextColor3 = DIM, Font = Enum.Font.GothamBold,
+			TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 2}, r)
+		local arrow = new("TextLabel", {Size = UDim2.fromOffset(30, 98), Position = UDim2.new(1, -38, 0, 0), BackgroundTransparency = 1,
+			Text = "›", TextSize = 36, Font = Enum.Font.GothamBold, ZIndex = 2}, r)
+		reg(arrow, "TextColor3", function() return C.acc2 end)
+
+		track(RunService.Heartbeat:Connect(function()
+			local t = os.clock()
+			rg.Rotation = (t * 120) % 360
+			ringF.Position = UDim2.fromOffset(14, 13 + math.sin(t * 2) * 2)
+		end))
+		r.MouseButton1Click:Connect(function() showPage(view) end)
+	end
+
+	charCard("GOKU", "🐉", rgb(255, 170, 60), rgb(230, 80, 30), #gokuPowers, 1, gokuView)
+	charCard("LUFFY", "👒", rgb(255, 120, 90), rgb(200, 40, 50), #luffyPowers, 0, luffyView)
 
 	-- ===== SETTINGS =====
 	local sp = pages["Settings"]
