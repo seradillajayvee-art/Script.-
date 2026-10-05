@@ -35,11 +35,25 @@ local Settings = {
 	CameraLock = true,
 	FollowAfterDodge = true,
 	FollowDuration = 5,
+	FollowDistance = 3,
+	FollowSpeed = 0.14,
+	FollowMode = "Behind",
+	StopEffect = true,
+	MenuScale = 1.0,
 	Radius = 12,
 	MinRadius = 3,
 	MaxRadius = 50,
 	RadiusStep = 1,
 	Ability = "Ultra Instinct",
+	DodgeChance = 100,
+	DodgeAnimation = "Side Burst",
+	PerfectDodgeWindow = 0.30,
+	WhiteAura = true,
+	Afterimage = true,
+	DodgeCount = 0,
+	UIVolume = 0.45,
+	UITransparency = 0.04,
+	AnimationSpeed = 0.45,
 }
 
 local character
@@ -101,8 +115,11 @@ local function playRandomDodgeSound()
 	end)
 end
 
+local uiSoundsEnabled = true
 local function play(sound)
+	if not uiSoundsEnabled then return end
 	pcall(function()
+		sound.Volume = Settings.UIVolume
 		sound:Play()
 	end)
 end
@@ -329,10 +346,18 @@ close.AutoButtonColor = false
 close.Parent = header
 corner(close, 11)
 
-local content = Instance.new("Frame")
+local content = Instance.new("ScrollingFrame")
 content.Size = UDim2.new(1, -36, 1, -145)
 content.Position = UDim2.fromOffset(18, 78)
 content.BackgroundTransparency = 1
+content.BorderSizePixel = 0
+content.ScrollBarThickness = 4
+content.ScrollBarImageTransparency = 0.35
+content.ScrollBarImageColor3 = Color3.fromRGB(118, 82, 175)
+content.CanvasSize = UDim2.new(0, 0, 0, 0)
+content.AutomaticCanvasSize = Enum.AutomaticSize.Y
+content.ScrollingDirection = Enum.ScrollingDirection.Y
+content.ElasticBehavior = Enum.ElasticBehavior.Always
 content.Parent = main
 
 --==================================================
@@ -344,7 +369,7 @@ local pages = {}
 local function newPage(name)
 	local page = Instance.new("Frame")
 	page.Name = name
-	page.Size = UDim2.fromScale(1, 1)
+	page.Size = UDim2.new(1, -8, 0, 940)
 	page.BackgroundTransparency = 1
 	page.Visible = false
 	page.Parent = content
@@ -396,7 +421,9 @@ label(homeCard,
 local statusCard = card(homePage, UDim2.fromOffset(0, 118), UDim2.new(1, 0, 0, 105))
 label(statusCard, "STATUS", UDim2.fromOffset(18, 12), UDim2.new(1,-36,0,22), 12)
 local statusText = label(statusCard,
-	"System: READY\nAbility: Ultra Instinct\nRadius: " .. Settings.Radius,
+	"System: " .. (Settings.Enabled and "READY" or "OFF")
+	.. "\nAbility: " .. Settings.Ability
+	.. "\nRadius: " .. Settings.Radius,
 	UDim2.fromOffset(18, 38), UDim2.new(1,-36,0,65), 11
 )
 
@@ -406,30 +433,261 @@ label(homeHint,
 	UDim2.fromOffset(18, 12), UDim2.new(1,-36,1,-24), 10
 )
 
+local menuSettings = card(homePage, UDim2.fromOffset(0, 314), UDim2.new(1, 0, 0, 255))
+label(menuSettings, "MENU SETTINGS", UDim2.fromOffset(18, 10), UDim2.new(1,-36,0,20), 11)
+
+local menuSizeText = label(menuSettings,
+	"SIZE  " .. math.floor(Settings.MenuScale * 100) .. "%",
+	UDim2.fromOffset(18, 42), UDim2.new(0, 150, 0, 34), 14)
+
+local menuSizeMinus = Instance.new("TextButton")
+menuSizeMinus.Size = UDim2.fromOffset(92, 40)
+menuSizeMinus.Position = UDim2.new(1,-205,0,38)
+menuSizeMinus.Text = "SIZE −"
+menuSizeMinus.Font = Enum.Font.GothamBlack
+menuSizeMinus.TextSize = 10
+menuSizeMinus.TextColor3 = Color3.new(1,1,1)
+menuSizeMinus.BackgroundColor3 = Color3.fromRGB(47,42,59)
+menuSizeMinus.AutoButtonColor = false
+menuSizeMinus.Parent = menuSettings
+corner(menuSizeMinus, 11)
+
+local menuSizePlus = Instance.new("TextButton")
+menuSizePlus.Size = UDim2.fromOffset(92, 40)
+menuSizePlus.Position = UDim2.new(1,-103,0,38)
+menuSizePlus.Text = "SIZE +"
+menuSizePlus.Font = Enum.Font.GothamBlack
+menuSizePlus.TextSize = 10
+menuSizePlus.TextColor3 = Color3.new(1,1,1)
+menuSizePlus.BackgroundColor3 = Color3.fromRGB(104,72,158)
+menuSizePlus.AutoButtonColor = false
+menuSizePlus.Parent = menuSettings
+corner(menuSizePlus, 11)
+
+label(menuSettings, "Smooth UI scaling • 85% to 115%", UDim2.fromOffset(18, 82), UDim2.new(1,-36,0,18), 9)
+
+local uiSoundButton = Instance.new("TextButton")
+uiSoundButton.Size = UDim2.new(0.48,-10,0,34)
+uiSoundButton.Position = UDim2.fromOffset(18,112)
+uiSoundButton.Text = "UI SOUNDS • ON"
+uiSoundButton.Font = Enum.Font.GothamBold
+uiSoundButton.TextSize = 10
+uiSoundButton.TextColor3 = Color3.new(1,1,1)
+uiSoundButton.BackgroundColor3 = Color3.fromRGB(65,55,88)
+uiSoundButton.AutoButtonColor = false
+uiSoundButton.Parent = menuSettings
+corner(uiSoundButton,10)
+
+local uiVolumeButton = Instance.new("TextButton")
+uiVolumeButton.Size = UDim2.new(0.48,-10,0,34)
+uiVolumeButton.Position = UDim2.new(0.52,0,0,112)
+uiVolumeButton.Text = "VOLUME • 45%"
+uiVolumeButton.Font = Enum.Font.GothamBold
+uiVolumeButton.TextSize = 10
+uiVolumeButton.TextColor3 = Color3.new(1,1,1)
+uiVolumeButton.BackgroundColor3 = Color3.fromRGB(65,55,88)
+uiVolumeButton.AutoButtonColor = false
+uiVolumeButton.Parent = menuSettings
+corner(uiVolumeButton,10)
+
+local uiTransparencyButton = Instance.new("TextButton")
+uiTransparencyButton.Size = UDim2.new(0.48,-10,0,34)
+uiTransparencyButton.Position = UDim2.fromOffset(18,154)
+uiTransparencyButton.Text = "UI TRANSPARENCY • 4%"
+uiTransparencyButton.Font = Enum.Font.GothamBold
+uiTransparencyButton.TextSize = 10
+uiTransparencyButton.TextColor3 = Color3.new(1,1,1)
+uiTransparencyButton.BackgroundColor3 = Color3.fromRGB(65,55,88)
+uiTransparencyButton.AutoButtonColor = false
+uiTransparencyButton.Parent = menuSettings
+corner(uiTransparencyButton,10)
+
+local uiAnimButton = Instance.new("TextButton")
+uiAnimButton.Size = UDim2.new(0.48,-10,0,34)
+uiAnimButton.Position = UDim2.new(0.52,0,0,154)
+uiAnimButton.Text = "ANIMATION • 45"
+uiAnimButton.Font = Enum.Font.GothamBold
+uiAnimButton.TextSize = 10
+uiAnimButton.TextColor3 = Color3.new(1,1,1)
+uiAnimButton.BackgroundColor3 = Color3.fromRGB(65,55,88)
+uiAnimButton.AutoButtonColor = false
+uiAnimButton.Parent = menuSettings
+corner(uiAnimButton,10)
+
+label(menuSettings, "Draggable • Scrollable • Mobile friendly", UDim2.fromOffset(18, 198), UDim2.new(1,-36,0,18), 9)
+
+--==================================================
+-- CONFIGURATION
+--==================================================
+
+local configCard = card(homePage, UDim2.fromOffset(0, 582), UDim2.new(1, 0, 0, 225))
+label(configCard, "CONFIGURATION", UDim2.fromOffset(18, 10), UDim2.new(1,-36,0,22), 12)
+label(configCard, "Player radius and detection settings", UDim2.fromOffset(18, 32), UDim2.new(1,-36,0,18), 9)
+
+local configRadiusText = label(configCard, "RADIUS  " .. Settings.Radius, UDim2.fromOffset(18, 64), UDim2.new(0,180,0,30), 13)
+local configMinus = Instance.new("TextButton")
+configMinus.Size = UDim2.fromOffset(82,34)
+configMinus.Position = UDim2.new(1,-174,0,62)
+configMinus.Text = "1 −"
+configMinus.Font = Enum.Font.GothamBlack
+configMinus.TextSize = 12
+configMinus.TextColor3 = Color3.new(1,1,1)
+configMinus.BackgroundColor3 = Color3.fromRGB(47,42,59)
+configMinus.AutoButtonColor = false
+configMinus.Parent = configCard
+corner(configMinus,10)
+local configPlus = Instance.new("TextButton")
+configPlus.Size = UDim2.fromOffset(82,34)
+configPlus.Position = UDim2.new(1,-84,0,62)
+configPlus.Text = "1 +"
+configPlus.Font = Enum.Font.GothamBlack
+configPlus.TextSize = 12
+configPlus.TextColor3 = Color3.new(1,1,1)
+configPlus.BackgroundColor3 = Color3.fromRGB(104,72,158)
+configPlus.AutoButtonColor = false
+configPlus.Parent = configCard
+corner(configPlus,10)
+
+local radiusToggle = Instance.new("TextButton")
+radiusToggle.Size = UDim2.new(1,-36,0,34)
+radiusToggle.Position = UDim2.fromOffset(18,106)
+radiusToggle.Text = "RADIUS CIRCLE • ON"
+radiusToggle.Font = Enum.Font.GothamBold
+radiusToggle.TextSize = 10
+radiusToggle.TextColor3 = Color3.new(1,1,1)
+radiusToggle.BackgroundColor3 = Color3.fromRGB(65,55,88)
+radiusToggle.AutoButtonColor = false
+radiusToggle.Parent = configCard
+corner(radiusToggle,10)
+
+local targetInfo = label(configCard, "Detection: enemies inside radius only\nRange: 3–50 • Step: 1", UDim2.fromOffset(18, 148), UDim2.new(1,-36,0,48), 9)
 --==================================================
 -- POWER
 --==================================================
 
-local gokuCard = card(powerPage, UDim2.fromOffset(0, 0), UDim2.new(1, 0, 0, 80))
+local gokuCard = card(powerPage, UDim2.fromOffset(0, 0), UDim2.new(1, 0, 0, 172))
 label(gokuCard, "GOKU", UDim2.fromOffset(18, 10), UDim2.new(1,-36,0,22), 14)
 label(gokuCard, "Dragon Ball ability set", UDim2.fromOffset(18, 34), UDim2.new(1,-36,0,18), 10)
 
 local ultra = Instance.new("TextButton")
-ultra.Size = UDim2.new(1, 0, 0, 62)
-ultra.Position = UDim2.fromOffset(0, 92)
+ultra.Size = UDim2.new(1, -28, 0, 74)
+ultra.Position = UDim2.fromOffset(14, 72)
 ultra.Text = ""
 ultra.BackgroundColor3 = Color3.fromRGB(104, 72, 158)
 ultra.AutoButtonColor = false
-ultra.Parent = powerPage
+ultra.Parent = gokuCard
 corner(ultra, 15)
 
-local ultraTitle = label(ultra, "ULTRA INSTINCT", UDim2.fromOffset(18, 8), UDim2.new(1,-36,0,24), 14)
+local ultraTitle = label(ultra, "ULTRA INSTINCT", UDim2.fromOffset(18, 9), UDim2.new(1,-36,0,24), 14)
 ultraTitle.TextColor3 = Color3.new(1,1,1)
-local ultraDesc = label(ultra, "Auto dodge • camera lock • 5s follow", UDim2.fromOffset(18, 33), UDim2.new(1,-36,0,18), 10)
+local ultraDesc = label(ultra, "Auto dodge • camera lock • configurable follow", UDim2.fromOffset(18, 36), UDim2.new(1,-36,0,20), 10)
 ultraDesc.TextColor3 = Color3.fromRGB(235,230,245)
 
-local settingsCard = card(powerPage, UDim2.fromOffset(0, 170), UDim2.new(1, 0, 0, 132))
-label(settingsCard, "ULTRA INSTINCT SETTINGS", UDim2.fromOffset(18, 9), UDim2.new(1,-36,0,20), 11)
+local followCard = card(powerPage, UDim2.fromOffset(0, 188), UDim2.new(1, 0, 0, 238))
+label(followCard, "FOLLOW SYSTEM", UDim2.fromOffset(18, 10), UDim2.new(1,-36,0,20), 12)
+label(followCard, "Edit what happens after a successful dodge.", UDim2.fromOffset(18, 32), UDim2.new(1,-36,0,18), 9)
+
+local followDurationText = label(followCard, "DURATION  " .. Settings.FollowDuration .. "s", UDim2.fromOffset(18, 60), UDim2.new(0,170,0,30), 11)
+local followDurationMinus = Instance.new("TextButton")
+followDurationMinus.Size = UDim2.fromOffset(70, 32)
+followDurationMinus.Position = UDim2.new(1,-150,0,58)
+followDurationMinus.Text = "−"
+followDurationMinus.Font = Enum.Font.GothamBlack
+followDurationMinus.TextSize = 16
+followDurationMinus.TextColor3 = Color3.new(1,1,1)
+followDurationMinus.BackgroundColor3 = Color3.fromRGB(47,42,59)
+followDurationMinus.AutoButtonColor = false
+followDurationMinus.Parent = followCard
+corner(followDurationMinus, 10)
+
+local followDurationPlus = Instance.new("TextButton")
+followDurationPlus.Size = UDim2.fromOffset(70, 32)
+followDurationPlus.Position = UDim2.new(1,-74,0,58)
+followDurationPlus.Text = "+"
+followDurationPlus.Font = Enum.Font.GothamBlack
+followDurationPlus.TextSize = 16
+followDurationPlus.TextColor3 = Color3.new(1,1,1)
+followDurationPlus.BackgroundColor3 = Color3.fromRGB(104,72,158)
+followDurationPlus.AutoButtonColor = false
+followDurationPlus.Parent = followCard
+corner(followDurationPlus, 10)
+
+local followDistanceText = label(followCard, "DISTANCE  " .. Settings.FollowDistance, UDim2.fromOffset(18, 102), UDim2.new(0,170,0,30), 11)
+local followDistanceMinus = Instance.new("TextButton")
+followDistanceMinus.Size = UDim2.fromOffset(70, 32)
+followDistanceMinus.Position = UDim2.new(1,-150,0,100)
+followDistanceMinus.Text = "−"
+followDistanceMinus.Font = Enum.Font.GothamBlack
+followDistanceMinus.TextSize = 16
+followDistanceMinus.TextColor3 = Color3.new(1,1,1)
+followDistanceMinus.BackgroundColor3 = Color3.fromRGB(47,42,59)
+followDistanceMinus.AutoButtonColor = false
+followDistanceMinus.Parent = followCard
+corner(followDistanceMinus, 10)
+
+local followDistancePlus = Instance.new("TextButton")
+followDistancePlus.Size = UDim2.fromOffset(70, 32)
+followDistancePlus.Position = UDim2.new(1,-74,0,100)
+followDistancePlus.Text = "+"
+followDistancePlus.Font = Enum.Font.GothamBlack
+followDistancePlus.TextSize = 16
+followDistancePlus.TextColor3 = Color3.new(1,1,1)
+followDistancePlus.BackgroundColor3 = Color3.fromRGB(104,72,158)
+followDistancePlus.AutoButtonColor = false
+followDistancePlus.Parent = followCard
+corner(followDistancePlus, 10)
+
+local followSpeedText = label(followCard, "FOLLOW SPEED  " .. math.floor(Settings.FollowSpeed*100), UDim2.fromOffset(18, 144), UDim2.new(0,200,0,30), 11)
+local followSpeedMinus = Instance.new("TextButton")
+followSpeedMinus.Size = UDim2.fromOffset(70, 32)
+followSpeedMinus.Position = UDim2.new(1,-150,0,142)
+followSpeedMinus.Text = "−"
+followSpeedMinus.Font = Enum.Font.GothamBlack
+followSpeedMinus.TextSize = 16
+followSpeedMinus.TextColor3 = Color3.new(1,1,1)
+followSpeedMinus.BackgroundColor3 = Color3.fromRGB(47,42,59)
+followSpeedMinus.AutoButtonColor = false
+followSpeedMinus.Parent = followCard
+corner(followSpeedMinus, 10)
+
+local followSpeedPlus = Instance.new("TextButton")
+followSpeedPlus.Size = UDim2.fromOffset(70, 32)
+followSpeedPlus.Position = UDim2.new(1,-74,0,142)
+followSpeedPlus.Text = "+"
+followSpeedPlus.Font = Enum.Font.GothamBlack
+followSpeedPlus.TextSize = 16
+followSpeedPlus.TextColor3 = Color3.new(1,1,1)
+followSpeedPlus.BackgroundColor3 = Color3.fromRGB(104,72,158)
+followSpeedPlus.AutoButtonColor = false
+followSpeedPlus.Parent = followCard
+corner(followSpeedPlus, 10)
+
+local followMode = Instance.new("TextButton")
+followMode.Size = UDim2.new(1,-36,0,34)
+followMode.Position = UDim2.fromOffset(18,184)
+followMode.Text = "MODE  •  " .. Settings.FollowMode
+followMode.Font = Enum.Font.GothamBold
+followMode.TextSize = 10
+followMode.TextColor3 = Color3.new(1,1,1)
+followMode.BackgroundColor3 = Color3.fromRGB(65,55,88)
+followMode.AutoButtonColor = false
+followMode.Parent = followCard
+corner(followMode, 10)
+
+local stopToggle = Instance.new("TextButton")
+stopToggle.Size = UDim2.new(1,-36,0,34)
+stopToggle.Position = UDim2.fromOffset(18,224)
+stopToggle.Text = "STOP EFFECT  •  ON"
+stopToggle.Font = Enum.Font.GothamBold
+stopToggle.TextSize = 10
+stopToggle.TextColor3 = Color3.new(1,1,1)
+stopToggle.BackgroundColor3 = Color3.fromRGB(65,55,88)
+stopToggle.AutoButtonColor = false
+stopToggle.Parent = followCard
+corner(stopToggle, 10)
+
+local settingsCard = card(powerPage, UDim2.fromOffset(0, 438), UDim2.new(1, 0, 0, 132))
+label(settingsCard, "ABILITY SETTINGS", UDim2.fromOffset(18, 9), UDim2.new(1,-36,0,20), 11)
 
 local function makeToggle(parent, text, pos)
 	local b = Instance.new("TextButton")
@@ -455,7 +713,7 @@ local function refreshPower()
 	systemToggle.Text = Settings.Enabled and "SYSTEM • ON" or "SYSTEM • OFF"
 	dodgeToggle.Text = Settings.AutoDodge and "AUTO DODGE • ON" or "AUTO DODGE • OFF"
 	cameraToggle.Text = Settings.CameraLock and "CAMERA LOCK • ON" or "CAMERA LOCK • OFF"
-	followToggle.Text = Settings.FollowAfterDodge and "5S FOLLOW • ON" or "5S FOLLOW • OFF"
+	followToggle.Text = Settings.FollowAfterDodge and "FOLLOW • ON" or "FOLLOW • OFF"
 
 	systemToggle.BackgroundColor3 = Settings.Enabled and Color3.fromRGB(65,55,88) or Color3.fromRGB(55,38,43)
 	dodgeToggle.BackgroundColor3 = Settings.AutoDodge and Color3.fromRGB(65,55,88) or Color3.fromRGB(55,38,43)
@@ -465,7 +723,132 @@ local function refreshPower()
 	ultra.BackgroundColor3 = Settings.Ability == "Ultra Instinct"
 		and Color3.fromRGB(104,72,158)
 		or Color3.fromRGB(46,41,58)
+
+	followDurationText.Text = "DURATION  " .. Settings.FollowDuration .. "s"
+	followDistanceText.Text = "DISTANCE  " .. Settings.FollowDistance
+	followSpeedText.Text = "FOLLOW SPEED  " .. math.floor(Settings.FollowSpeed*100)
+	followMode.Text = "MODE  •  " .. Settings.FollowMode
+	stopToggle.Text = Settings.StopEffect and "STOP EFFECT  •  ON" or "STOP EFFECT  •  OFF"
+	stopToggle.BackgroundColor3 = Settings.StopEffect and Color3.fromRGB(65,55,88) or Color3.fromRGB(55,38,43)
 end
+--==================================================
+-- ULTRA INSTINCT CONFIGURATION
+--==================================================
+
+local ultraConfig = card(powerPage, UDim2.fromOffset(0, 582), UDim2.new(1,0,0,330))
+label(ultraConfig, "ULTRA INSTINCT", UDim2.fromOffset(18,10), UDim2.new(1,-36,0,22), 13)
+label(ultraConfig, "---", UDim2.fromOffset(18,32), UDim2.new(1,-36,0,16), 9)
+
+local dodgeChanceButton = Instance.new("TextButton")
+dodgeChanceButton.Size = UDim2.new(1,-36,0,36)
+dodgeChanceButton.Position = UDim2.fromOffset(18,56)
+dodgeChanceButton.Text = "DODGE CHANCE • 100%"
+dodgeChanceButton.Font = Enum.Font.GothamBold
+dodgeChanceButton.TextSize = 10
+dodgeChanceButton.TextColor3 = Color3.new(1,1,1)
+dodgeChanceButton.BackgroundColor3 = Color3.fromRGB(65,55,88)
+dodgeChanceButton.AutoButtonColor = false
+dodgeChanceButton.Parent = ultraConfig
+corner(dodgeChanceButton,10)
+
+local dodgeAnimButton = Instance.new("TextButton")
+dodgeAnimButton.Size = UDim2.new(1,-36,0,36)
+dodgeAnimButton.Position = UDim2.fromOffset(18,100)
+dodgeAnimButton.Text = "DODGE ANIMATION • SIDE BURST"
+dodgeAnimButton.Font = Enum.Font.GothamBold
+dodgeAnimButton.TextSize = 10
+dodgeAnimButton.TextColor3 = Color3.new(1,1,1)
+dodgeAnimButton.BackgroundColor3 = Color3.fromRGB(65,55,88)
+dodgeAnimButton.AutoButtonColor = false
+dodgeAnimButton.Parent = ultraConfig
+corner(dodgeAnimButton,10)
+
+local perfectButton = Instance.new("TextButton")
+perfectButton.Size = UDim2.new(1,-36,0,36)
+perfectButton.Position = UDim2.fromOffset(18,144)
+perfectButton.Text = "PERFECT DODGE • 0.30s"
+perfectButton.Font = Enum.Font.GothamBold
+perfectButton.TextSize = 10
+perfectButton.TextColor3 = Color3.new(1,1,1)
+perfectButton.BackgroundColor3 = Color3.fromRGB(65,55,88)
+perfectButton.AutoButtonColor = false
+perfectButton.Parent = ultraConfig
+corner(perfectButton,10)
+
+local auraButton = Instance.new("TextButton")
+auraButton.Size = UDim2.new(0.48,-10,0,36)
+auraButton.Position = UDim2.fromOffset(18,188)
+auraButton.Text = "WHITE AURA • ON"
+auraButton.Font = Enum.Font.GothamBold
+auraButton.TextSize = 10
+auraButton.TextColor3 = Color3.new(1,1,1)
+auraButton.BackgroundColor3 = Color3.fromRGB(65,55,88)
+auraButton.AutoButtonColor = false
+auraButton.Parent = ultraConfig
+corner(auraButton,10)
+
+local afterButton = Instance.new("TextButton")
+afterButton.Size = UDim2.new(0.48,-10,0,36)
+afterButton.Position = UDim2.new(0.52,0,0,188)
+afterButton.Text = "WHITE AFTERIMAGE • ON"
+afterButton.Font = Enum.Font.GothamBold
+afterButton.TextSize = 10
+afterButton.TextColor3 = Color3.new(1,1,1)
+afterButton.BackgroundColor3 = Color3.fromRGB(65,55,88)
+afterButton.AutoButtonColor = false
+afterButton.Parent = ultraConfig
+corner(afterButton,10)
+
+local dodgeCountText = label(ultraConfig, "DODGE STREAK  •  0x", UDim2.fromOffset(18,240), UDim2.new(1,-36,0,30), 12)
+local resetDodge = Instance.new("TextButton")
+resetDodge.Size = UDim2.fromOffset(110,32)
+resetDodge.Position = UDim2.new(1,-128,0,236)
+resetDodge.Text = "RESET"
+resetDodge.Font = Enum.Font.GothamBlack
+resetDodge.TextSize = 10
+resetDodge.TextColor3 = Color3.new(1,1,1)
+resetDodge.BackgroundColor3 = Color3.fromRGB(47,42,59)
+resetDodge.AutoButtonColor = false
+resetDodge.Parent = ultraConfig
+corner(resetDodge,10)
+
+local function refreshUltraConfig()
+	dodgeChanceButton.Text = "DODGE CHANCE • " .. Settings.DodgeChance .. "%"
+	dodgeAnimButton.Text = "DODGE ANIMATION • " .. string.upper(Settings.DodgeAnimation)
+	perfectButton.Text = string.format("PERFECT DODGE • %.2fs", Settings.PerfectDodgeWindow)
+	auraButton.Text = Settings.WhiteAura and "WHITE AURA • ON" or "WHITE AURA • OFF"
+	afterButton.Text = Settings.Afterimage and "WHITE AFTERIMAGE • ON" or "WHITE AFTERIMAGE • OFF"
+	dodgeCountText.Text = "DODGE STREAK  •  " .. Settings.DodgeCount .. "x"
+end
+
+dodgeChanceButton.MouseButton1Click:Connect(function()
+	Settings.DodgeChance = Settings.DodgeChance >= 100 and 10 or Settings.DodgeChance + 10
+	refreshUltraConfig()
+end)
+dodgeAnimButton.MouseButton1Click:Connect(function()
+	local modes={"Side Burst","Backstep","Blink"}
+	local i=table.find(modes,Settings.DodgeAnimation) or 1
+	Settings.DodgeAnimation=modes[(i%#modes)+1]
+	refreshUltraConfig()
+end)
+perfectButton.MouseButton1Click:Connect(function()
+	local vals={0.15,0.25,0.30,0.40,0.50}
+	local i=table.find(vals,Settings.PerfectDodgeWindow) or 3
+	Settings.PerfectDodgeWindow=vals[(i%#vals)+1]
+	refreshUltraConfig()
+end)
+auraButton.MouseButton1Click:Connect(function()
+	Settings.WhiteAura = not Settings.WhiteAura
+	refreshUltraConfig()
+end)
+afterButton.MouseButton1Click:Connect(function()
+	Settings.Afterimage = not Settings.Afterimage
+	refreshUltraConfig()
+end)
+resetDodge.MouseButton1Click:Connect(function()
+	Settings.DodgeCount = 0
+	refreshUltraConfig()
+end)
 
 --==================================================
 -- PLAYER PAGE
@@ -594,6 +977,7 @@ ringFolder.Name = "AbilityRadiusRing"
 ringFolder.Parent = workspace
 
 local ringParts = {}
+local radiusCircleEnabled = true
 local RING_SEGMENTS = 48
 
 for i = 1, RING_SEGMENTS do
@@ -631,9 +1015,102 @@ local function updateRing()
 		p.CFrame = CFrame.new(pos)
 			* CFrame.Angles(0, -angle, 0)
 
-		p.Transparency = Settings.Enabled and 0.15 or 1
+		p.Transparency = (Settings.Enabled and radiusCircleEnabled) and 0.15 or 1
 	end
 end
+
+--==================================================
+-- MENU / FOLLOW CONFIGURATION
+--==================================================
+
+local function refreshMenuSize()
+	menuSizeText.Text = "SIZE  " .. math.floor(Settings.MenuScale * 100) .. "%"
+	mainScale.Scale = Settings.MenuScale
+end
+
+menuSizeMinus.MouseButton1Click:Connect(function()
+	play(clickSound)
+	Settings.MenuScale = math.max(0.85, math.floor((Settings.MenuScale - 0.05) * 100 + 0.5) / 100)
+	refreshMenuSize()
+end)
+
+menuSizePlus.MouseButton1Click:Connect(function()
+	play(clickSound)
+	Settings.MenuScale = math.min(1.15, math.floor((Settings.MenuScale + 0.05) * 100 + 0.5) / 100)
+	refreshMenuSize()
+end)
+
+uiSoundButton.MouseButton1Click:Connect(function()
+	uiSoundsEnabled = not uiSoundsEnabled
+	uiSoundButton.Text = uiSoundsEnabled and "UI SOUNDS • ON" or "UI SOUNDS • OFF"
+end)
+uiVolumeButton.MouseButton1Click:Connect(function()
+	Settings.UIVolume = Settings.UIVolume >= 0.9 and 0 or Settings.UIVolume + 0.15
+	uiVolumeButton.Text = "VOLUME • " .. math.floor(Settings.UIVolume*100) .. "%"
+	clickSound.Volume = Settings.UIVolume
+	openSound.Volume = Settings.UIVolume
+end)
+uiTransparencyButton.MouseButton1Click:Connect(function()
+	Settings.UITransparency = Settings.UITransparency >= 0.24 and 0 or Settings.UITransparency + 0.05
+	main.BackgroundTransparency = Settings.UITransparency
+	uiTransparencyButton.Text = "UI TRANSPARENCY • " .. math.floor(Settings.UITransparency*100) .. "%"
+end)
+uiAnimButton.MouseButton1Click:Connect(function()
+	Settings.AnimationSpeed = Settings.AnimationSpeed >= 0.85 and 0.20 or Settings.AnimationSpeed + 0.10
+	uiAnimButton.Text = "ANIMATION • " .. math.floor(Settings.AnimationSpeed*100)
+end)
+
+local function refreshFollowConfig()
+	refreshPower()
+end
+
+followDurationMinus.MouseButton1Click:Connect(function()
+	play(clickSound)
+	Settings.FollowDuration = math.max(1, Settings.FollowDuration - 1)
+	refreshFollowConfig()
+end)
+
+followDurationPlus.MouseButton1Click:Connect(function()
+	play(clickSound)
+	Settings.FollowDuration = math.min(15, Settings.FollowDuration + 1)
+	refreshFollowConfig()
+end)
+
+followDistanceMinus.MouseButton1Click:Connect(function()
+	play(clickSound)
+	Settings.FollowDistance = math.max(1, Settings.FollowDistance - 1)
+	refreshFollowConfig()
+end)
+
+followDistancePlus.MouseButton1Click:Connect(function()
+	play(clickSound)
+	Settings.FollowDistance = math.min(10, Settings.FollowDistance + 1)
+	refreshFollowConfig()
+end)
+
+followSpeedMinus.MouseButton1Click:Connect(function()
+	play(clickSound)
+	Settings.FollowSpeed = math.max(0.06, math.floor((Settings.FollowSpeed - 0.02) * 100 + 0.5) / 100)
+	refreshFollowConfig()
+end)
+
+followSpeedPlus.MouseButton1Click:Connect(function()
+	play(clickSound)
+	Settings.FollowSpeed = math.min(0.30, math.floor((Settings.FollowSpeed + 0.02) * 100 + 0.5) / 100)
+	refreshFollowConfig()
+end)
+
+followMode.MouseButton1Click:Connect(function()
+	play(clickSound)
+	Settings.FollowMode = Settings.FollowMode == "Behind" and "Side" or "Behind"
+	refreshFollowConfig()
+end)
+
+stopToggle.MouseButton1Click:Connect(function()
+	play(clickSound)
+	Settings.StopEffect = not Settings.StopEffect
+	refreshFollowConfig()
+end)
 
 --==================================================
 -- RADIUS CONTROLS
@@ -663,6 +1140,25 @@ plus.MouseButton1Click:Connect(function()
 		Settings.Radius + Settings.RadiusStep
 	)
 	refreshRadius()
+end)
+
+configMinus.MouseButton1Click:Connect(function()
+	play(clickSound)
+	Settings.Radius = math.max(Settings.MinRadius, Settings.Radius - Settings.RadiusStep)
+	refreshRadius()
+	configRadiusText.Text = "RADIUS  " .. Settings.Radius
+end)
+
+configPlus.MouseButton1Click:Connect(function()
+	play(clickSound)
+	Settings.Radius = math.min(Settings.MaxRadius, Settings.Radius + Settings.RadiusStep)
+	refreshRadius()
+	configRadiusText.Text = "RADIUS  " .. Settings.Radius
+end)
+
+radiusToggle.MouseButton1Click:Connect(function()
+	radiusCircleEnabled = not radiusCircleEnabled
+	radiusToggle.Text = radiusCircleEnabled and "RADIUS CIRCLE • ON" or "RADIUS CIRCLE • OFF"
 end)
 
 --==================================================
@@ -839,9 +1335,18 @@ local function flash()
 		NumberSequenceKeypoint.new(1, 1)
 	})
 	emitter.Parent = attachment
-	emitter:Emit(24)
+	if Settings.WhiteAura then
+		emitter:Emit(24)
+	else
+		emitter.Enabled = false
+	end
 
 	local highlight = Instance.new("Highlight")
+	if not Settings.WhiteAura then
+		highlight:Destroy()
+		Debris:AddItem(attachment, 0.1)
+		return
+	end
 	highlight.Name = "UI_WhiteFlash"
 	highlight.Adornee = character
 	highlight.FillColor = Color3.fromRGB(255,255,255)
@@ -857,6 +1362,60 @@ local function flash()
 
 	Debris:AddItem(attachment, 0.5)
 	Debris:AddItem(highlight, 0.35)
+end
+
+local function createAfterimage()
+	if not Settings.Afterimage or not character then return end
+	local clone = character:Clone()
+	for _, obj in ipairs(clone:GetDescendants()) do
+		if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ModuleScript") or obj:IsA("Tool") then
+			obj:Destroy()
+		elseif obj:IsA("BasePart") then
+			obj.Anchored = true
+			obj.CanCollide = false
+			obj.CanTouch = false
+			obj.CanQuery = false
+			obj.Material = Enum.Material.Neon
+			obj.Color = Color3.fromRGB(245,245,255)
+			obj.Transparency = math.clamp(obj.Transparency + 0.45,0,0.9)
+		end
+	end
+	clone.Name = "UI_Afterimage"
+	clone.Parent = workspace
+	for _, obj in ipairs(clone:GetDescendants()) do
+		if obj:IsA("BasePart") then
+			tween(obj,0.32,{Transparency=1}):Play()
+		end
+	end
+	Debris:AddItem(clone,0.38)
+end
+
+local counterGui = Instance.new("TextLabel")
+counterGui.Size = UDim2.fromOffset(190,48)
+counterGui.Position = UDim2.new(0.5,-95,0.72,0)
+counterGui.BackgroundTransparency = 1
+counterGui.Text = ""
+counterGui.Font = Enum.Font.GothamBlack
+counterGui.TextSize = 25
+counterGui.TextColor3 = Color3.new(1,1,1)
+counterGui.TextStrokeTransparency = 0.35
+counterGui.Visible = false
+counterGui.ZIndex = 200
+counterGui.Parent = gui
+
+local function showDodgeIndicator()
+	counterGui.Text = "DODGE  " .. tostring(Settings.DodgeCount) .. "x"
+	counterGui.Visible = true
+	counterGui.TextTransparency = 0
+	tween(counterGui,0.18,{Position=UDim2.new(0.5,-95,0.67,0)}):Play()
+	task.delay(0.55,function()
+		if counterGui.Parent then
+			tween(counterGui,0.25,{TextTransparency=1}):Play()
+			task.wait(0.25)
+			counterGui.Visible=false
+			counterGui.Position=UDim2.new(0.5,-95,0.72,0)
+		end
+	end)
 end
 
 local function stopEffect()
@@ -909,7 +1468,14 @@ local function followForFiveSeconds(target)
 			if not root or not root.Parent then break end
 			if not targetRoot.Parent or targetHum.Health <= 0 then break end
 
-			local desired = targetRoot.Position - targetRoot.CFrame.LookVector * 3
+			local offset
+			if Settings.FollowMode == "Side" then
+				offset = targetRoot.CFrame.RightVector * Settings.FollowDistance
+			else
+				offset = -targetRoot.CFrame.LookVector * Settings.FollowDistance
+			end
+
+			local desired = targetRoot.Position + offset
 			local flat = Vector3.new(desired.X, root.Position.Y, desired.Z)
 
 			root.CFrame = root.CFrame:Lerp(
@@ -917,7 +1483,7 @@ local function followForFiveSeconds(target)
 					flat,
 					Vector3.new(targetRoot.Position.X, flat.Y, targetRoot.Position.Z)
 				),
-				0.12
+				Settings.FollowSpeed
 			)
 
 			task.wait()
@@ -926,7 +1492,9 @@ local function followForFiveSeconds(target)
 		if token == followToken then
 			following = false
 			followTarget = nil
-			stopEffect()
+			if Settings.StopEffect then
+				stopEffect()
+			end
 		end
 	end)
 end
@@ -935,6 +1503,7 @@ local function dodge()
 	if dodging then return end
 	if not Settings.Enabled or not Settings.AutoDodge then return end
 	if not humanoid or humanoid.Health <= 0 or not root then return end
+	if math.random(1,100) > Settings.DodgeChance then return end
 
 	dodging = true
 	followToken += 1
@@ -945,6 +1514,9 @@ local function dodge()
 
 	playRandomDodgeSound()
 	flash()
+	createAfterimage()
+	Settings.DodgeCount += 1
+	showDodgeIndicator()
 
 	if targetRoot then
 		cameraLocked = Settings.CameraLock
@@ -973,7 +1545,9 @@ local function dodge()
 
 	-- Short, smooth Ultra-Instinct-style evasive burst:
 	-- mostly sideways/backward, with a small lift and quick return.
-	local destination = root.Position + direction * 8 + Vector3.new(0, 1.2, 0)
+	local burstDistance = Settings.DodgeAnimation == "Backstep" and 6 or (Settings.DodgeAnimation == "Blink" and 10 or 8)
+	local lift = Settings.DodgeAnimation == "Blink" and 0.6 or 1.2
+	local destination = root.Position + direction * burstDistance + Vector3.new(0, lift, 0)
 	local endCF = CFrame.lookAt(
 		destination,
 		destination + root.CFrame.LookVector
@@ -1096,7 +1670,7 @@ local function openMenu()
 	menuOpen = true
 	minimized.Visible = false
 	main.Visible = true
-	mainScale.Scale = 1
+	mainScale.Scale = Settings.MenuScale
 	play(openSound)
 	task.spawn(runIntroAnimations)
 end
@@ -1138,6 +1712,8 @@ minimized.MouseButton1Click:Connect(openMenu)
 showPage("Home")
 refreshPower()
 refreshRadius()
+refreshMenuSize()
+refreshUltraConfig()
 hookDamage()
 
 player.CharacterAdded:Connect(function()
