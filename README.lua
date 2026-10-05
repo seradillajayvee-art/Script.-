@@ -5,6 +5,7 @@ do
 	local TS = game:GetService("TweenService")
 	local RS = game:GetService("RunService")
 	local Lighting = game:GetService("Lighting")
+	local UIS = game:GetService("UserInputService")
 	local lp = Players.LocalPlayer
 
 	local KEY_HASH, KEY_LEN = 822848760, 21
@@ -35,7 +36,7 @@ do
 
 	local dim = Instance.new("Frame")
 	dim.Size = UDim2.fromScale(1, 1); dim.BackgroundColor3 = Color3.new(0, 0, 0)
-	dim.BackgroundTransparency = 1; dim.BorderSizePixel = 0; dim.Active = true; dim.Parent = g
+	dim.BackgroundTransparency = 1; dim.BorderSizePixel = 0; dim.Active = false; dim.Parent = g
 	TS:Create(dim, TweenInfo.new(0.6), {BackgroundTransparency = 0.35}):Play()
 
 	-- floating particles
@@ -56,7 +57,7 @@ do
 	local card = Instance.new("Frame")
 	card.AnchorPoint = Vector2.new(0.5, 0.5); card.Position = UDim2.fromScale(0.5, 0.5)
 	card.Size = UDim2.fromOffset(0, 0); card.BackgroundColor3 = Color3.fromRGB(12, 14, 26)
-	card.BorderSizePixel = 0; card.ClipsDescendants = true; card.Parent = g
+	card.BorderSizePixel = 0; card.ClipsDescendants = true; card.Active = true; card.Parent = g
 	local cc = Instance.new("UICorner"); cc.CornerRadius = UDim.new(0, 16); cc.Parent = card
 	local bg = Instance.new("UIGradient")
 	bg.Color = ColorSequence.new(Color3.fromRGB(32, 38, 78), Color3.fromRGB(8, 9, 18)); bg.Rotation = 90; bg.Parent = card
@@ -134,6 +135,21 @@ do
 
 	TS:Create(card, TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = UDim2.fromOffset(W, H)}):Play()
 
+	-- drag the card from anywhere (movement/camera stay free)
+	local dragging, dstart, dpos = false, nil, nil
+	on(card.InputBegan, function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging, dstart, dpos = true, i.Position, card.Position
+			i.Changed:Connect(function() if i.UserInputState == Enum.UserInputState.End then dragging = false end end)
+		end
+	end)
+	on(UIS.InputChanged, function(i)
+		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+			local d = i.Position - dstart
+			card.Position = UDim2.new(dpos.X.Scale, dpos.X.Offset + d.X, dpos.Y.Scale, dpos.Y.Offset + d.Y)
+		end
+	end)
+
 	-- animation loop
 	local t0 = os.clock()
 	on(RS.Heartbeat, function(dt)
@@ -165,12 +181,13 @@ do
 	local tries, locked, busy = 0, false, false
 
 	local function shake()
+		local p0 = card.Position
 		for i = 1, 8 do
 			local o = (i % 2 == 0 and 1 or -1) * (16 - i * 2)
-			card.Position = UDim2.new(0.5, o, 0.5, 0)
+			card.Position = UDim2.new(p0.X.Scale, p0.X.Offset + o, p0.Y.Scale, p0.Y.Offset)
 			task.wait(0.03)
 		end
-		card.Position = UDim2.fromScale(0.5, 0.5)
+		card.Position = p0
 	end
 
 	local function setColor(c)
@@ -269,6 +286,7 @@ local aimOn, aimSmooth, aimHead, teamCheck, soundOn = false, 0.4, true, true, tr
 local cooldown, lastDodge = 0.9, 0
 local dodgeMode, busy = "RANDOM", false
 local LOCK_TIME, lockOn, fxOn = 5, true, true
+local returnDelay = 0.04
 local lockTarget, lockUntil = nil, 0
 local dodgeCount = 0
 
@@ -578,11 +596,11 @@ local function swing()
 	end)
 end
 
-local function doCounter()
+local function doCounter(n, gap)
 	if not counter then return end
-	for _ = 1, 3 do
+	for _ = 1, (n or 3) do
 		swing()
-		task.wait(0.14)
+		task.wait(gap or 0.14)
 	end
 end
 
@@ -639,13 +657,11 @@ local function dodge(eChar)
 		local startCF = r.CFrame
 		local list = snapshot(char)
 		local useTP = dodgeMode == "TELEPORT" or (dodgeMode == "RANDOM" and math.random() < 0.5)
-		local side = math.random(0, 1) == 0 and -4 or 4
-		local goal
-		if useTP then
-			goal = (er.CFrame * CFrame.new(side * 0.5, 0, 3.2)).Position
-		else
-			goal = (er.CFrame * CFrame.new(side, 0, 1.5)).Position
-		end
+		-- BACK dodge only: always behind the enemy, randomly back-left or back-right
+		local side = math.random(0, 1) == 0 and -1 or 1
+		local sx = side * (math.random(25, 40) / 10)
+		local back = math.random(32, 45) / 10
+		local goal = (er.CFrame * CFrame.new(sx, 0, back)).Position
 		local endCF = CFrame.lookAt(goal, Vector3.new(er.Position.X, goal.Y, er.Position.Z))
 		pcall(playDodgeSound)
 		r.CFrame = endCF
@@ -655,15 +671,17 @@ local function dodge(eChar)
 			lockUntil = tick() + LOCK_TIME
 		end
 		pcall(dodgeFX, char, startCF, endCF, list)
-		task.wait(0.05)
-		doCounter()
+		task.wait(useTP and 0.05 or 0.02)
+		if useTP then doCounter() else doCounter(2, 0.06) end
 		if not useTP then
-			task.wait(0.1)
+			task.wait(returnDelay)
 			local nowR = getRoot(lp.Character)
 			local nowE = getRoot(eChar)
 			if nowR then
-				local look = nowE and Vector3.new(nowE.Position.X, startCF.Position.Y, nowE.Position.Z) or (startCF.Position + startCF.LookVector)
-				local back = CFrame.lookAt(startCF.Position, look)
+				local moved = nowR.Position - endCF.Position
+				local retPos = startCF.Position + moved
+				local look = nowE and Vector3.new(nowE.Position.X, retPos.Y, nowE.Position.Z) or (retPos + startCF.LookVector)
+				local back = CFrame.lookAt(retPos, look)
 				local from = nowR.CFrame
 				nowR.CFrame = back
 				pcall(returnFX, list, from, back)
@@ -823,7 +841,7 @@ local function buildUI()
 		tabs[n] = new("TextButton", {Size = UDim2.fromOffset(TW, 36), Position = UDim2.fromOffset(12 + (i - 1) * TW, HEAD + 4),
 			BackgroundTransparency = 1, Text = n, TextColor3 = DIM, Font = Enum.Font.GothamMedium, TextSize = 17,
 			AutoButtonColor = false}, main)
-		local pg2 = new("ScrollingFrame", {Size = UDim2.fromOffset(W - 32, H - HEAD - 52), Position = UDim2.fromOffset(16, HEAD + 48),
+		local pg2 = new("ScrollingFrame", {Size = UDim2.fromOffset(W - 32, H - HEAD - 62), Position = UDim2.fromOffset(16, HEAD + 48),
 			BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3, ScrollBarImageColor3 = ACC,
 			CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, Visible = false}, main)
 		new("UIListLayout", {Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder}, pg2)
@@ -990,6 +1008,7 @@ local function buildUI()
 	toggle(dp, "Auto Counter", function() return counter end, function(v) counter = v end)
 	toggle(dp, "Target Lock (free move)", function() return lockOn end, function(v) lockOn = v; if not v then releaseLock() end end)
 	slider(dp, "Lock Time", 1, 10, 1, function() return LOCK_TIME end, function(v) LOCK_TIME = v end, function(v) return v .. "s" end)
+	slider(dp, "Return Delay", 0, 0.3, 0.01, function() return returnDelay end, function(v) returnDelay = v end, function(v) return string.format("%.2fs", v) end)
 	slider(dp, "Dodge Cooldown", 0.3, 3, 0.1, function() return cooldown end, function(v) cooldown = v end, function(v) return string.format("%.1fs", v) end)
 
 	-- ===== AIM =====
@@ -1033,6 +1052,13 @@ local function buildUI()
 	end
 	xB.MouseButton1Click:Connect(function() show(false) end)
 	drag(main, header)
+	local function edge(pos, size)
+		local e = new("Frame", {Position = pos, Size = size, BackgroundTransparency = 1}, main)
+		drag(main, e)
+	end
+	edge(UDim2.fromOffset(0, HEAD), UDim2.new(0, 16, 1, -HEAD))
+	edge(UDim2.new(1, -16, 0, HEAD), UDim2.new(0, 16, 1, -HEAD))
+	edge(UDim2.new(0, 0, 1, -14), UDim2.new(1, 0, 0, 14))
 	local ost = drag(openB, openB)
 	openB.MouseButton1Click:Connect(function() if not ost.moved then show(true) end end)
 	track(UIS.InputBegan:Connect(function(i, gp)
