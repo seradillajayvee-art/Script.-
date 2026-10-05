@@ -74,8 +74,32 @@ end
 
 local clickSound = makeSound(9118828568, 0.4)
 local openSound = makeSound(9118823107, 0.45)
-local dodgeSound = makeSound(138186576, 0.5)
+local dodgeSoundIds = {
+	"rbxassetid://87566211283329",
+	"rbxassetid://81857580097150",
+	"rbxassetid://129561737395908",
+	"rbxassetid://122312400582724",
+	"rbxassetid://136080815136211"
+}
+
+local dodgeSounds = {}
+for _, soundId in ipairs(dodgeSoundIds) do
+	local s = Instance.new("Sound")
+	s.SoundId = soundId
+	s.Volume = 0.65
+	s.Parent = SoundService
+	table.insert(dodgeSounds, s)
+end
+
 local stopSound = makeSound(9118828568, 0.3)
+
+local function playRandomDodgeSound()
+	if #dodgeSounds == 0 then return end
+	local sound = dodgeSounds[math.random(1, #dodgeSounds)]
+	pcall(function()
+		sound:Play()
+	end)
+end
 
 local function play(sound)
 	pcall(function()
@@ -709,8 +733,8 @@ local function getRoot(model)
 	return model and model:FindFirstChild("HumanoidRootPart")
 end
 
-local function nearestEnemy()
-	if not root then return nil end
+local function getEnemyInsideRadius()
+	if not root then return nil, math.huge end
 
 	local nearest
 	local best = Settings.Radius
@@ -722,7 +746,7 @@ local function nearestEnemy()
 
 			if hum and r and hum.Health > 0 then
 				local d = (r.Position - root.Position).Magnitude
-				if d <= best then
+				if d <= Settings.Radius and d < best then
 					best = d
 					nearest = other.Character
 				end
@@ -737,7 +761,7 @@ local function nearestEnemy()
 
 			if hum and r and hum.Health > 0 then
 				local d = (r.Position - root.Position).Magnitude
-				if d <= best then
+				if d <= Settings.Radius and d < best then
 					best = d
 					nearest = obj
 				end
@@ -745,8 +769,12 @@ local function nearestEnemy()
 		end
 	end
 
-	return nearest
+	return nearest, best
 end
+
+-- Targeting for the actual dodge is deliberately limited to enemies
+-- currently inside the player's configured radius.
+local nearestEnemy = getEnemyInsideRadius
 
 --==================================================
 -- CAMERA / JOYSTICK
@@ -783,16 +811,52 @@ end)
 --==================================================
 
 local function flash()
-	local f = Instance.new("Frame")
-	f.Size = UDim2.fromScale(1,1)
-	f.BackgroundColor3 = Color3.fromRGB(210,190,255)
-	f.BackgroundTransparency = 0.84
-	f.BorderSizePixel = 0
-	f.ZIndex = 100
-	f.Parent = gui
+	-- Simple white Ultra Instinct aura effect.
+	if not root then return end
 
-	tween(f,0.28,{BackgroundTransparency=1}):Play()
-	Debris:AddItem(f,0.35)
+	local attachment = Instance.new("Attachment")
+	attachment.Name = "UI_WhiteAura"
+	attachment.Parent = root
+
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	emitter.Color = ColorSequence.new(Color3.fromRGB(255,255,255))
+	emitter.LightEmission = 1
+	emitter.Rate = 0
+	emitter.Lifetime = NumberRange.new(0.18, 0.34)
+	emitter.Speed = NumberRange.new(3, 8)
+	emitter.Rotation = NumberRange.new(0, 360)
+	emitter.RotSpeed = NumberRange.new(-180, 180)
+	emitter.SpreadAngle = Vector2.new(360, 360)
+	emitter.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.75),
+		NumberSequenceKeypoint.new(0.45, 0.42),
+		NumberSequenceKeypoint.new(1, 0)
+	})
+	emitter.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.05),
+		NumberSequenceKeypoint.new(0.7, 0.25),
+		NumberSequenceKeypoint.new(1, 1)
+	})
+	emitter.Parent = attachment
+	emitter:Emit(24)
+
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "UI_WhiteFlash"
+	highlight.Adornee = character
+	highlight.FillColor = Color3.fromRGB(255,255,255)
+	highlight.OutlineColor = Color3.fromRGB(255,255,255)
+	highlight.FillTransparency = 0.72
+	highlight.OutlineTransparency = 0.2
+	highlight.Parent = character
+
+	tween(highlight, 0.28, {
+		FillTransparency = 1,
+		OutlineTransparency = 1
+	}):Play()
+
+	Debris:AddItem(attachment, 0.5)
+	Debris:AddItem(highlight, 0.35)
 end
 
 local function stopEffect()
@@ -876,10 +940,10 @@ local function dodge()
 	followToken += 1
 	following = false
 
-	local target = nearestEnemy()
+	local target = getEnemyInsideRadius()
 	local targetRoot = target and getRoot(target)
 
-	play(dodgeSound)
+	playRandomDodgeSound()
 	flash()
 
 	if targetRoot then
@@ -906,14 +970,20 @@ local function dodge()
 	end
 
 	local startCF = root.CFrame
-	local destination = root.Position + direction * 8
-	local endCF = CFrame.lookAt(destination, destination + root.CFrame.LookVector)
+
+	-- Short, smooth Ultra-Instinct-style evasive burst:
+	-- mostly sideways/backward, with a small lift and quick return.
+	local destination = root.Position + direction * 8 + Vector3.new(0, 1.2, 0)
+	local endCF = CFrame.lookAt(
+		destination,
+		destination + root.CFrame.LookVector
+	)
 
 	local start = os.clock()
 
-	while os.clock() - start < 0.22 do
-		local a = math.clamp((os.clock() - start) / 0.22,0,1)
-		a = 1 - (1-a)^3
+	while os.clock() - start < 0.24 do
+		local a = math.clamp((os.clock() - start) / 0.24,0,1)
+		a = 1 - (1-a)^4
 
 		if root and root.Parent then
 			root.CFrame = startCF:Lerp(endCF,a)
@@ -967,8 +1037,13 @@ local function hookDamage()
 	lastHealth = humanoid.Health
 
 	damageConnection = humanoid.HealthChanged:Connect(function(newHealth)
-		if newHealth < lastHealth then
-			task.defer(dodge)
+		if newHealth < lastHealth and Settings.Enabled and Settings.AutoDodge then
+			-- Only trigger Ultra Instinct when an enemy is actually inside
+			-- the configured player circle at the moment damage is received.
+			local enemyInside = getEnemyInsideRadius()
+			if enemyInside then
+				task.defer(dodge)
+			end
 		end
 
 		lastHealth = newHealth
@@ -993,18 +1068,59 @@ corner(minimized,20)
 addStroke(minimized,0.15)
 draggable(minimized)
 
+local function runIntroAnimations()
+	-- Back-style intro inspired by the animation snippet provided.
+	local targetPosition = UDim2.new(0.5, -285, 0.5, -195)
+	local startPosition = UDim2.new(0.5, -285, 0.4, -120)
+
+	main.Position = startPosition
+	main.Size = UDim2.fromOffset(500, 350)
+
+	local positionTween = TweenService:Create(
+		main,
+		TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+		{Position = targetPosition}
+	)
+
+	local sizeTween = TweenService:Create(
+		main,
+		TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+		{Size = UDim2.fromOffset(570, 390)}
+	)
+
+	positionTween:Play()
+	sizeTween:Play()
+end
+
 local function openMenu()
 	menuOpen = true
 	minimized.Visible = false
 	main.Visible = true
-	mainScale.Scale = 0.82
-	tween(mainScale,0.35,{Scale=1},Enum.EasingStyle.Back):Play()
+	mainScale.Scale = 1
 	play(openSound)
+	task.spawn(runIntroAnimations)
 end
 
 local function minimizeMenu()
 	menuOpen = false
-	tween(mainScale,0.2,{Scale=0.82},Enum.EasingStyle.Quint,Enum.EasingDirection.In):Play()
+
+	local targetPosition = UDim2.new(0.5, -285, 0.4, -120)
+
+	local positionTween = TweenService:Create(
+		main,
+		TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
+		{Position = targetPosition}
+	)
+
+	local sizeTween = TweenService:Create(
+		main,
+		TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
+		{Size = UDim2.fromOffset(500, 350)}
+	)
+
+	positionTween:Play()
+	sizeTween:Play()
+
 	task.wait(0.18)
 	main.Visible = false
 	minimized.Visible = true
