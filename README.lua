@@ -18,7 +18,10 @@ pcall(function() RunService:UnbindFromRenderStep("UIJ_Aimbot") end)
 
 local radius, enabled, showBox, counter = 12, true, true, true
 local aimOn, aimSmooth, aimHead, teamCheck, soundOn = false, 0.4, true, true, true
-local cooldown, lastDodge = 0.6, 0
+local cooldown, lastDodge = 0.9, 0
+local dodgeMode, busy = "RANDOM", false
+local LOCK_TIME = 5
+local lockTarget, lockUntil = nil, 0
 
 local function getRoot(c) return c and c:FindFirstChild("HumanoidRootPart") end
 
@@ -62,11 +65,7 @@ local function label(parent, text, size, pos, color)
 	return l
 end
 
-local flash = Instance.new("Frame")
-flash.Size = UDim2.new(1,0,1,0); flash.BackgroundColor3 = Color3.new(1,1,1)
-flash.BackgroundTransparency = 1; flash.BorderSizePixel = 0; flash.ZIndex = 0; flash.Active = false; flash.Parent = gui
-
-local FULL_H, MINI_H = 214, 56
+local FULL_H, MINI_H = 256, 56
 local main = Instance.new("Frame")
 main.Size = UDim2.new(0, 440, 0, FULL_H); main.Position = UDim2.new(0.5, -220, 0.2, 0)
 main.BackgroundColor3 = Color3.fromRGB(15,17,30); main.BorderSizePixel = 0; main.ZIndex = 5; main.ClipsDescendants = true; main.Parent = gui
@@ -104,6 +103,7 @@ local plus = btn(L, "+1", UDim2.new(0,58,0,34), UDim2.new(1,-58,0,44))
 local boxB = btn(L, "HITBOX: SHOW", UDim2.new(0.5,-3,0,32), UDim2.new(0,0,0,86))
 local ctrB = btn(L, "COUNTER: ON", UDim2.new(0.5,-3,0,32), UDim2.new(0.5,3,0,86))
 local sndB = btn(L, "SOUND: ON", UDim2.new(1,0,0,32), UDim2.new(0,0,0,124))
+local modeB = btn(L, "DODGE: RANDOM", UDim2.new(1,0,0,32), UDim2.new(0,0,0,162))
 
 local aimB = btn(R, "AIMBOT: OFF", UDim2.new(1,0,0,36), UDim2.new(0,0,0,0), Color3.fromRGB(150,50,60))
 local sMinus = btn(R, "-", UDim2.new(0,40,0,34), UDim2.new(0,0,0,44))
@@ -119,6 +119,7 @@ local function refresh()
 	boxB.Text = "HITBOX: " .. (showBox and "SHOW" or "HIDE")
 	ctrB.Text = "COUNTER: " .. (counter and "ON" or "OFF")
 	sndB.Text = "SOUND: " .. (soundOn and "ON" or "OFF")
+	modeB.Text = "DODGE: " .. dodgeMode
 	aimB.Text = "AIMBOT: " .. (aimOn and "ON" or "OFF")
 	aimB.BackgroundColor3 = aimOn and Color3.fromRGB(40,150,90) or Color3.fromRGB(150,50,60)
 	sLabel.Text = "Smooth: " .. string.format("%.1f", aimSmooth)
@@ -211,6 +212,10 @@ minus.MouseButton1Click:Connect(function() radius = math.max(radius - 1, 3); ref
 boxB.MouseButton1Click:Connect(function() showBox = not showBox; refresh() end)
 ctrB.MouseButton1Click:Connect(function() counter = not counter; refresh() end)
 sndB.MouseButton1Click:Connect(function() soundOn = not soundOn; refresh() end)
+modeB.MouseButton1Click:Connect(function()
+	dodgeMode = dodgeMode == "RANDOM" and "TELEPORT" or (dodgeMode == "TELEPORT" and "NORMAL" or "RANDOM")
+	refresh()
+end)
 aimB.MouseButton1Click:Connect(function() aimOn = not aimOn; refresh() end)
 sPlus.MouseButton1Click:Connect(function() aimSmooth = math.min(1, math.floor((aimSmooth + 0.1) * 10 + 0.5) / 10); refresh() end)
 sMinus.MouseButton1Click:Connect(function() aimSmooth = math.max(0.1, math.floor((aimSmooth - 0.1) * 10 + 0.5) / 10); refresh() end)
@@ -366,8 +371,6 @@ local function fireAura(root)
 end
 
 local function screenFX()
-	flash.BackgroundTransparency = 0.3
-	TS:Create(flash, TweenInfo.new(0.5), {BackgroundTransparency = 1}):Play()
 	local cc = Instance.new("ColorCorrectionEffect")
 	cc.Saturation = -1; cc.Contrast = 0.5; cc.Brightness = 0.2; cc.Parent = Lighting
 	TS:Create(cc, TweenInfo.new(0.6), {Saturation = 0, Contrast = 0, Brightness = 0}):Play()
@@ -434,11 +437,18 @@ local function dodgeFX(char, startCF, endCF, list)
 	screenFX()
 end
 
-local function doCounter()
-	if not counter then return end
+local function swing()
 	local c = lp.Character
 	local tool = c and c:FindFirstChildOfClass("Tool")
 	if tool then pcall(function() tool:Activate() end) end
+	pcall(function()
+		local vim = game:GetService("VirtualInputManager")
+		local v = cam.ViewportSize
+		vim:SendMouseButtonEvent(v.X / 2, v.Y / 2, 0, true, game, 0)
+		task.wait(0.02)
+		vim:SendMouseButtonEvent(v.X / 2, v.Y / 2, 0, false, game, 0)
+	end)
+	pcall(function() if mouse1click then mouse1click() end end)
 	pcall(function()
 		local VU = game:GetService("VirtualUser")
 		VU:CaptureController()
@@ -446,22 +456,70 @@ local function doCounter()
 	end)
 end
 
+local function doCounter()
+	if not counter then return end
+	for _ = 1, 3 do
+		swing()
+		task.wait(0.14)
+	end
+end
+
+track(RunService.Heartbeat:Connect(function()
+	if not lockTarget then return end
+	if tick() > lockUntil then lockTarget = nil; return end
+	local r, er = getRoot(lp.Character), getRoot(lockTarget)
+	if not r or not er then lockTarget = nil; return end
+	local p = r.Position
+	local flat = Vector3.new(er.Position.X, p.Y, er.Position.Z)
+	if (flat - p).Magnitude > 0.1 then r.CFrame = CFrame.lookAt(p, flat) end
+end))
+
+local function returnFX(list, fromCF, toCF)
+	ghostAt(list, fromCF, ICE, 0.45, 1.15)
+	beamBetween(fromCF.Position, toCF.Position, 2)
+	ring(toCF.Position - Vector3.new(0, 2.8, 0), 18, 0)
+end
+
 local function dodge(eChar)
-	if not enabled or tick() - lastDodge < cooldown then return end
+	if not enabled or busy or tick() - lastDodge < cooldown then return end
 	local char = lp.Character
 	local r, er = getRoot(char), getRoot(eChar)
 	if not r or not er then return end
+	busy = true
 	lastDodge = tick()
-	local startCF = r.CFrame
-	local list = snapshot(char)
-	local side = math.random(0, 1) == 0 and -4 or 4
-	local goal = (er.CFrame * CFrame.new(side, 0, 4)).Position
-	local endCF = CFrame.lookAt(goal, Vector3.new(er.Position.X, goal.Y, er.Position.Z))
-	pcall(playDodgeSound)
-	r.CFrame = endCF
-	pcall(dodgeFX, char, startCF, endCF, list)
-	task.wait(0.05)
-	doCounter()
+	local ok = pcall(function()
+		local startCF = r.CFrame
+		local list = snapshot(char)
+		local useTP = dodgeMode == "TELEPORT" or (dodgeMode == "RANDOM" and math.random() < 0.5)
+		local side = math.random(0, 1) == 0 and -4 or 4
+		local goal
+		if useTP then
+			goal = (er.CFrame * CFrame.new(side * 0.5, 0, 3.2)).Position
+		else
+			goal = (er.CFrame * CFrame.new(side, 0, 1.5)).Position
+		end
+		local endCF = CFrame.lookAt(goal, Vector3.new(er.Position.X, goal.Y, er.Position.Z))
+		pcall(playDodgeSound)
+		r.CFrame = endCF
+		lockTarget = eChar
+		lockUntil = tick() + LOCK_TIME
+		pcall(dodgeFX, char, startCF, endCF, list)
+		task.wait(0.05)
+		doCounter()
+		if not useTP then
+			task.wait(0.1)
+			local nowR = getRoot(lp.Character)
+			local nowE = getRoot(eChar)
+			if nowR then
+				local look = nowE and Vector3.new(nowE.Position.X, startCF.Position.Y, nowE.Position.Z) or (startCF.Position + startCF.LookVector)
+				local back = CFrame.lookAt(startCF.Position, look)
+				local from = nowR.CFrame
+				nowR.CFrame = back
+				pcall(returnFX, list, from, back)
+			end
+		end
+	end)
+	busy = false
 end
 
 local P = Enum.AnimationPriority
