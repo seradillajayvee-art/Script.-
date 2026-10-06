@@ -1,5 +1,5 @@
 --==================================================================
--- ABILITY MENU - JAYVEE  (v5.2)
+-- ABILITY MENU - JAYVEE  (v5.4)
 -- Own-game LocalScript
 -- Place in: StarterPlayer > StarterPlayerScripts
 --
@@ -10,27 +10,12 @@
 --   PLAYER   : player info, dodge counter (+reset), Player ESP
 --   SETTINGS : theme, scale, sounds, animations, keybind, reset/unload
 --
--- v4.9 CHANGES
---   * Adaptive defensive/aggressive dodging based on remaining HP.
---   * Removed startup ContentProvider:PreloadAsync calls that could hang on Delta/mobile clients.
---   * Added a 15-second PlayerGui startup timeout instead of an indefinite wait.
---   * Audio now loads lazily when played; UI initialization no longer depends on audio assets.
---   * Kept the security/UI startup path independent from optional executor/audio APIs.
-
--- v4.6 CHANGES
---   * Fixed startup failure on clients where the executor does not expose `shared`.
---   * Added safe shared-state fallback so UI initialization can continue.
---   * Kept Delta/local-asset compatibility and all existing features.
---   * Fixed duplicate Ultra intro audio declaration.
---   * Hardened audio/chat compatibility for mobile clients.
---   * Fixed re-execution audio cleanup bookkeeping.
---   * Version/password metadata now consistently reports v4.7.
---   * Removed Studio Lite-specific branching; target is normal Roblox/Delta execution.
-
--- v4.3 CHANGES
---   * Ultra Instinct intro sound support (local asset / Roblox asset ID).
---   * Dodge chat reactions every 5 dodges with randomized, non-repeating lines.
---   * Ultra Instinct can auto-trigger once when HP crosses 50% while Ultra is OFF.
+-- v5.4 CHANGES
+--   * Delta local Intro.mp3 / Outro.mp3 support (lazy-loaded; no startup preload).
+--   * Ultra Instinct auto-activates once when HP crosses down through 50%, only if OFF.
+--   * Adaptive dodge becomes faster and more defensive as HP falls.
+--   * Anime combat chat every 5 dodges, with exactly one emoji and HP-based emotion.
+--   * Manual mouse / touch / gamepad camera movement cancels camera lock.
 
 -- v4.2 CHANGES
 --   BUG FIXES
@@ -57,14 +42,12 @@
 --   * Damage fallback dodges even when no enemy is inside the radius.
 --==================================================================
 
-print("[JAYVEE] Ability Menu v5.2 loading...")
+print("[JAYVEE] Ability Menu v4.2 loading...")
 
 -- On-screen status banner: shows "loading", "loaded" or the exact ERROR on your screen.
 local function JV_Banner(text, isError)
 	pcall(function()
-		local lp = game:GetService("Players").LocalPlayer
-		if not lp then return end
-		local pg = lp:WaitForChild("PlayerGui", 15)
+		local pg = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui", 10)
 		if not pg then return end
 		local g = pg:FindFirstChild("JAYVEE_Status")
 		if not g then
@@ -100,23 +83,17 @@ JV_Banner("[JAYVEE] Script is running... loading", false)
 local JV_ok, JV_err = xpcall(function()
 
 local Players = game:GetService("Players")
-
--- Some clients expose `shared`, others do not. Never let that stop UI startup.
-local JV_SHARED = (type(shared) == "table") and shared or {}
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
 local SoundService = game:GetService("SoundService")
 local Debris = game:GetService("Debris")
 
-
 local U = {} -- helper functions live here (Luau allows only 200 locals per scope)
 local player = Players.LocalPlayer
-if not player then error("LocalPlayer is not available yet") end
-local playerGui = player:WaitForChild("PlayerGui", 15)
-if not playerGui then error("PlayerGui did not become available within 15 seconds") end
+local playerGui = player:WaitForChild("PlayerGui")
 
-local SCRIPT_VERSION = "v5.2"
+local SCRIPT_VERSION = "v5.4"
 local VERSION_MAJOR = SCRIPT_VERSION:match("%d+") or "4"
 local PASSWORD_PREFIX = "ULTRAINSTINCTBYJAYVEE"
 local PASSWORD = PASSWORD_PREFIX .. "V" .. VERSION_MAJOR
@@ -127,9 +104,9 @@ end
 --==================================================
 -- CLEAN OLD COPY (safe re-execute)
 --==================================================
-if type(JV_SHARED.JAYVEE_AbilityMenu_Destroy) == "function" then
-	pcall(JV_SHARED.JAYVEE_AbilityMenu_Destroy)
-	JV_SHARED.JAYVEE_AbilityMenu_Destroy = nil
+if shared.JAYVEE_AbilityMenu_Destroy then
+	pcall(shared.JAYVEE_AbilityMenu_Destroy)
+	shared.JAYVEE_AbilityMenu_Destroy = nil
 end
 do
 	local old = playerGui:FindFirstChild("AbilityMenu_JAYVEE")
@@ -184,7 +161,6 @@ local Settings = {
 	DodgeAnimation = "Side Burst", -- "Side Burst" / "Backstep" / "Blink"
 	PerfectDodgeWindow = 0.30,     -- reaction window (re-trigger delay)
 	DodgeActivity = "High",        -- Low / Normal / High / Max
-	AdaptiveDodge = true,            -- gets faster/more defensive as HP falls
 	WhiteAura = true,
 	Afterimage = true,
 	AuraIntensity = 1,            -- Gear 5 aura power (0.5 - 2)
@@ -192,21 +168,6 @@ local Settings = {
 	AuraLightning = true,         -- white lightning crackling around you
 	AuraBurst = true,             -- shockwave + cloud explosion when Ultra turns ON
 	DodgeCount = 0,
-
-	-- Ultra Instinct extra triggers / feedback
-	UltraHalfHPTrigger = true,
-	UltraIntroSound = true,
-	UltraIntroSoundVolume = 0.85,
-	UltraIntroSoundFile = "Intro.mp3",
-	UltraIntroSoundId = "", -- Optional Roblox audio asset ID for Studio/normal Roblox.
-	UltraOutroSound = true,
-	UltraOutroSoundVolume = 0.85,
-	UltraOutroSoundFile = "Outro.mp3",
-	UltraOutroSoundId = "", -- Optional Roblox audio asset ID for Studio/normal Roblox.
-	DeltaClientSupport = true, -- Safe compatibility layer for Delta/mobile executor environments.
-	DodgeChatEnabled = true,
-	DodgeChatEvery = 5,
-	DodgeChatCooldown = 2.5,
 
 	-- ESP
 	ESPEnabled = false,
@@ -229,6 +190,8 @@ local Settings = {
 	BorderGlow = true,
 	DodgePopup = true,
 	ChatIntro = true,
+	AutoDodgeChat = true,
+	AutoDodgeChatEvery = 5,
 	CustomMovement = false,
 }
 
@@ -236,7 +199,7 @@ local Defaults = table.clone(Settings)
 local UI_KEYS = {
 	"ThemeIndex", "MenuScale", "UITransparency", "UISounds", "UIVolume",
 	"AnimationSpeed", "IntroAnimation", "BorderGlow", "DodgePopup",
-	"ChatIntro", "CustomMovement",
+	"ChatIntro", "AutoDodgeChat", "AutoDodgeChatEvery", "CustomMovement",
 }
 
 --==================================================
@@ -257,25 +220,20 @@ local function new(class, props, parent)
 	-- tag our own effect parts so the threat sense never reacts to them
 	if o:IsA("BasePart") then o:SetAttribute("JV_FX", true) end
 	if props then
-		for k, v in pairs(props) do
-			-- Never let one unsupported property abort the entire menu.
-			pcall(function() o[k] = v end)
-		end
+		for k, v in pairs(props) do o[k] = v end
 	end
 	-- PIXEL FONT on every text element (menu, security screen, ESP)
 	if o:IsA("TextLabel") or o:IsA("TextButton") or o:IsA("TextBox") then
-		pcall(function() o.Font = PIXEL_FONT end)
-		pcall(function() o.TextSize = math.floor(o.TextSize * PIXEL_TEXT_BOOST + 0.5) end)
+		o.Font = PIXEL_FONT
+		o.TextSize = math.floor(o.TextSize * PIXEL_TEXT_BOOST + 0.5)
 	end
 	if parent then
 		if o:IsA("GuiObject") and not (props and props.LayoutOrder) then
-			pcall(function()
-				local n = (parent:GetAttribute("_n") or 0) + 1
-				parent:SetAttribute("_n", n)
-				o.LayoutOrder = n
-			end)
+			local n = (parent:GetAttribute("_n") or 0) + 1
+			parent:SetAttribute("_n", n)
+			o.LayoutOrder = n
 		end
-		pcall(function() o.Parent = parent end)
+		o.Parent = parent
 	end
 	return o
 end
@@ -360,125 +318,31 @@ function U.makeSound(id, volume)
 	return s
 end
 
---==================================================
--- DELTA / EXECUTOR COMPATIBILITY + ULTRA AUDIO
---==================================================
--- Delta and other mobile clients can expose different local-asset helpers.
--- We probe them safely so a missing helper never breaks the whole script.
-local ExecutorName = "Unknown"
-if Settings.DeltaClientSupport then
-	pcall(function()
-		if type(identifyexecutor) == "function" then
-			local a, b = identifyexecutor()
-			ExecutorName = tostring(a or b or "Unknown")
-		end
-	end)
-end
-
-local function resolveLocalAsset(fileName)
-		if not Settings.DeltaClientSupport or not fileName or fileName == "" then return nil end
-
-	local candidates = {
-		function() return type(getcustomasset) == "function" and getcustomasset(fileName) or nil end,
-		function() return type(getsynasset) == "function" and getsynasset(fileName) or nil end,
-	}
-	for _, getter in ipairs(candidates) do
-		local ok, id = pcall(getter)
-		if ok and type(id) == "string" and id ~= "" then
-			return id
-		end
+-- Delta/executor local audio. The user places these files in the executor workspace.
+function U.makeLocalSound(fileName, volume)
+	local getter
+	pcall(function() getter = getcustomasset end)
+	if type(getter) ~= "function" then pcall(function() getter = getsynasset end) end
+	if type(getter) ~= "function" then pcall(function() getter = getasset end) end
+	if type(getter) ~= "function" then return nil end
+	local ok, asset = pcall(getter, fileName)
+	if not ok or not asset then
+		ok, asset = pcall(getter, "workspace/" .. fileName)
 	end
-	return nil
-end
-
-local function resolveAudioId(enabled, fileName, assetId)
-	if not enabled then return nil end
-
-	local localId = resolveLocalAsset(fileName)
-	if localId then return localId end
-
-	assetId = tostring(assetId or "")
-	if assetId ~= "" then
-		if assetId:match("^rbxassetid://") then return assetId end
-		return "rbxassetid://" .. assetId
-	end
-	return nil
-end
-
-local function makeUltraAudio(name, enabled, fileName, assetId, volume)
-	local id = resolveAudioId(enabled, fileName, assetId)
-	if not id then return nil end
-
+	if not ok or not asset then return nil end
 	local s = Instance.new("Sound")
-	s.Name = name
-	s.SoundId = id
-	s.Volume = math.clamp(tonumber(volume) or 0.85, 0, 10)
+	s.Name = "JAYVEE_" .. fileName
+	s.SoundId = tostring(asset)
+	s.Volume = volume or 0.8
 	s.Parent = SoundService
 	table.insert(sounds, s)
-
-	-- Do not call ContentProvider:PreloadAsync here. Some mobile/executor
-	-- clients can wait indefinitely on custom/local assets, which used to
-	-- leave the whole JAYVEE startup screen stuck on "loading". Roblox
-	-- will stream the Sound when Play() is called.
 	return s
 end
 
-local ultraIntroSound
-local ultraOutroSound
-
-local function setupUltraAudio()
-	if ultraIntroSound then
-		pcall(function() ultraIntroSound:Stop() end)
-		pcall(function() ultraIntroSound:Destroy() end)
-		ultraIntroSound = nil
-	end
-	if ultraOutroSound then
-		pcall(function() ultraOutroSound:Stop() end)
-		pcall(function() ultraOutroSound:Destroy() end)
-		ultraOutroSound = nil
-	end
-	ultraIntroSound = makeUltraAudio(
-		"JAYVEE_UltraInstinctIntro",
-		Settings.UltraIntroSound,
-		Settings.UltraIntroSoundFile,
-		Settings.UltraIntroSoundId,
-		Settings.UltraIntroSoundVolume
-	)
-	ultraOutroSound = makeUltraAudio(
-		"JAYVEE_UltraInstinctOutro",
-		Settings.UltraOutroSound,
-		Settings.UltraOutroSoundFile,
-		Settings.UltraOutroSoundId,
-		Settings.UltraOutroSoundVolume
-	)
-end
-
-local function playUltraIntroSound()
-	if not Settings.UltraIntroSound or not ultraIntroSound then return end
-	pcall(function()
-		if ultraOutroSound then ultraOutroSound:Stop() end
-		ultraIntroSound:Stop()
-		ultraIntroSound.TimePosition = 0
-		ultraIntroSound.Volume = math.clamp(tonumber(Settings.UltraIntroSoundVolume) or 0.85, 0, 10)
-		ultraIntroSound:Play()
-	end)
-end
-
-local function playUltraOutroSound()
-	if not Settings.UltraOutroSound or not ultraOutroSound then return end
-	pcall(function()
-		if ultraIntroSound then ultraIntroSound:Stop() end
-		ultraOutroSound:Stop()
-		ultraOutroSound.TimePosition = 0
-		ultraOutroSound.Volume = math.clamp(tonumber(Settings.UltraOutroSoundVolume) or 0.85, 0, 10)
-		ultraOutroSound:Play()
-	end)
-end
-
-pcall(setupUltraAudio)
-
--- Sound keys used by play(): click, toggleOn, toggleOff, open, close, stop, error, success, type
+-- Sound keys used by play(): click, toggleOn, toggleOff, open, close, stop, error, success, type: click, toggleOn, toggleOff, open, close, stop, error, success, type
 local clickSound, openSound, stopSound = "click", "open", "stop"
+local introSound = U.makeLocalSound("Intro.mp3", 0.9)
+local outroSound = U.makeLocalSound("Outro.mp3", 0.9)
 
 local dodgeSounds = {}
 for _, id in ipairs({87566211283329, 81857580097150, 129561737395908, 122312400582724, 136080815136211}) do
@@ -522,9 +386,7 @@ local function pixelBlip(speed)
 	Debris:AddItem(s, 1.5)
 end
 
--- Audio probing is intentionally not done during startup.
--- PreloadAsync can hang on some mobile/executor clients. The built-in
--- source remains the default; UI sound failures are handled by pcall.
+-- No startup ContentProvider:PreloadAsync: audio is loaded lazily by Roblox/Delta.
 
 function U.play(key)
 	if not Settings.UISounds then return end
@@ -605,10 +467,8 @@ local gui = new("ScreenGui", {
 -- CORE STATE
 --==================================================
 local character, humanoid, root, lastHealth, damageConnection
-local halfHPTriggered = false
-local dodgeChatLastAt = 0
-local dodgeChatRecent = {}
-local lastDamageAmount = 0
+local halfHealthTriggered = false
+local setUltra
 local dodging, following, followTarget, followToken = false, false, nil, 0
 local dodgeToken = 0
 local cameraLocked, cameraTarget, bodyLocked = false, nil, false
@@ -1382,7 +1242,29 @@ function U.cancelCameraLock()
 	cameraTarget = nil
 end
 
-pcall(function() RunService:BindToRenderStep("JAYVEE_CameraLock", Enum.RenderPriority.Camera.Value + 1, function()
+-- Manual camera input cancels lock. Script-driven CFrame changes do not fire these input events.
+bind(UIS.InputChanged, function(input)
+	if not cameraLocked then return end
+	local t = input.UserInputType
+	if t == Enum.UserInputType.MouseMovement
+		or t == Enum.UserInputType.Touch
+		or t == Enum.UserInputType.Gamepad1 then
+		if t == Enum.UserInputType.Gamepad1 then
+			local pos = input.Position
+			if math.abs(pos.X) < 0.08 and math.abs(pos.Y) < 0.08 then return end
+		end
+		U.cancelCameraLock()
+	end
+end)
+
+bind(UIS.InputBegan, function(input)
+	if not cameraLocked then return end
+	if input.UserInputType == Enum.UserInputType.MouseButton2 then
+		U.cancelCameraLock()
+	end
+end)
+
+RunService:BindToRenderStep("JAYVEE_CameraLock", Enum.RenderPriority.Camera.Value + 1, function()
 	local target = cameraTarget or followTarget
 	if not (cameraLocked and target) then
 		if bodyLocked then
@@ -1418,144 +1300,22 @@ pcall(function() RunService:BindToRenderStep("JAYVEE_CameraLock", Enum.RenderPri
 			root.CFrame = CFrame.lookAt(root.Position, flat)
 		end
 	end
-end) end)
+end)
 
 --==================================================
 -- ULTRA ON/OFF + CHAT INTRO (intro only, no outro)
 --==================================================
-function U.ultraChatIntro()
-	local text = "ULTRA INSTINCT!!!"
-	local sent = false
-
-	pcall(function()
-		local TCS = game:GetService("TextChatService")
-		if TCS.ChatVersion == Enum.ChatVersion.TextChatService then
-			local channels = TCS:FindFirstChild("TextChannels")
-			local ch = channels and channels:FindFirstChild("RBXGeneral")
-			if ch then
-				ch:SendAsync(text)
-				sent = true
-			end
-		end
-	end)
-	if sent then return end
-
-	pcall(function()
-		local RS = game:GetService("ReplicatedStorage")
-		local events = RS:FindFirstChild("DefaultChatSystemChatEvents")
-		local say = events and events:FindFirstChild("SayMessageRequest")
-		if say then
-			say:FireServer(text, "All")
-			sent = true
-		end
-	end)
-	if sent then return end
-
-	local head = character and character:FindFirstChild("Head")
-	if not head then return end
-	local bb = new("BillboardGui", {
-		Size = UDim2.fromOffset(220, 40), StudsOffset = Vector3.new(0, 3, 0),
-		AlwaysOnTop = true, Adornee = head,
-	}, head)
-	new("TextLabel", {
-		Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = text,
-		Font = Enum.Font.GothamBlack, TextScaled = true, TextColor3 = Color3.new(1, 1, 1),
-		TextStrokeTransparency = 0.3,
-	}, bb)
-	Debris:AddItem(bb, 3)
-end
-
--- Dodge reactions: one message every N successful dodges.
--- The tone changes with current HP and the damage just received:
--- high HP = calm/confident, mid HP = alert, low HP = intense,
--- critical HP = fierce/survival-focused. Every line has exactly one emoji.
-local DODGE_CHAT_LINES = {
-	calm = {
-		"Your attack was already behind me. 🌌",
-		"I can see your movements before they happen. 👁️",
-		"Too slow... my instincts are already ahead of you. ⚡",
-		"You missed. My body moved before I even thought. 🪽",
-		"Keep trying. I have no reason to rush. 😌",
-	},
-	alert = {
-		"That one was close... now I am paying attention. 👀",
-		"You are getting faster, but so am I. 🔥",
-		"I felt that one... you will not get the next chance. 🥶",
-		"Your attacks are changing. So are my instincts. ⚔️",
-		"Closer than before... but still not enough. 😏",
-	},
-	intense = {
-		"You actually hurt me... now my instincts are awake. ⚡",
-		"My body is moving faster because I refuse to fall. 🐉",
-		"Every wound makes the next attack easier to read. 🔥",
-		"Do not mistake my damage for weakness. 😈",
-		"I am running out of room for mistakes... so I will make none. 🥋",
-	},
-	critical = {
-		"My body is breaking... but my instinct will not. 🩶",
-		"One more hit and I fall... so you will not land it. 👁️",
-		"This pain is not stopping me. It is sharpening me. ⚔️",
-		"I have nothing left to waste. Come at me. 😤",
-		"If this is the end... then my instincts will decide it. 🌑",
-	},
-}
-
-local function dodgeChatAlreadyUsed(key)
-	for _, used in ipairs(dodgeChatRecent) do
-		if used == key then return true end
-	end
-	return false
-end
-
-local function getDodgeEmotionTier()
-	if not humanoid or humanoid.MaxHealth <= 0 then return "calm" end
-	local hp = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
-	if hp <= 0.25 then return "critical" end
-	if hp <= 0.50 then return "intense" end
-	if hp <= 0.75 then return "alert" end
-	return "calm"
-end
-
-local function pickDodgeChatLine()
-	local tier = getDodgeEmotionTier()
-	local pool = DODGE_CHAT_LINES[tier]
-	local available = {}
-	for i = 1, #pool do
-		local key = tier .. ":" .. i
-		if not dodgeChatAlreadyUsed(key) then
-			table.insert(available, {key = key, text = pool[i]})
-		end
-	end
-	if #available == 0 then
-		-- Clear only this emotion tier, so a change in HP can still change the tone.
-		local kept = {}
-		for _, used in ipairs(dodgeChatRecent) do
-			if not tostring(used):match("^" .. tier .. ":") then table.insert(kept, used) end
-		end
-		dodgeChatRecent = kept
-		for i = 1, #pool do table.insert(available, {key = tier .. ":" .. i, text = pool[i]}) end
-	end
-	local chosen = available[math.random(1, #available)]
-	table.insert(dodgeChatRecent, chosen.key)
-	if #dodgeChatRecent > 6 then table.remove(dodgeChatRecent, 1) end
-	return chosen.text
-end
-
-local function sendChatLine(text)
+function U.sendChat(text)
 	local sent = false
 	pcall(function()
 		local TCS = game:GetService("TextChatService")
 		if TCS.ChatVersion == Enum.ChatVersion.TextChatService then
 			local channels = TCS:FindFirstChild("TextChannels")
 			local ch = channels and (channels:FindFirstChild("RBXGeneral") or channels:FindFirstChildWhichIsA("TextChannel"))
-			if ch and ch.Parent then
-				ch:SendAsync(tostring(text))
-				sent = true
-			end
+			if ch then ch:SendAsync(text); sent = true end
 		end
 	end)
 	if sent then return true end
-
 	pcall(function()
 		local RS = game:GetService("ReplicatedStorage")
 		local events = RS:FindFirstChild("DefaultChatSystemChatEvents")
@@ -1565,16 +1325,47 @@ local function sendChatLine(text)
 	return sent
 end
 
-local function maybeDodgeChat()
-	if not Settings.DodgeChatEnabled then return end
-	local every = math.max(5, math.floor(tonumber(Settings.DodgeChatEvery) or 5))
+function U.ultraChatIntro()
+	U.sendChat("ULTRA INSTINCT!!!")
+end
+
+local DODGE_CHAT = {
+	CALM = {
+		"Your eyes saw the attack. My body already answered. ⚡",
+		"You moved with intent. I moved without thought. 🥶",
+		"The attack was decided before it reached me. 👁️",
+		"I do not chase the opening. I simply appear beyond it. 🌌",
+	},
+	ALERT = {
+		"Now I can feel every move before it happens. ⚡",
+		"Your rhythm is getting easier to read. 🐉",
+		"The closer you push me, the faster instinct takes over. 👁️",
+		"I heard the attack before your hand even moved. 🥶",
+	},
+	INTENSE = {
+		"Every second hurts. Every instinct sharpens. ⚡",
+		"You pushed me this far. Now survive the response. 🔥",
+		"Pain is not slowing me down. It is removing hesitation. 🩶",
+		"My body has stopped asking permission to move. 👁️",
+	},
+	CRITICAL = {
+		"One more hit will not be enough to catch me. ⚡",
+		"At the edge of defeat, instinct becomes absolute. 🥶",
+		"This body is wounded. The instinct is not. 🔥",
+		"You finally pushed me to my limit. Now watch me disappear. 🌌",
+	},
+}
+local lastDodgeChatIndex = 0
+function U.autoDodgeChat()
+	if not Settings.AutoDodgeChat then return end
+	local every = math.max(1, math.floor(Settings.AutoDodgeChatEvery or 5))
 	if Settings.DodgeCount < every or Settings.DodgeCount % every ~= 0 then return end
-	local now = os.clock()
-	if now - dodgeChatLastAt < math.max(0, tonumber(Settings.DodgeChatCooldown) or 2.5) then return end
-	local text = pickDodgeChatLine()
-	if sendChatLine(text) then
-		dodgeChatLastAt = now
-	end
+	local profile = U.dodgeProfile()
+	local pool = DODGE_CHAT[profile.tier] or DODGE_CHAT.CALM
+	local idx = math.random(1, #pool)
+	if #pool > 1 and idx == lastDodgeChatIndex then idx = (idx % #pool) + 1 end
+	lastDodgeChatIndex = idx
+	U.sendChat(pool[idx])
 end
 
 --==================================================
@@ -1647,7 +1438,7 @@ local function ultraCinematic(enabled)
 	end
 end
 
-local function setUltra(on)
+setUltra = function(on)
 	on = on == true
 	if Settings.UltraActive == on then
 		if not on then
@@ -1668,12 +1459,11 @@ local function setUltra(on)
 	Settings.UltraActive = on
 	if on then
 		ultraCinematic(true)
-		playUltraIntroSound()
 		U.play("toggleOn")
+		if introSound then pcall(function() introSound:Play() end) end
 		if Settings.ChatIntro then U.ultraChatIntro() end
 		U.auraBurst()
 	else
-		playUltraOutroSound()
 		-- HARD OFF: invalidate any running dodge/follow task immediately.
 		dodgeToken += 1
 		dodging = false
@@ -1686,6 +1476,7 @@ local function setUltra(on)
 		nextRanged = 0
 		ultraCinematic(false)
 		U.play("toggleOff")
+		if outroSound then pcall(function() outroSound:Play() end) end
 		U.cancelCameraLock()
 		if humanoid then pcall(function() humanoid.AutoRotate = true end) end
 	end
@@ -1744,11 +1535,27 @@ local ACTIVITY = {
 	Max = {dur = 0.08, lock = 0.02},
 }
 
+-- Adaptive defense: the lower your HP, the faster and farther Ultra Instinct reacts.
+function U.dodgeProfile()
+	local hp = humanoid and humanoid.Health or 100
+	local maxHp = humanoid and humanoid.MaxHealth or 100
+	local pct = math.clamp(hp / math.max(maxHp, 1), 0, 1)
+	if pct <= 0.25 then
+		return {tier = "CRITICAL", durMul = 0.58, lockMul = 0.35, distMul = 1.65, followMul = 1.15}
+	elseif pct <= 0.50 then
+		return {tier = "INTENSE", durMul = 0.72, lockMul = 0.5, distMul = 1.42, followMul = 1.08}
+	elseif pct <= 0.75 then
+		return {tier = "ALERT", durMul = 0.88, lockMul = 0.72, distMul = 1.18, followMul = 1.03}
+	end
+	return {tier = "CALM", durMul = 1, lockMul = 1, distMul = 1, followMul = 1}
+end
+
 -- threat = {dir = Vector3, dist = number, away = bool}
 --   away = false : sidestep perpendicular to dir (projectiles / beams)
 --   away = true  : move along dir (explosions / hitboxes around you)
-function U.dodgeDestination(targetRoot, threat, adaptive)
+function U.dodgeDestination(targetRoot, threat, profile)
 	local origin = root.Position
+	profile = profile or U.dodgeProfile()
 
 	local ignore = {character, ringFolder}
 	if targetRoot and targetRoot.Parent then table.insert(ignore, targetRoot.Parent) end
@@ -1779,7 +1586,7 @@ function U.dodgeDestination(targetRoot, threat, adaptive)
 		end
 		if d.Magnitude <= 0.05 then d = Vector3.new(0, 0, -1) end
 		d = d.Unit
-		local dist = threat.dist or 8
+		local dist = (threat.dist or 8) * profile.distMul
 		if threat.away then
 			return clip(origin + d * dist)
 		end
@@ -1799,53 +1606,23 @@ function U.dodgeDestination(targetRoot, threat, adaptive)
 		local look = Vector3.new(targetRoot.CFrame.LookVector.X, 0, targetRoot.CFrame.LookVector.Z)
 		look = look.Magnitude > 0.05 and look.Unit or Vector3.new(0, 0, -1)
 		local right = Vector3.new(-look.Z, 0, look.X)
-		local dist = math.max(Settings.FollowDistance, 3.5)
+		local dist = math.max(Settings.FollowDistance, 3.5) * profile.distMul
 		local mode = Settings.DodgeAnimation
 		if mode == "Backstep" then
 			local away = Vector3.new(origin.X - tp.X, 0, origin.Z - tp.Z)
 			away = away.Magnitude > 0.05 and away.Unit or -look
-			dest = origin + away * (8 * ((adaptive and adaptive.backstep) or 1))
+			dest = origin + away * 8
 		elseif mode == "Blink" then
-			dest = tp - look * dist * ((adaptive and adaptive.sideDistance) or 1)
+			dest = tp - look * dist
 		else
 			local side = ((origin - tp):Dot(right) >= 0) and -1 or 1
-		local mult = (adaptive and adaptive.sideDistance) or 1
-		dest = tp + right * side * dist * mult - look * (dist * 0.4 * mult)
+			dest = tp + right * side * dist - look * (dist * 0.4)
 		end
 	else
 		local side = math.random(1, 2) == 1 and 1 or -1
-		dest = origin + root.CFrame.RightVector * side * (8 * ((adaptive and adaptive.sideDistance) or 1))
+		dest = origin + root.CFrame.RightVector * side * 8
 	end
 	return clip(dest)
-end
-
--- Adaptive dodge: as HP falls, shorten reaction/lock time and favor safer evasive movement.
--- HP tiers: >75% calm, 50-75% alert, 25-50% aggressive, <=25% emergency.
-local function getAdaptiveDodge()
-	local base = ACTIVITY[Settings.DodgeActivity] or ACTIVITY.High
-	if not Settings.AdaptiveDodge or not humanoid or humanoid.MaxHealth <= 0 then
-		return {dur = base.dur, lock = base.lock, sideDistance = 1, backstep = 1}
-	end
-	local hp = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
-	local tier = 1
-	if hp <= 0.25 then
-		tier = 4
-	elseif hp <= 0.50 then
-		tier = 3
-	elseif hp <= 0.75 then
-		tier = 2
-	end
-	local speedMul = ({1.00, 0.88, 0.76, 0.64})[tier]
-	local lockMul = ({1.00, 0.82, 0.64, 0.45})[tier]
-	local distanceMul = ({1.00, 1.08, 1.18, 1.30})[tier]
-	return {
-		dur = math.max(0.045, base.dur * speedMul),
-		lock = math.max(0.008, base.lock * lockMul),
-		sideDistance = distanceMul,
-		backstep = distanceMul,
-		tier = tier,
-		hp = hp,
-	}
 end
 
 local function runDodge(target, threat)
@@ -1867,13 +1644,15 @@ local function runDodge(target, threat)
 	U.flash()
 	Settings.DodgeCount += 1
 	U.refreshStats()
+	U.autoDodgeChat()
 	U.showDodgeIndicator()
-	maybeDodgeChat()
 	if targetRoot then U.lockCameraToTarget(target) end
 
-	local act = getAdaptiveDodge()
+	local baseAct = ACTIVITY[Settings.DodgeActivity] or ACTIVITY.High
+	local profile = U.dodgeProfile()
+	local act = {dur = baseAct.dur * profile.durMul, lock = baseAct.lock * profile.lockMul}
 	local startPos = root.Position
-	local destination = U.dodgeDestination(targetRoot, threat, act)
+	local destination = U.dodgeDestination(targetRoot, threat, profile)
 	local startCF = root.CFrame
 	local endCF
 	if targetRoot then
@@ -2237,9 +2016,7 @@ local function senseStep()
 
 	local chosen = hitTarget or attacker or ranged or U.getEnemyInsideRadius() or nearby[1]
 	local w = Settings.PerfectDodgeWindow
-	local hpRatio = (humanoid and humanoid.MaxHealth > 0) and math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1) or 1
-	local adaptiveCdMul = Settings.AdaptiveDodge and (hpRatio <= 0.25 and 0.45 or hpRatio <= 0.50 and 0.62 or hpRatio <= 0.75 and 0.82 or 1) or 1
-	senseCooldown = now + w * adaptiveCdMul * (threat and 0.4 or attack and 0.5 or contact and 0.75 or ranged and 0.8 or 1.2)
+	senseCooldown = now + w * (threat and 0.4 or attack and 0.5 or contact and 0.75 or ranged and 0.8 or 1.2)
 	if chosen then U.lockCameraToTarget(chosen) end
 	dodge(chosen, (not hitTarget and not attack and not contact) and threat or nil)
 end
@@ -2266,29 +2043,24 @@ function U.hookDamage()
 	if damageConnection then damageConnection:Disconnect(); damageConnection = nil end
 	if not humanoid then return end
 	lastHealth = humanoid.Health
+	halfHealthTriggered = false
 	damageConnection = humanoid.HealthChanged:Connect(function(newHealth)
-		local damageTaken = (lastHealth and newHealth < lastHealth) and (lastHealth - newHealth) or 0
-		if damageTaken > 0 then lastDamageAmount = damageTaken end
-		-- Alternate Ultra Instinct trigger: crossing from above 50% HP to 50% or below.
-		-- It deliberately checks UltraActive == false, so it cannot retrigger while Ultra is ON.
-		if Settings.UltraHalfHPTrigger and Settings.Enabled and not Settings.UltraActive
-			and not halfHPTriggered and humanoid.MaxHealth > 0
-			and lastHealth and lastHealth > humanoid.MaxHealth * 0.5
-			and newHealth <= humanoid.MaxHealth * 0.5 and newHealth > 0 then
-			halfHPTriggered = true
+		local oldHealth = lastHealth
+		local maxHealth = math.max(humanoid.MaxHealth, 1)
+		local crossedHalf = oldHealth and oldHealth > maxHealth * 0.5 and newHealth <= maxHealth * 0.5
+		if crossedHalf and not halfHealthTriggered and not Settings.UltraActive and Settings.Enabled then
+			halfHealthTriggered = true
 			task.defer(function()
-				if Settings.Enabled and not Settings.UltraActive and humanoid and humanoid.Health > 0 then
+				if humanoid and humanoid.Health > 0 and not Settings.UltraActive then
 					setUltra(true)
 				end
 			end)
 		end
-
-		if lastHealth and newHealth < lastHealth - 0.5
+		if oldHealth and newHealth < oldHealth - 0.5
 			and Settings.Enabled and Settings.AutoDodge and Settings.UltraActive then
 			local st = humanoid:GetState()
 			local fallDamage = (st == Enum.HumanoidStateType.Freefall or st == Enum.HumanoidStateType.Landed)
 			if not fallDamage then
-				-- damage from anything (even unseen sources): dodge again right away
 				local enemyInside = U.getEnemyInsideRadius()
 				if enemyInside then U.lockCameraToTarget(enemyInside) end
 				senseCooldown = 0
@@ -2380,9 +2152,8 @@ local function setupCharacter(char)
 	local hrp = char:WaitForChild("HumanoidRootPart", 10)
 	if not hum or not hrp then return end
 	character, humanoid, root = char, hum, hrp
-	halfHPTriggered = false
-	lastDamageAmount = 0
 	dodging, following, followTarget = false, false, nil
+	halfHealthTriggered = false
 	followToken += 1
 	U.cancelCameraLock()
 	U.hookCharacterTools(char)
@@ -3219,11 +2990,12 @@ do
 
 	local about = U.makeCard(p, "ABOUT THE SCRIPT", "What it does")
 	U.infoText(about, function()
-		return "- Ultra Instinct with manual ON/OFF and a chat intro when activated.\n"
+		return "- Ultra Instinct with manual ON/OFF, automatic 50% HP activation, and chat intro when activated.\n"
 			.. "- Dodges EVERYTHING: melee, projectiles, beams, hitboxes, explosions, ranged abilities.\n"
 			.. "- Purple detection circle with live radius control; enemies inside turn red.\n"
 			.. "- Follow system that keeps you glued to the enemy after each dodge.\n"
-			.. "- Dodge counter with reset, plus Player ESP (names, health, distance, boxes).\n"
+			.. "- Adaptive dodging gets faster and more defensive as HP falls, plus anime combat chat every 5 dodges.\n" ..
+			"- Dodge counter with reset, plus Player ESP (names, health, distance, boxes).\n"
 			.. "- Themes, scale, sounds and animation settings. Mobile friendly."
 	end)
 
@@ -3418,6 +3190,7 @@ do
 	U.stepperRow(c3, "VOLUME", function() return string.format("%d%%", math.floor(Settings.UIVolume * 100 + 0.5)) end,
 		U.adjust("UIVolume", 0.05, 0, 1))
 	U.toggleRow(c3, "CHAT INTRO (ULTRA)", function() return Settings.ChatIntro end, function(v) Settings.ChatIntro = v end)
+	U.toggleRow(c3, "AUTO DODGE CHAT", function() return Settings.AutoDodgeChat end, function(v) Settings.AutoDodgeChat = v end)
 
 	local c4 = U.makeCard(p, "CHARACTER", nil)
 	U.toggleRow(c4, "CUSTOM WALK / RUN ANIMATION", function() return Settings.CustomMovement end, function(v)
@@ -3536,9 +3309,9 @@ unloadFn = function()
 		local statusGui = playerGui:FindFirstChild("JAYVEE_Status")
 		if statusGui then statusGui:Destroy() end
 	end)
-	if JV_SHARED.JAYVEE_AbilityMenu_Destroy == unloadFn then JV_SHARED.JAYVEE_AbilityMenu_Destroy = nil end
+	if shared.JAYVEE_AbilityMenu_Destroy == unloadFn then shared.JAYVEE_AbilityMenu_Destroy = nil end
 end
-JV_SHARED.JAYVEE_AbilityMenu_Destroy = unloadFn
+shared.JAYVEE_AbilityMenu_Destroy = unloadFn
 
 --==================================================
 -- UNLOCK FLOW:  Security -> Password -> Loading -> Menu
