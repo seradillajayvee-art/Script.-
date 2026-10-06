@@ -47,6 +47,7 @@ local Settings = {
 	MinRadius = 3,
 	MaxRadius = 50,
 	RadiusStep = 1,
+	ContactTriggerDistance = 3.2,
 	Ability = "Ultra Instinct",
 	DodgeChance = 100,
 	DodgeAnimation = "Side Burst",
@@ -207,11 +208,166 @@ gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.Parent = player:WaitForChild("PlayerGui")
 
+local security
+local main
+local minimized
+local secScale
+
+--==================================================
+-- ULTRA INSTINCT LOADING SCREEN
+--==================================================
+
+local loading = Instance.new("Frame")
+loading.Name = "UltraInstinctLoading"
+loading.Size = UDim2.fromScale(1, 1)
+loading.BackgroundColor3 = Color3.fromRGB(5, 5, 9)
+loading.ZIndex = 1000
+loading.Parent = gui
+
+local loadGlow = Instance.new("Frame")
+loadGlow.Size = UDim2.fromOffset(270, 270)
+loadGlow.Position = UDim2.new(0.5, -135, 0.42, -135)
+loadGlow.BackgroundColor3 = Color3.fromRGB(104, 72, 158)
+loadGlow.BackgroundTransparency = 0.86
+loadGlow.ZIndex = 1001
+loadGlow.Parent = loading
+corner(loadGlow, 135)
+
+local loadRing = Instance.new("Frame")
+loadRing.Size = UDim2.fromOffset(170, 170)
+loadRing.Position = UDim2.new(0.5, -85, 0.42, -85)
+loadRing.BackgroundTransparency = 1
+loadRing.ZIndex = 1002
+loadRing.Parent = loading
+local loadStroke = addStroke(loadRing, 0.05)
+loadStroke.Thickness = 3
+
+local loadCore = Instance.new("Frame")
+loadCore.Size = UDim2.fromOffset(112, 112)
+loadCore.Position = UDim2.new(0.5, -56, 0.42, -56)
+loadCore.BackgroundColor3 = Color3.fromRGB(16, 14, 23)
+loadCore.BackgroundTransparency = 0.08
+loadCore.ZIndex = 1003
+loadCore.Parent = loading
+corner(loadCore, 56)
+local coreStroke = addStroke(loadCore, 0.15)
+coreStroke.Thickness = 2
+
+local loadTitle = Instance.new("TextLabel")
+loadTitle.BackgroundTransparency = 1
+loadTitle.Size = UDim2.new(1, -30, 0, 34)
+loadTitle.Position = UDim2.new(0, 15, 0.42, 62)
+loadTitle.Text = "ULTRA INSTINCT"
+loadTitle.Font = Enum.Font.GothamBlack
+loadTitle.TextSize = 25
+loadTitle.TextColor3 = Color3.new(1, 1, 1)
+loadTitle.ZIndex = 1004
+loadTitle.Parent = loading
+
+local loadSub = Instance.new("TextLabel")
+loadSub.BackgroundTransparency = 1
+loadSub.Size = UDim2.new(1, -30, 0, 22)
+loadSub.Position = UDim2.new(0, 15, 0.42, 99)
+loadSub.Text = "JAYVEE • ABILITY CORE"
+loadSub.Font = Enum.Font.GothamBold
+loadSub.TextSize = 10
+loadSub.TextColor3 = Color3.fromRGB(170, 165, 190)
+loadSub.ZIndex = 1004
+loadSub.Parent = loading
+
+local loadStatus = Instance.new("TextLabel")
+loadStatus.BackgroundTransparency = 1
+loadStatus.Size = UDim2.new(1, -60, 0, 24)
+loadStatus.Position = UDim2.new(0, 30, 0.72, 0)
+loadStatus.Text = "INITIALIZING..."
+loadStatus.Font = Enum.Font.GothamBold
+loadStatus.TextSize = 11
+loadStatus.TextColor3 = Color3.fromRGB(210, 205, 225)
+loadStatus.ZIndex = 1004
+loadStatus.Parent = loading
+
+local loadBarBack = Instance.new("Frame")
+loadBarBack.Size = UDim2.new(0, 330, 0, 6)
+loadBarBack.Position = UDim2.new(0.5, -165, 0.77, 0)
+loadBarBack.BackgroundColor3 = Color3.fromRGB(32, 29, 42)
+loadBarBack.ZIndex = 1004
+loadBarBack.Parent = loading
+corner(loadBarBack, 6)
+
+local loadBar = Instance.new("Frame")
+loadBar.Size = UDim2.new(0, 0, 1, 0)
+loadBar.BackgroundColor3 = Color3.fromRGB(150, 105, 225)
+loadBar.ZIndex = 1005
+loadBar.Parent = loadBarBack
+corner(loadBar, 6)
+
+local loadPercent = Instance.new("TextLabel")
+loadPercent.BackgroundTransparency = 1
+loadPercent.Size = UDim2.fromOffset(100, 22)
+loadPercent.Position = UDim2.new(0.5, -50, 0.80, 0)
+loadPercent.Text = "0%"
+loadPercent.Font = Enum.Font.GothamBlack
+loadPercent.TextSize = 10
+loadPercent.TextColor3 = Color3.fromRGB(190, 185, 210)
+loadPercent.ZIndex = 1004
+loadPercent.Parent = loading
+
+local loadingStatuses = {
+    "INITIALIZING ULTRA INSTINCT...",
+    "SYNCING MOVEMENT CORE...",
+    "LOADING DODGE SENSE...",
+    "CALIBRATING FOLLOW SYSTEM...",
+    "ARMING SECURITY LAYER...",
+    "ABILITY CORE READY."
+}
+
+local function runLoadingScreen()
+    security.Visible = false
+    loading.Visible = true
+    main.Visible = false
+    minimized.Visible = false
+
+    task.spawn(function()
+        while loading.Parent and loading.Visible do
+            loadRing.Rotation += 1.2
+            local pulse = 270 + math.sin(os.clock() * 3) * 10
+            loadGlow.Size = UDim2.fromOffset(pulse, pulse)
+            loadGlow.Position = UDim2.new(0.5, -pulse/2, 0.42, -pulse/2)
+            task.wait()
+        end
+    end)
+
+    for i, status in ipairs(loadingStatuses) do
+        loadStatus.Text = status
+        local progress = i / #loadingStatuses
+        tween(loadBar, 0.38, {Size = UDim2.new(progress, 0, 1, 0)}, Enum.EasingStyle.Quint):Play()
+        loadPercent.Text = tostring(math.floor(progress * 100)) .. "%"
+        task.wait(0.38)
+    end
+
+    task.wait(0.15)
+
+    for _, obj in ipairs({loading, loadGlow, loadCore, loadBarBack}) do
+        tween(obj, 0.55, {BackgroundTransparency = 1}, Enum.EasingStyle.Quint):Play()
+    end
+    for _, obj in ipairs({loadTitle, loadSub, loadStatus, loadPercent}) do
+        tween(obj, 0.55, {TextTransparency = 1}, Enum.EasingStyle.Quint):Play()
+    end
+    tween(loadStroke, 0.55, {Transparency = 1}, Enum.EasingStyle.Quint):Play()
+    tween(coreStroke, 0.55, {Transparency = 1}, Enum.EasingStyle.Quint):Play()
+    task.wait(0.58)
+
+    loading.Visible = false
+    security.Visible = true
+    secScale.Scale = 0.72
+    tween(secScale, 0.42, {Scale = 1}, Enum.EasingStyle.Back, Enum.EasingDirection.Out):Play()
+end
+
 --==================================================
 -- SECURITY
 --==================================================
 
-local security = Instance.new("Frame")
+security = Instance.new("Frame")
 security.Size = UDim2.fromOffset(410, 275)
 security.Position = UDim2.new(0.5, -205, 0.5, -138)
 security.BackgroundColor3 = Color3.fromRGB(12, 11, 17)
@@ -221,7 +377,7 @@ corner(security, 22)
 addStroke(security, 0.1)
 draggable(security)
 
-local secScale = Instance.new("UIScale")
+secScale = Instance.new("UIScale")
 secScale.Scale = 0.84
 secScale.Parent = security
 
@@ -472,7 +628,7 @@ end)
 -- =========================
 
 
-local main = Instance.new("Frame")
+main = Instance.new("Frame")
 main.Size = UDim2.fromOffset(570, 390)
 main.Position = UDim2.new(0.5, -285, 0.5, -195)
 main.BackgroundColor3 = Color3.fromRGB(11, 10, 16)
@@ -977,6 +1133,16 @@ local function refreshPower()
 	stopToggle.Text = Settings.StopEffect and "STOP EFFECT  •  ON" or "STOP EFFECT  •  OFF"
 	stopToggle.BackgroundColor3 = Settings.StopEffect and Color3.fromRGB(65,55,88) or Color3.fromRGB(55,38,43)
 end
+
+local function refreshFollowConfig()
+    followDurationText.Text = "DURATION  " .. tostring(Settings.FollowDuration) .. "s"
+    followDistanceText.Text = "DISTANCE  " .. tostring(Settings.FollowDistance)
+    followSpeedText.Text = "FOLLOW SPEED  " .. math.floor(Settings.FollowSpeed * 100)
+    followMode.Text = "MODE  •  " .. Settings.FollowMode
+    stopToggle.Text = Settings.StopEffect and "STOP EFFECT  •  ON" or "STOP EFFECT  •  OFF"
+    stopToggle.BackgroundColor3 = Settings.StopEffect and Color3.fromRGB(65,55,88) or Color3.fromRGB(55,38,43)
+end
+
 --==================================================
 -- ULTRA INSTINCT CONFIGURATION
 --==================================================
@@ -2126,9 +2292,8 @@ RunService.Heartbeat:Connect(function()
 		return
 	end
 
-	-- Ultra Instinct Sense reacts to ANY valid character/player inside the circle:
-	-- entering the radius, already standing inside it, getting close to the body,
-	-- beginning an attack, or taking damage all count as a dodge trigger.
+	-- Ultra Instinct Sense does NOT trigger just because a target is inside the radius.
+	-- A dodge is triggered by an attack start, actual damage, or very close contact.
 	local target = getEnemyInsideRadius()
 	local hitTarget = detectAnyEnemyHit()
 	if hitTarget and isValidTarget(hitTarget) then target = hitTarget end
@@ -2136,7 +2301,6 @@ RunService.Heartbeat:Connect(function()
 	local trigger = false
 	local attack = false
 	local enemyHit = hitTarget ~= nil
-	local entered = false
 	local contact = false
 	local nearest = target
 
@@ -2144,10 +2308,7 @@ RunService.Heartbeat:Connect(function()
 		local tr = getRoot(model)
 		if tr then
 			local d = (tr.Position - root.Position).Magnitude
-			local wasInside = lastTargetPositions[model] ~= nil and lastTargetPositions[model] <= Settings.Radius
-			local nowInside = d <= Settings.Radius
-			if nowInside and not wasInside then entered = true end
-			if d <= 3.2 then contact = true end
+			if d <= Settings.ContactTriggerDistance then contact = true end
 			if enemyLooksLikeAttacking(model) then
 				attack = true
 				nearest = nearest or model
@@ -2156,14 +2317,14 @@ RunService.Heartbeat:Connect(function()
 		end
 	end
 
-	if enemyHit or entered or contact or attack or #nearby > 0 then
+	if enemyHit or contact or attack then
 		trigger = true
 	end
 
 	local chosen = hitTarget or target or nearby[1]
-	if chosen and (trigger or attack or enemyHit) then
+	if chosen and trigger then
 		lockCameraToTarget(chosen)
-		senseCooldown = os.clock() + (attack and 0.16 or contact and 0.22 or entered and 0.28 or 0.38)
+		senseCooldown = os.clock() + (attack and 0.16 or contact and 0.22 or 0.38)
 		dodge()
 	end
 end)
@@ -2233,7 +2394,7 @@ end
 -- MENU ANIMATION
 --==================================================
 
-local minimized = Instance.new("TextButton")
+minimized = Instance.new("TextButton")
 minimized.Size = UDim2.fromOffset(65,65)
 minimized.Position = UDim2.new(0,18,0.5,-32)
 minimized.Text = "UI"
@@ -2302,6 +2463,40 @@ close.MouseButton1Click:Connect(minimizeMenu)
 minimized.MouseButton1Click:Connect(openMenu)
 
 --==================================================
+-- MAIN UI CLICK ANIMATIONS
+--==================================================
+
+local function addClickAnimation(button)
+    if not button:IsA("TextButton") then return end
+    if button:GetAttribute("JAYVEE_ClickFX") then return end
+    button:SetAttribute("JAYVEE_ClickFX", true)
+
+    local scale = button:FindFirstChild("ClickScale")
+    if not scale then
+        scale = Instance.new("UIScale")
+        scale.Name = "ClickScale"
+        scale.Scale = 1
+        scale.Parent = button
+    end
+
+    button.Activated:Connect(function()
+        if not button.Visible then return end
+        scale.Scale = 0.94
+        tween(scale, 0.12, {Scale = 1.06}, Enum.EasingStyle.Back, Enum.EasingDirection.Out):Play()
+        task.delay(0.12, function()
+            if scale.Parent then
+                tween(scale, 0.10, {Scale = 1}, Enum.EasingStyle.Quint, Enum.EasingDirection.Out):Play()
+            end
+        end)
+    end)
+end
+
+for _, obj in ipairs(main:GetDescendants()) do
+    addClickAnimation(obj)
+end
+main.DescendantAdded:Connect(addClickAnimation)
+
+--==================================================
 -- INITIALIZE
 --==================================================
 
@@ -2310,7 +2505,13 @@ refreshPower()
 refreshRadius()
 refreshMenuSize()
 refreshUltraConfig()
+refreshFollowConfig()
 hookDamage()
+
+security.Visible = false
+main.Visible = false
+minimized.Visible = false
+task.spawn(runLoadingScreen)
 
 player.CharacterAdded:Connect(function()
 	task.wait(0.25)
