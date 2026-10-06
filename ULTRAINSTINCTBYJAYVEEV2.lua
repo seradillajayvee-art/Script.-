@@ -395,20 +395,20 @@ local function runLoadingScreen()
         local progress = i / #loadingStatuses
         tween(loadBar, 0.38, {Size = UDim2.new(progress, 0, 1, 0)}, Enum.EasingStyle.Quint):Play()
         loadPercent.Text = tostring(math.floor(progress * 100)) .. "%"
-        task.wait(0.38)
+        task.wait(0.65)
     end
 
-    task.wait(0.15)
+    task.wait(0.35)
 
     for _, obj in ipairs({loading, loadGlow, loadCore, loadBarBack}) do
-        tween(obj, 0.55, {BackgroundTransparency = 1}, Enum.EasingStyle.Quint):Play()
+        tween(obj, 0.70, {BackgroundTransparency = 1}, Enum.EasingStyle.Quint):Play()
     end
     for _, obj in ipairs({loadTitle, loadSub, loadStatus, loadPercent}) do
-        tween(obj, 0.55, {TextTransparency = 1}, Enum.EasingStyle.Quint):Play()
+        tween(obj, 0.70, {TextTransparency = 1}, Enum.EasingStyle.Quint):Play()
     end
-    tween(loadStroke, 0.55, {Transparency = 1}, Enum.EasingStyle.Quint):Play()
-    tween(coreStroke, 0.55, {Transparency = 1}, Enum.EasingStyle.Quint):Play()
-    task.wait(0.58)
+    tween(loadStroke, 0.70, {Transparency = 1}, Enum.EasingStyle.Quint):Play()
+    tween(coreStroke, 0.70, {Transparency = 1}, Enum.EasingStyle.Quint):Play()
+    task.wait(0.73)
 
     loading.Visible = false
     loading.Active = false
@@ -2722,6 +2722,11 @@ minimized.Visible = false
 
 -- Start the real loading screen before Security UI.
 task.spawn(function()
+    -- Keep the loading screen on-screen long enough to be visible on mobile.
+    loading.Visible = true
+    loading.Active = true
+    loading.ZIndex = 100000
+    task.wait(0.15)
     local ok, err = pcall(runLoadingScreen)
     if not ok then
         warn("[JAYVEE UI] Loading screen error:", err)
