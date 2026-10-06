@@ -2,17 +2,14 @@
 -- Own-game LocalScript
 -- Place in StarterPlayer > StarterPlayerScripts
 --
--- Style inspired by the user's reference image:
--- dark translucent panel, purple active tab, rounded controls,
--- bottom navigation, draggable window.
---
 -- Includes:
 -- • Security password screen
 -- • Home / Power / Player pages
--- • Goku > Ultra Instinct ability
+-- • Goku > Ultra Instinct ability (OFF by default, manual ON/OFF toggle)
+-- • Chat intro "ULTRA INSTINCT!!!" when turned ON (no outro)
+-- • White aura + white body outline (sabay, fade in / fade out)
 -- • Player-radius visual circle
 -- • Radius 1+ / 1- controls
--- • Radius display
 -- • Auto-dodge / camera / follow controls
 -- • Mobile-friendly dragging
 -- • UI sounds and animations
@@ -21,9 +18,8 @@
 -- QUICK EDIT GUIDE
 -- ================================================================
 -- Most user-editable values are inside the Settings table below.
--- Change numbers/true/false there first instead of searching the
--- whole script. The comments beside each setting explain its job.
 --
+-- UltraActive = Ultra Instinct ON/OFF (default OFF, ikaw mag-on sa Power tab).
 -- FollowDuration = follow time after a dodge (seconds).
 -- FollowDistance = distance kept from the target.
 -- FollowSpeed = smooth follow response speed.
@@ -58,6 +54,7 @@ local Settings = {
 	Enabled = true,                 -- Master ON/OFF.
 	AutoDodge = true,               -- Automatic dodge detection.
 	CameraLock = true,              -- Camera reaction during combat.
+	UltraActive = false,            -- Ultra Instinct OFF by default.
 
 	-- Follow system
 	FollowAfterDodge = true,        -- Follow target after dodge.
@@ -71,7 +68,7 @@ local Settings = {
 	MenuScale = 1.0,                -- Main menu size multiplier.
 	UIScale = 1.0,                  -- Global UI scale.
 	IntroAnimation = "Back",        -- Intro/entrance style.
-	OpenCloseAnimation = "Smooth", -- Open/close style.
+	OpenCloseAnimation = "Smooth",  -- Open/close style.
 
 	-- Detection radius
 	Radius = 12,                    -- Purple detection radius.
@@ -82,10 +79,10 @@ local Settings = {
 
 	-- Ability / dodge
 	Ability = "Ultra Instinct",     -- Current ability name.
-	DodgeChance = 100,               -- Chance from 1 to 100.
+	DodgeChance = 100,              -- Chance from 1 to 100.
 	DodgeAnimation = "Side Burst",  -- Dodge animation preset.
-	PerfectDodgeWindow = 0.30,       -- Attack timing window.
-	DodgeActivity = "High",          -- Dodge speed: "Low" / "Normal" / "High" / "Max" (does NOT change triggers).
+	PerfectDodgeWindow = 0.30,      -- Attack timing window.
+	DodgeActivity = "High",         -- Dodge speed: "Low" / "Normal" / "High" / "Max" (does NOT change triggers).
 
 	-- Visual effects
 	WhiteAura = true,               -- White aura ON/OFF.
@@ -760,6 +757,19 @@ ultraTitle.TextColor3 = Color3.new(1,1,1)
 local ultraDesc = label(ultra, "Auto dodge • sense • camera lock • aura", UDim2.fromOffset(18, 36), UDim2.new(1,-36,0,20), 10)
 ultraDesc.TextColor3 = Color3.fromRGB(235,230,245)
 
+-- ULTRA INSTINCT ON/OFF toggle (OFF by default)
+local ultraToggle = Instance.new("TextButton")
+ultraToggle.Size = UDim2.fromOffset(130, 26)
+ultraToggle.Position = UDim2.new(1, -148, 0, 10)
+ultraToggle.Text = "ULTRA • OFF"
+ultraToggle.Font = Enum.Font.GothamBlack
+ultraToggle.TextSize = 10
+ultraToggle.TextColor3 = Color3.new(1,1,1)
+ultraToggle.BackgroundColor3 = Color3.fromRGB(55,38,43)
+ultraToggle.AutoButtonColor = false
+ultraToggle.Parent = ultra
+corner(ultraToggle, 9)
+
 local followCard = card(powerPage, UDim2.fromOffset(0, 538), UDim2.new(1, 0, 0, 270))
 label(followCard, "FOLLOW SYSTEM", UDim2.fromOffset(18, 10), UDim2.new(1,-36,0,20), 12)
 label(followCard, "Edit what happens after a successful dodge.", UDim2.fromOffset(18, 32), UDim2.new(1,-36,0,18), 9)
@@ -918,6 +928,10 @@ local function refreshPower()
 	ultra.BackgroundColor3 = Settings.Ability == "Ultra Instinct"
 		and Color3.fromRGB(104,72,158)
 		or Color3.fromRGB(46,41,58)
+
+	ultraToggle.Text = Settings.UltraActive and "ULTRA • ON" or "ULTRA • OFF"
+	ultraToggle.BackgroundColor3 = Settings.UltraActive and Color3.fromRGB(235,235,245) or Color3.fromRGB(55,38,43)
+	ultraToggle.TextColor3 = Settings.UltraActive and Color3.fromRGB(20,18,30) or Color3.new(1,1,1)
 
 	followDurationText.Text = "DURATION  " .. Settings.FollowDuration .. "s"
 	followDistanceText.Text = "DISTANCE  " .. Settings.FollowDistance
@@ -1510,42 +1524,45 @@ end)
 
 --==================================================
 -- ULTRA INSTINCT BODY SENSE VISUALS
+-- White aura + white body outline: sabay, walang delay,
+-- may fade in / fade out.
 --==================================================
 
-local uiHighlight = nil
-local auraPulseConnection = nil
-local auraEmitters = {}
-local auraObjects = {}
+local uiHighlight, auraPulseConnection = nil, nil
+local auraEmitters, auraObjects = {}, {}
 local visualCharacter = nil
+
+local auraAlpha = Instance.new("NumberValue")
+auraAlpha.Value = 0
+local auraTween
+local function setAuraAlpha(target, t)
+	if auraTween then auraTween:Cancel() end
+	auraTween = tween(auraAlpha, t, {Value = target}, Enum.EasingStyle.Quad)
+	auraTween:Play()
+end
 
 local function clearBodyAura()
 	for _, obj in ipairs(auraObjects) do
-		if obj and obj.Parent then
-			obj:Destroy()
-		end
+		if obj and obj.Parent then obj:Destroy() end
 	end
-	auraObjects = {}
-	auraEmitters = {}
+	auraObjects, auraEmitters = {}, {}
 end
 
 local function buildBodyAura()
 	clearBodyAura()
-	if not character or not Settings.Enabled or Settings.Ability ~= "Ultra Instinct" or not Settings.WhiteAura then
-		return
-	end
+	if not character then return end
 
 	for _, part in ipairs(character:GetDescendants()) do
 		if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
 			local a = Instance.new("Attachment")
 			a.Name = "UI_AuraAttachment"
 			a.Parent = part
-
 			local e = Instance.new("ParticleEmitter")
 			e.Name = "UI_WhiteAura"
 			e.Texture = "rbxasset://textures/particles/sparkles_main.dds"
 			e.Color = ColorSequence.new(Color3.new(1,1,1))
 			e.LightEmission = 1
-			e.Rate = 5
+			e.Rate = 0
 			e.Lifetime = NumberRange.new(0.22,0.5)
 			e.Speed = NumberRange.new(0.15,1.3)
 			e.SpreadAngle = Vector2.new(360,360)
@@ -1560,71 +1577,56 @@ local function buildBodyAura()
 				NumberSequenceKeypoint.new(1,1)
 			})
 			e.Parent = a
-			table.insert(auraObjects,a)
-			table.insert(auraEmitters,e)
+			table.insert(auraObjects, a)
+			table.insert(auraEmitters, e)
 		end
 	end
 
-	if not uiHighlight or uiHighlight.Parent ~= character then
-		if uiHighlight then uiHighlight:Destroy() end
-		uiHighlight = Instance.new("Highlight")
-		uiHighlight.Name = "UI_WhiteOutline"
-		uiHighlight.Adornee = character
-		uiHighlight.DepthMode = Enum.HighlightDepthMode.Occluded
-		uiHighlight.FillColor = Color3.new(1,1,1)
-		uiHighlight.OutlineColor = Color3.new(1,1,1)
-		uiHighlight.FillTransparency = 1
-		uiHighlight.OutlineTransparency = 1
-		uiHighlight.Parent = character
-	end
-
-	-- Smooth in animation for the body outline.
-	tween(uiHighlight, 0.28 / math.max(Settings.AnimationSpeed,0.1), {
-		OutlineTransparency = 0.08,
-		FillTransparency = 0.86
-	}, Enum.EasingStyle.Quint, Enum.EasingDirection.Out):Play()
+	if uiHighlight then uiHighlight:Destroy() end
+	uiHighlight = Instance.new("Highlight")
+	uiHighlight.Name = "UI_WhiteOutline"
+	uiHighlight.Adornee = character
+	uiHighlight.DepthMode = Enum.HighlightDepthMode.Occluded
+	uiHighlight.FillColor = Color3.new(1,1,1)
+	uiHighlight.OutlineColor = Color3.new(1,1,1)
+	uiHighlight.FillTransparency = 1
+	uiHighlight.OutlineTransparency = 1
+	uiHighlight.Parent = character
 	visualCharacter = character
 end
 
-local function hideBodyAura(fadeOut)
-	if auraPulseConnection then auraPulseConnection:Disconnect(); auraPulseConnection=nil end
-	if uiHighlight and uiHighlight.Parent then
-		if fadeOut then
-			tween(uiHighlight, 0.28 / math.max(Settings.AnimationSpeed,0.1), {
-				OutlineTransparency = 1,
-				FillTransparency = 1
-			}, Enum.EasingStyle.Quint, Enum.EasingDirection.In):Play()
-			task.delay(0.3, function()
-				if uiHighlight and uiHighlight.Parent then uiHighlight:Destroy(); uiHighlight=nil end
-				clearBodyAura()
-			end)
-		else
-			uiHighlight:Destroy(); uiHighlight=nil
-			clearBodyAura()
-		end
-	else
-		clearBodyAura()
-	end
-	visualCharacter = nil
-end
-
 function refreshBodyAura()
-	local shouldShow = Settings.Enabled and Settings.Ability == "Ultra Instinct" and Settings.WhiteAura
+	local shouldShow = Settings.Enabled and Settings.UltraActive and Settings.WhiteAura
 	if shouldShow then
-		buildBodyAura()
-		if auraPulseConnection then auraPulseConnection:Disconnect() end
-		auraPulseConnection = RunService.RenderStepped:Connect(function()
-			if not uiHighlight or not uiHighlight.Parent or not Settings.WhiteAura or Settings.Ability ~= "Ultra Instinct" then return end
-			local pulse = (math.sin(os.clock() * 5.5) + 1) * 0.5
-			uiHighlight.OutlineTransparency = 0.04 + pulse * 0.28
-			uiHighlight.FillTransparency = 0.90 - pulse * 0.07
-			for _, em in ipairs(auraEmitters) do
-				if em.Parent then em.Rate = 5 + pulse * 9 end
+		-- aura + outline sabay, walang delay
+		if not (uiHighlight and uiHighlight.Parent) or visualCharacter ~= character then
+			buildBodyAura()
+		end
+		if not auraPulseConnection then
+			auraPulseConnection = RunService.RenderStepped:Connect(function()
+				if not uiHighlight or not uiHighlight.Parent then return end
+				local a = auraAlpha.Value
+				local pulse = (math.sin(os.clock() * 5.5) + 1) * 0.5
+				local outlineBase = 0.04 + pulse * 0.28
+				local fillBase = 0.90 - pulse * 0.07
+				uiHighlight.OutlineTransparency = 1 - a * (1 - outlineBase)
+				uiHighlight.FillTransparency = 1 - a * (1 - fillBase)
+				for _, em in ipairs(auraEmitters) do
+					if em.Parent then em.Rate = a * (5 + pulse * 9) end
+				end
+			end)
+		end
+		setAuraAlpha(1, 0.25) -- fade in
+	else
+		setAuraAlpha(0, 0.35) -- fade out
+		task.delay(0.4, function()
+			if auraAlpha.Value <= 0.01 then
+				if auraPulseConnection then auraPulseConnection:Disconnect(); auraPulseConnection = nil end
+				if uiHighlight then uiHighlight:Destroy(); uiHighlight = nil end
+				clearBodyAura()
+				visualCharacter = nil
 			end
 		end)
-	else
-		if auraPulseConnection then auraPulseConnection:Disconnect(); auraPulseConnection=nil end
-		hideBodyAura(true)
 	end
 end
 
@@ -1864,7 +1866,7 @@ end
 --==================================================
 
 local function lockCameraToTarget(target)
-	if not Settings.CameraLock or not target then return end
+	if not Settings.CameraLock or not Settings.UltraActive or not target then return end
 	if humanoid and humanoid.MoveDirection.Magnitude > 0.12 then return end -- joystick = no lock
 	local hum = getHum(target)
 	local tr = getRoot(target)
@@ -1879,6 +1881,81 @@ local function cancelCameraLock()
 	cameraTarget = nil
 	cameraManualLock = false
 end
+
+--==================================================
+-- ULTRA INSTINCT ON/OFF + CHAT INTRO
+-- Chat intro lang pag ON. Walang outro pag OFF.
+--==================================================
+
+local function ultraChatIntro()
+	local text = "ULTRA INSTINCT!!!"
+	local sent = false
+
+	-- New TextChatService
+	pcall(function()
+		local TCS = game:GetService("TextChatService")
+		if TCS.ChatVersion == Enum.ChatVersion.TextChatService then
+			local channels = TCS:FindFirstChild("TextChannels")
+			local ch = channels and channels:FindFirstChild("RBXGeneral")
+			if ch then
+				ch:SendAsync(text)
+				sent = true
+			end
+		end
+	end)
+	if sent then return end
+
+	-- Legacy chat
+	pcall(function()
+		local RS = game:GetService("ReplicatedStorage")
+		local events = RS:FindFirstChild("DefaultChatSystemChatEvents")
+		local say = events and events:FindFirstChild("SayMessageRequest")
+		if say then
+			say:FireServer(text, "All")
+			sent = true
+		end
+	end)
+	if sent then return end
+
+	-- Fallback bubble kung hindi gumana ang chat
+	local head = character and character:FindFirstChild("Head")
+	if not head then return end
+	local bb = Instance.new("BillboardGui")
+	bb.Size = UDim2.fromOffset(220, 40)
+	bb.StudsOffset = Vector3.new(0, 3, 0)
+	bb.AlwaysOnTop = true
+	bb.Adornee = head
+	bb.Parent = head
+	local t = Instance.new("TextLabel")
+	t.Size = UDim2.fromScale(1,1)
+	t.BackgroundTransparency = 1
+	t.Text = text
+	t.Font = Enum.Font.GothamBlack
+	t.TextScaled = true
+	t.TextColor3 = Color3.new(1,1,1)
+	t.TextStrokeTransparency = 0.3
+	t.Parent = bb
+	Debris:AddItem(bb, 3)
+end
+
+local function setUltra(on)
+	if Settings.UltraActive == on then return end
+	Settings.UltraActive = on
+	if on then
+		ultraChatIntro()
+	else
+		following = false
+		followToken += 1
+		cancelCameraLock()
+	end
+	refreshBodyAura() -- aura + outline sabay, fade in/out
+	refreshPower()
+end
+
+ultraToggle.MouseButton1Click:Connect(function()
+	play(clickSound)
+	setUltra(not Settings.UltraActive)
+end)
 
 local function followForFiveSeconds(target)
 	if not Settings.FollowAfterDodge then return end
@@ -1992,7 +2069,7 @@ end
 
 local function runDodge()
 	if dodging then return end
-	if not Settings.Enabled or not Settings.AutoDodge then return end
+	if not Settings.Enabled or not Settings.AutoDodge or not Settings.UltraActive then return end
 	if not humanoid or humanoid.Health <= 0 or not root then return end
 	if math.random(1,100) > Settings.DodgeChance then return end
 
@@ -2086,7 +2163,7 @@ RunService.RenderStepped:Connect(function()
 	updatePlayerInfo()
 
 	if character and character ~= visualCharacter
-		and Settings.Enabled and Settings.Ability == "Ultra Instinct" and Settings.WhiteAura then
+		and Settings.Enabled and Settings.UltraActive and Settings.WhiteAura then
 		refreshBodyAura()
 	end
 
@@ -2232,7 +2309,7 @@ local function enemyLooksLikeAttacking(model)
 end
 
 RunService.Heartbeat:Connect(function()
-	if not Settings.Enabled or not Settings.AutoDodge or dodging or not root then return end
+	if not Settings.Enabled or not Settings.AutoDodge or not Settings.UltraActive or dodging or not root then return end
 	if os.clock() < senseCooldown then return end
 
 	local nearby = getAllNearbyTargets()
@@ -2333,7 +2410,7 @@ local function hookDamage()
 	lastHealth = humanoid.Health
 
 	damageConnection = humanoid.HealthChanged:Connect(function(newHealth)
-		if newHealth < lastHealth and Settings.Enabled and Settings.AutoDodge then
+		if newHealth < lastHealth and Settings.Enabled and Settings.AutoDodge and Settings.UltraActive then
 			-- Only trigger Ultra Instinct when an enemy is actually inside
 			-- the configured player circle at the moment damage is received.
 			local enemyInside = getEnemyInsideRadius()
@@ -2463,6 +2540,9 @@ main.DescendantAdded:Connect(addClickAnimation)
 -- INITIALIZE
 --==================================================
 
+-- Ultra Instinct starts OFF (security screen AND main menu).
+Settings.UltraActive = false
+
 showPage("Home")
 refreshPower()
 refreshRadius()
@@ -2470,6 +2550,7 @@ refreshMenuSize()
 refreshUltraConfig()
 refreshFollowConfig()
 hookDamage()
+refreshBodyAura() -- no aura while OFF
 
 security.Visible = false
 main.Visible = false
