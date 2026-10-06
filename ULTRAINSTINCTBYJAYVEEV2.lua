@@ -1,5 +1,5 @@
 -- ABILITY MENU • JAYVEE
--- Own-game LocalScript
+-- LocalScript
 -- Place in StarterPlayer > StarterPlayerScripts
 --
 -- Style inspired by the user's reference image:
