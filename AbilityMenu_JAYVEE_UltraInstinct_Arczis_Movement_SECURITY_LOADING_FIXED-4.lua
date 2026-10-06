@@ -55,6 +55,9 @@ local Settings = {
 	AutoDodge = true,               -- Automatic dodge detection.
 	CameraLock = true,              -- Camera reaction during combat.
 	UltraActive = false,            -- Ultra Instinct OFF by default.
+	RedLingerTime = 2,              -- Seconds na nananatiling pula ang enemy pagkalabas sa radius.
+	RedFadeIn = 0.2,                -- Fade in ng red mark.
+	RedFadeOut = 0.35,              -- Fade out ng red mark.
 
 	-- Follow system
 	FollowAfterDodge = true,        -- Follow target after dodge.
@@ -1815,34 +1818,88 @@ local function showDodgeIndicator()
 	end)
 end
 
-local function markEnemiesRed()
-	if not root then return end
-	local duration = Settings.FollowAfterDodge and (Settings.FollowDuration + 0.5) or 1.5
-	local function mark(model)
-		if not model or model == character then return end
-		local hum, r = getHum(model), getRoot(model)
-		if not hum or not r or hum.Health <= 0 then return end
-		if (r.Position - root.Position).Magnitude > Settings.Radius then return end
-		local h = model:FindFirstChild("UI_RedMark")
-		if not h then
-			h = Instance.new("Highlight")
-			h.Name = "UI_RedMark"
-			h.Adornee = model
-			h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-			h.FillColor = Color3.fromRGB(255, 30, 30)
-			h.OutlineColor = Color3.fromRGB(255, 70, 70)
-			h.FillTransparency = 0.45
-			h.OutlineTransparency = 0
-			h.Parent = model
+-- RED MARK: pumupula ang enemy kapag nasa loob ng radius circle.
+-- Pag nasa labas na, 2 seconds (RedLingerTime) bago mawala. May fade in/out.
+local redMarks = setmetatable({}, {__mode = "k"})
+
+local function redFadeIn(entry)
+	entry.state = "shown"
+	if entry.tw then entry.tw:Cancel() end
+	entry.tw = tween(entry.h, Settings.RedFadeIn, {
+		FillTransparency = 0.45,
+		OutlineTransparency = 0
+	}, Enum.EasingStyle.Quad)
+	entry.tw:Play()
+end
+
+local function redFadeOut(model, entry)
+	if entry.state == "fading" then return end
+	entry.state = "fading"
+	if entry.tw then entry.tw:Cancel() end
+	local tw = tween(entry.h, Settings.RedFadeOut, {
+		FillTransparency = 1,
+		OutlineTransparency = 1
+	}, Enum.EasingStyle.Quad)
+	entry.tw = tw
+	tw.Completed:Connect(function(playbackState)
+		if playbackState == Enum.PlaybackState.Completed and entry.state == "fading" then
+			if entry.h then entry.h:Destroy() end
+			redMarks[model] = nil
 		end
-		h:SetAttribute("Expire", os.clock() + duration)
-		task.delay(duration, function()
-			if h.Parent and (h:GetAttribute("Expire") or 0) <= os.clock() + 0.05 then
-				h:Destroy()
+	end)
+	tw:Play()
+end
+
+local lastRedUpdate = 0
+local function updateRedMarks()
+	local now = os.clock()
+	if now - lastRedUpdate < 0.08 then return end
+	lastRedUpdate = now
+
+	local active = Settings.Enabled and Settings.UltraActive and root ~= nil and root.Parent ~= nil
+
+	if active then
+		eachTarget(function(model)
+			local hum, r = getHum(model), getRoot(model)
+			if not hum or not r or hum.Health <= 0 then return end
+			local inside = (r.Position - root.Position).Magnitude <= Settings.Radius
+			local entry = redMarks[model]
+			if inside then
+				if not entry or not entry.h or not entry.h.Parent then
+					local h = Instance.new("Highlight")
+					h.Name = "UI_RedMark"
+					h.Adornee = model
+					h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+					h.FillColor = Color3.fromRGB(255, 30, 30)
+					h.OutlineColor = Color3.fromRGB(255, 70, 70)
+					h.FillTransparency = 1
+					h.OutlineTransparency = 1
+					h.Parent = model
+					entry = {h = h, lastInside = now, state = "new"}
+					redMarks[model] = entry
+					redFadeIn(entry)
+				else
+					entry.lastInside = now
+					if entry.state ~= "shown" then redFadeIn(entry) end
+				end
+			elseif entry and entry.state == "shown" and now - entry.lastInside >= Settings.RedLingerTime then
+				redFadeOut(model, entry)
 			end
 		end)
 	end
-	eachTarget(mark)
+
+	-- cleanup: patay / nawala / Ultra OFF -> fade out
+	for model, entry in pairs(redMarks) do
+		if not entry.h or not entry.h.Parent or not model.Parent then
+			if entry.h then entry.h:Destroy() end
+			redMarks[model] = nil
+		elseif entry.state == "shown" then
+			local hum = getHum(model)
+			if not active or not hum or hum.Health <= 0 then
+				redFadeOut(model, entry)
+			end
+		end
+	end
 end
 
 local function stopEffect()
@@ -2087,7 +2144,6 @@ local function runDodge()
 	local targetRoot = target and getRoot(target)
 
 	playRandomDodgeSound()
-	markEnemiesRed()
 	flash()
 	Settings.DodgeCount += 1
 	refreshUltraConfig()
@@ -2167,6 +2223,7 @@ RunService.RenderStepped:Connect(function()
 	end
 	updateRing()
 	updatePlayerInfo()
+	updateRedMarks()
 
 	if character and character ~= visualCharacter
 		and Settings.Enabled and Settings.UltraActive and Settings.WhiteAura then
