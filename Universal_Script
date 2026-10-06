@@ -1,5 +1,5 @@
 --==================================================================
--- ABILITY MENU - JAYVEE  (v3.6)
+-- ABILITY MENU - JAYVEE  (v3.7)
 -- Own-game LocalScript
 -- Place in: StarterPlayer > StarterPlayerScripts
 --
@@ -1255,13 +1255,133 @@ function U.ultraChatIntro()
 	Debris:AddItem(bb, 3)
 end
 
+--==================================================
+-- ULTRA INSTINCT SHIRT + CINEMATIC INTRO / OUTRO
+--==================================================
+local ULTRA_TSHIRT_ID = "rbxassetid://15840324"
+local ultraShirtStates = setmetatable({}, {__mode = "k"})
+local ultraFxToken = 0
+
+local function rememberAndApplyUltraTShirt(char, enabled)
+	if not char or not char.Parent then return end
+	local state = ultraShirtStates[char]
+
+	if enabled then
+		if not state then
+			state = {items = {}, created = {}}
+			for _, obj in ipairs(char:GetChildren()) do
+				if obj:IsA("ShirtGraphic") then
+					table.insert(state.items, {obj = obj, graphic = obj.Graphic})
+				end
+			end
+			ultraShirtStates[char] = state
+		end
+
+		local graphics = {}
+		for _, obj in ipairs(char:GetChildren()) do
+			if obj:IsA("ShirtGraphic") then table.insert(graphics, obj) end
+		end
+		if #graphics == 0 then
+			local sg = Instance.new("ShirtGraphic")
+			sg.Name = "JAYVEE_UltraInstinct_TShirt"
+			sg.Graphic = ULTRA_TSHIRT_ID
+			sg.Parent = char
+			table.insert(state.created, sg)
+		else
+			for _, sg in ipairs(graphics) do sg.Graphic = ULTRA_TSHIRT_ID end
+		end
+	else
+		if not state then return end
+		for _, sg in ipairs(state.created) do
+			if sg and sg.Parent then sg:Destroy() end
+		end
+		for _, item in ipairs(state.items) do
+			if item.obj and item.obj.Parent then item.obj.Graphic = item.graphic end
+		end
+		ultraShirtStates[char] = nil
+	end
+end
+
+local function ultraCinematic(enabled)
+	ultraFxToken += 1
+	local my = ultraFxToken
+	local overlay = new("Frame", {
+		Name = enabled and "UltraInstinctIntro" or "UltraInstinctOutro",
+		Size = UDim2.fromScale(1, 1), Position = UDim2.fromScale(0.5, 0.5),
+		AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+		BackgroundTransparency = enabled and 1 or 1, BorderSizePixel = 0, ZIndex = 500,
+	}, gui)
+
+	local flash = new("Frame", {
+		Size = UDim2.fromScale(0, 0), Position = UDim2.fromScale(0.5, 0.5),
+		AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = Color3.new(1, 1, 1),
+		BackgroundTransparency = 0.05, BorderSizePixel = 0, ZIndex = 503,
+	}, overlay)
+	U.corner(flash, 999)
+
+	local ring = new("Frame", {
+		Size = UDim2.fromOffset(20, 20), Position = UDim2.fromScale(0.5, 0.5),
+		AnchorPoint = Vector2.new(0.5, 0.5), BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 501,
+	}, overlay)
+	U.corner(ring, 999)
+	local ringStroke = stroke(ring, 4, 0.05, Color3.fromRGB(235, 240, 255))
+
+	local title = new("TextLabel", {
+		Size = UDim2.new(1, -40, 0, 70), Position = UDim2.fromScale(0.5, 0.5),
+		AnchorPoint = Vector2.new(0.5, 0.5), BackgroundTransparency = 1,
+		Text = enabled and "ULTRA INSTINCT" or "ULTRA INSTINCT OFF", Font = Enum.Font.GothamBlack,
+		TextSize = 38, TextColor3 = Color3.new(1, 1, 1), TextStrokeColor3 = Color3.fromRGB(130, 140, 180),
+		TextStrokeTransparency = 1, TextTransparency = 1, ZIndex = 504,
+	}, overlay)
+
+	local sub = new("TextLabel", {
+		Size = UDim2.new(1, -60, 0, 28), Position = UDim2.fromScale(0.5, 0.61),
+		AnchorPoint = Vector2.new(0.5, 0.5), BackgroundTransparency = 1,
+		Text = enabled and "THE BODY MOVES ON ITS OWN" or "POWER RELEASED", Font = Enum.Font.GothamBold,
+		TextSize = 13, TextColor3 = Color3.fromRGB(220, 225, 240), TextTransparency = 1, ZIndex = 504,
+	}, overlay)
+
+	if enabled then
+		U.tw(overlay, 0.12, {BackgroundTransparency = 0.82}, Enum.EasingStyle.Quad)
+		U.tw(flash, 0.34, {Size = UDim2.fromOffset(700, 700), BackgroundTransparency = 1}, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+		U.tw(ring, 0.55, {Size = UDim2.fromOffset(720, 720)}, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+		U.tw(ringStroke, 0.55, {Transparency = 1}, Enum.EasingStyle.Quad)
+		U.tw(title, 0.35, {TextTransparency = 0, TextStrokeTransparency = 0.25, Position = UDim2.fromScale(0.5, 0.47)}, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+		U.tw(sub, 0.3, {TextTransparency = 0, Position = UDim2.fromScale(0.5, 0.58)}, Enum.EasingStyle.Quad)
+		task.delay(0.95, function()
+			if my ~= ultraFxToken or not overlay.Parent then return end
+			U.tw(title, 0.3, {TextTransparency = 1, TextStrokeTransparency = 1}, Enum.EasingStyle.Quad)
+			U.tw(sub, 0.25, {TextTransparency = 1}, Enum.EasingStyle.Quad)
+			U.tw(overlay, 0.35, {BackgroundTransparency = 1}, Enum.EasingStyle.Quad)
+			Debris:AddItem(overlay, 0.4)
+		end)
+	else
+		U.tw(overlay, 0.12, {BackgroundTransparency = 0.78}, Enum.EasingStyle.Quad)
+		U.tw(ring, 0.45, {Size = UDim2.fromOffset(20, 20)}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+		U.tw(ringStroke, 0.45, {Transparency = 1}, Enum.EasingStyle.Quad)
+		U.tw(title, 0.25, {TextTransparency = 0, TextStrokeTransparency = 0.35}, Enum.EasingStyle.Quad)
+		task.delay(0.32, function()
+			if my ~= ultraFxToken or not overlay.Parent then return end
+			U.tw(title, 0.35, {TextTransparency = 1, TextStrokeTransparency = 1}, Enum.EasingStyle.Quad)
+			U.tw(overlay, 0.4, {BackgroundTransparency = 1}, Enum.EasingStyle.Quad)
+			Debris:AddItem(overlay, 0.45)
+		end)
+	end
+end
+
 local function setUltra(on)
 	if Settings.UltraActive == on then return end
 	Settings.UltraActive = on
 	if on then
+		rememberAndApplyUltraTShirt(character, true)
+		ultraCinematic(true)
+		U.play("toggleOn")
 		if Settings.ChatIntro then U.ultraChatIntro() end
 		U.auraBurst()
 	else
+		ultraCinematic(false)
+		U.play("toggleOff")
+		rememberAndApplyUltraTShirt(character, false)
 		following = false
 		followToken += 1
 		followTarget = nil
@@ -1899,6 +2019,9 @@ local function setupCharacter(char)
 	U.hookCharacterTools(char)
 	U.hookDamage()
 	task.spawn(Arczis.Setup, char)
+	if Settings.UltraActive then
+		task.defer(function() rememberAndApplyUltraTShirt(char, true) end)
+	end
 	U.refreshBodyAura()
 	U.refreshStats()
 end
@@ -2822,6 +2945,7 @@ end
 --==================================================
 unloadFn = function()
 	Settings.UltraActive = false
+	rememberAndApplyUltraTShirt(character, false)
 	following = false
 	followToken += 1
 	for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
@@ -2893,7 +3017,7 @@ security.Visible = true
 main.Visible = false
 minimized.Visible = false
 
-print("[JAYVEE] Ability Menu v3.5 loaded - Security screen should be visible.")
+print("[JAYVEE] Ability Menu v3.7 loaded - Security screen should be visible.")
 
 end, function(e) return tostring(e) .. "\n" .. debug.traceback() end)
 
