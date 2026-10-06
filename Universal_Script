@@ -1,5 +1,5 @@
 --==================================================================
--- ABILITY MENU - JAYVEE  (v4.7)
+-- ABILITY MENU - JAYVEE  (v4.8)
 -- Own-game LocalScript
 -- Place in: StarterPlayer > StarterPlayerScripts
 --
@@ -10,6 +10,16 @@
 --   PLAYER   : player info, dodge counter (+reset), Player ESP
 --   SETTINGS : theme, scale, sounds, animations, keybind, reset/unload
 --
+-- v4.8 CHANGES
+--   * FIXED FOREVER LOADING: audio PreloadAsync ran inline at startup and could never
+--     return for a missing local/Delta asset. It now runs in the background.
+--   * Re-executing now really replaces the old copy (shared-state fallback via getgenv/_G).
+--   * Ultra intro/outro overlay can no longer get stuck on screen when toggled fast.
+--   * Tools stay hooked after re-execute; no connection leak per respawn.
+--   * Half-HP auto Ultra no longer fires before the menu is unlocked.
+--   * Afterimage no longer copies aura lights; search no longer matches 'Frame';
+--     Reset UI stops the custom walk animation; unload cleans every hook.
+
 -- v4.6 CHANGES
 --   * Fixed startup failure on clients where the executor does not expose `shared`.
 --   * Added safe shared-state fallback so UI initialization can continue.
@@ -51,7 +61,7 @@
 --   * Damage fallback dodges even when no enemy is inside the radius.
 --==================================================================
 
-print("[JAYVEE] Ability Menu v4.7 loading...")
+print("[JAYVEE] Ability Menu v4.8 loading...")
 
 -- On-screen status banner: shows "loading", "loaded" or the exact ERROR on your screen.
 local function JV_Banner(text, isError)
@@ -96,7 +106,16 @@ local JV_ok, JV_err = xpcall(function()
 local Players = game:GetService("Players")
 
 -- Some clients expose `shared`, others do not. Never let that stop UI startup.
-local JV_SHARED = (type(shared) == "table") and shared or {}
+local JV_SHARED
+do
+	if type(shared) == "table" then JV_SHARED = shared end
+	if not JV_SHARED and type(getgenv) == "function" then
+		local okG, g = pcall(getgenv)
+		if okG and type(g) == "table" then JV_SHARED = g end
+	end
+	if not JV_SHARED and type(_G) == "table" then JV_SHARED = _G end
+	JV_SHARED = JV_SHARED or {}
+end
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
@@ -108,9 +127,10 @@ pcall(function() IS_STUDIO = RunService:IsStudio() end)
 
 local U = {} -- helper functions live here (Luau allows only 200 locals per scope)
 local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui")
+local playerGui = player:WaitForChild("PlayerGui", 30)
+assert(playerGui, "PlayerGui not found")
 
-local SCRIPT_VERSION = "v4.7"
+local SCRIPT_VERSION = "v4.8"
 local VERSION_MAJOR = SCRIPT_VERSION:match("%d+") or "4"
 local PASSWORD_PREFIX = "ULTRAINSTINCTBYJAYVEE"
 local PASSWORD = PASSWORD_PREFIX .. "V" .. VERSION_MAJOR
@@ -411,8 +431,12 @@ local function makeUltraAudio(name, enabled, fileName, assetId, volume)
 	s.Parent = SoundService
 	table.insert(sounds, s)
 
-	pcall(function()
-		game:GetService("ContentProvider"):PreloadAsync({s})
+	-- Preload in the background. PreloadAsync can yield forever on a missing/unsupported
+	-- local asset; running it inline froze the script on the "loading" banner.
+	task.spawn(function()
+		pcall(function()
+			game:GetService("ContentProvider"):PreloadAsync({s})
+		end)
 	end)
 	return s
 end
@@ -469,7 +493,7 @@ local function playUltraOutroSound()
 	end)
 end
 
-setupUltraAudio()
+pcall(setupUltraAudio)
 
 -- Sound keys used by play(): click, toggleOn, toggleOff, open, close, stop, error, success, type
 local clickSound, openSound, stopSound = "click", "open", "stop"
@@ -1272,7 +1296,7 @@ function U.createAfterimage(fade)
 			or obj:IsA("Humanoid") or obj:IsA("Decal") or obj:IsA("Shirt") or obj:IsA("Pants")
 			or obj:IsA("ShirtGraphic") or obj:IsA("BodyColors") or obj:IsA("ParticleEmitter")
 			or obj:IsA("Highlight") or obj:IsA("Trail") or obj:IsA("Beam") or obj:IsA("BillboardGui")
-			or obj:IsA("Sound") then
+			or obj:IsA("Sound") or obj:IsA("Light") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
 			obj:Destroy()
 		end
 	end
@@ -1562,8 +1586,9 @@ local function ultraCinematic(enabled)
 		Name = enabled and "UltraInstinctIntro" or "UltraInstinctOutro",
 		Size = UDim2.fromScale(1, 1), Position = UDim2.fromScale(0.5, 0.5),
 		AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-		BackgroundTransparency = enabled and 1 or 1, BorderSizePixel = 0, ZIndex = 500,
+		BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 500,
 	}, gui)
+	Debris:AddItem(overlay, 2) -- safety net so the overlay can never get stuck
 
 	local flash = new("Frame", {
 		Size = UDim2.fromScale(0, 0), Position = UDim2.fromScale(0.5, 0.5),
@@ -1602,7 +1627,7 @@ local function ultraCinematic(enabled)
 		U.tw(title, 0.35, {TextTransparency = 0, TextStrokeTransparency = 0.25, Position = UDim2.fromScale(0.5, 0.47)}, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 		U.tw(sub, 0.3, {TextTransparency = 0, Position = UDim2.fromScale(0.5, 0.58)}, Enum.EasingStyle.Quad)
 		task.delay(0.95, function()
-			if my ~= ultraFxToken or not overlay.Parent then return end
+			if my ~= ultraFxToken or not overlay.Parent then pcall(function() overlay:Destroy() end) return end
 			U.tw(title, 0.3, {TextTransparency = 1, TextStrokeTransparency = 1}, Enum.EasingStyle.Quad)
 			U.tw(sub, 0.25, {TextTransparency = 1}, Enum.EasingStyle.Quad)
 			U.tw(overlay, 0.35, {BackgroundTransparency = 1}, Enum.EasingStyle.Quad)
@@ -1614,7 +1639,7 @@ local function ultraCinematic(enabled)
 		U.tw(ringStroke, 0.45, {Transparency = 1}, Enum.EasingStyle.Quad)
 		U.tw(title, 0.25, {TextTransparency = 0, TextStrokeTransparency = 0.35}, Enum.EasingStyle.Quad)
 		task.delay(0.32, function()
-			if my ~= ultraFxToken or not overlay.Parent then return end
+			if my ~= ultraFxToken or not overlay.Parent then pcall(function() overlay:Destroy() end) return end
 			U.tw(title, 0.35, {TextTransparency = 1, TextStrokeTransparency = 1}, Enum.EasingStyle.Quad)
 			U.tw(overlay, 0.4, {BackgroundTransparency = 1}, Enum.EasingStyle.Quad)
 			Debris:AddItem(overlay, 0.45)
@@ -2190,10 +2215,11 @@ end
 --==================================================
 -- TOOL + DAMAGE HOOKS
 --==================================================
+local hookedTools = setmetatable({}, {__mode = "k"}) -- tool -> connection
+local charConns = {}
 local function hookTool(tool)
-	if not tool:IsA("Tool") or tool:GetAttribute("JV_Hooked") then return end
-	tool:SetAttribute("JV_Hooked", true)
-	bind(tool.Activated, function()
+	if not tool:IsA("Tool") or hookedTools[tool] then return end
+	hookedTools[tool] = tool.Activated:Connect(function()
 		lastOwnAction = os.clock()
 		local target = U.getEnemyInsideRadius()
 		if target then U.lockCameraToTarget(target) end
@@ -2201,8 +2227,10 @@ local function hookTool(tool)
 end
 
 function U.hookCharacterTools(char)
+	for _, c in ipairs(charConns) do pcall(function() c:Disconnect() end) end
+	charConns = {}
 	for _, obj in ipairs(char:GetChildren()) do hookTool(obj) end
-	bind(char.ChildAdded, hookTool)
+	table.insert(charConns, char.ChildAdded:Connect(hookTool))
 end
 
 function U.hookDamage()
@@ -2212,7 +2240,7 @@ function U.hookDamage()
 	damageConnection = humanoid.HealthChanged:Connect(function(newHealth)
 		-- Alternate Ultra Instinct trigger: crossing from above 50% HP to 50% or below.
 		-- It deliberately checks UltraActive == false, so it cannot retrigger while Ultra is ON.
-		if Settings.UltraHalfHPTrigger and Settings.Enabled and not Settings.UltraActive
+		if unlocked and Settings.UltraHalfHPTrigger and Settings.Enabled and not Settings.UltraActive
 			and not halfHPTriggered and humanoid.MaxHealth > 0
 			and lastHealth and lastHealth > humanoid.MaxHealth * 0.5
 			and newHealth <= humanoid.MaxHealth * 0.5 and newHealth > 0 then
@@ -2328,8 +2356,6 @@ local function setupCharacter(char)
 	U.hookCharacterTools(char)
 	U.hookDamage()
 	task.spawn(Arczis.Setup, char)
-	if Settings.UltraActive then
-	end
 	U.refreshBodyAura()
 	U.refreshStats()
 end
@@ -2877,7 +2903,7 @@ local function smartSearchScore(query, hay)
 end
 
 local function searchHaystack(pageName, child, aliasText)
-	local parts = {pageName, child.Name}
+	local parts = {pageName}
 	for _, d in ipairs(child:GetDescendants()) do
 		if d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox") then
 			-- strip RichText tags so a query like "color" does not match every stepper row
@@ -3373,6 +3399,7 @@ do
 	local c6 = U.makeCard(p, "DATA", "Reset or unload")
 	U.actionRow(c6, "RESET UI SETTINGS", function()
 		for _, k in ipairs(UI_KEYS) do Settings[k] = Defaults[k] end
+		Arczis.Stop()
 		applyScale()
 		U.refreshAll()
 	end)
@@ -3456,6 +3483,10 @@ unloadFn = function()
 	followToken += 1
 	for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
 	conns = {}
+	for _, c in ipairs(charConns) do pcall(function() c:Disconnect() end) end
+	charConns = {}
+	for _, c in pairs(hookedTools) do pcall(function() c:Disconnect() end) end
+	hookedTools = {}
 	if auraPulseConnection then auraPulseConnection:Disconnect(); auraPulseConnection = nil end
 	if damageConnection then damageConnection:Disconnect(); damageConnection = nil end
 	pcall(function() RunService:UnbindFromRenderStep("JAYVEE_CameraLock") end)
