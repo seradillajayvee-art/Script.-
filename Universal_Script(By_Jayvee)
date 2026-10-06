@@ -26,6 +26,7 @@ local UIS = game:GetService("UserInputService")
 local SoundService = game:GetService("SoundService")
 local Debris = game:GetService("Debris")
 
+local U = {} -- helper functions live here (Luau allows only 200 locals per scope)
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
@@ -166,7 +167,7 @@ local function new(class, props, parent)
 	return o
 end
 
-local function corner(obj, r)
+function U.corner(obj, r)
 	return new("UICorner", {CornerRadius = UDim.new(0, r)}, obj)
 end
 
@@ -179,17 +180,17 @@ local function stroke(obj, thickness, transparency, color)
 	}, obj)
 end
 
-local function tw(obj, t, props, style, dir)
+function U.tw(obj, t, props, style, dir)
 	local x = TweenService:Create(obj, TweenInfo.new(
 		t, style or Enum.EasingStyle.Quint, dir or Enum.EasingDirection.Out), props)
 	x:Play()
 	return x
 end
 
-local function fmt(v) return string.format("%g", v) end
-local function round2(v) return math.floor(v * 100 + 0.5) / 100 end
+function U.fmt(v) return string.format("%g", v) end
+function U.round2(v) return math.floor(v * 100 + 0.5) / 100 end
 
-local function cycleList(list, value, dir)
+function U.cycleList(list, value, dir)
 	local i = table.find(list, value) or 1
 	i = ((i - 1 + (dir or 1)) % #list) + 1
 	return list[i]
@@ -218,26 +219,26 @@ local function theme() return THEMES[Settings.ThemeIndex] or THEMES[1] end
 
 -- Refresh registry: every UI element registers a function that re-reads Settings.
 local refreshers, fastRefreshers = {}, {}
-local function reg(fn, fast)
+function U.reg(fn, fast)
 	table.insert(refreshers, fn)
 	if fast then table.insert(fastRefreshers, fn) end
 	local ok, err = pcall(fn)
 	if not ok then warn("[JAYVEE] UI refresh error:", err) end
 	return fn
 end
-local function refreshAll()
+function U.refreshAll()
 	for _, fn in ipairs(refreshers) do
 		local ok, err = pcall(fn)
 		if not ok then warn("[JAYVEE] UI refresh error:", err) end
 	end
 end
-local function refreshStats()
+function U.refreshStats()
 	for _, fn in ipairs(fastRefreshers) do pcall(fn) end
 end
 
 -- Sounds
 local sounds = {}
-local function makeSound(id, volume)
+function U.makeSound(id, volume)
 	local s = Instance.new("Sound")
 	s.SoundId = "rbxassetid://" .. tostring(id)
 	s.Volume = volume or 0.45
@@ -250,10 +251,10 @@ local clickSound, openSound, stopSound = "click", "open", "stop"
 
 local dodgeSounds = {}
 for _, id in ipairs({87566211283329, 81857580097150, 129561737395908, 122312400582724, 136080815136211}) do
-	local s = makeSound(id, 0.65)
+	local s = U.makeSound(id, 0.65)
 	table.insert(dodgeSounds, s)
 end
-local function playRandomDodgeSound()
+function U.playRandomDodgeSound()
 	if #dodgeSounds == 0 then return end
 	pcall(function() dodgeSounds[math.random(1, #dodgeSounds)]:Play() end)
 end
@@ -307,7 +308,7 @@ task.spawn(function()
 	end
 end)
 
-local function play(key)
+function U.play(key)
 	if not Settings.UISounds then return end
 	local def = PIXEL_SOUNDS[key]
 	if not def then return end
@@ -321,7 +322,7 @@ local function play(key)
 end
 
 -- Draggable (mobile friendly). Returns state table with .moved
-local function draggable(frame, handle)
+function U.draggable(frame, handle)
 	handle = handle or frame
 	local st = {moved = false}
 	local dragging, dragStart, startPos = false, nil, nil
@@ -370,8 +371,8 @@ local senseCooldown = 0
 local unlocked = false
 local lastOwnAction = 0 -- last time YOU used a tool / pressed an ability key
 
-local function getHum(m) return m and m:FindFirstChildOfClass("Humanoid") end
-local function getRoot(m) return m and m:FindFirstChild("HumanoidRootPart") end
+function U.getHum(m) return m and m:FindFirstChildOfClass("Humanoid") end
+function U.getRoot(m) return m and m:FindFirstChild("HumanoidRootPart") end
 
 -- Track every humanoid model (players + NPCs, even inside folders)
 local targetModels = {}
@@ -384,7 +385,7 @@ end
 for _, d in ipairs(workspace:GetDescendants()) do trackHumanoid(d) end
 bind(workspace.DescendantAdded, function(d) task.defer(trackHumanoid, d) end)
 
-local function eachTarget(fn)
+function U.eachTarget(fn)
 	for m in pairs(targetModels) do
 		if not m.Parent or not m:IsDescendantOf(workspace) then
 			targetModels[m] = nil
@@ -394,19 +395,19 @@ local function eachTarget(fn)
 	end
 end
 
-local function isValidTarget(model)
+function U.isValidTarget(model)
 	if not model or model == character then return false end
-	local hum, tr = getHum(model), getRoot(model)
+	local hum, tr = U.getHum(model), U.getRoot(model)
 	return hum ~= nil and tr ~= nil and hum.Health > 0
 		and Players:GetPlayerFromCharacter(model) ~= player
 end
 
-local function getEnemyInsideRadius()
+function U.getEnemyInsideRadius()
 	if not root then return nil, math.huge end
 	local nearest, best = nil, math.huge
-	eachTarget(function(model)
-		if not isValidTarget(model) then return end
-		local d = (getRoot(model).Position - root.Position).Magnitude
+	U.eachTarget(function(model)
+		if not U.isValidTarget(model) then return end
+		local d = (U.getRoot(model).Position - root.Position).Magnitude
 		if d <= Settings.Radius and d < best then
 			best, nearest = d, model
 		end
@@ -414,12 +415,12 @@ local function getEnemyInsideRadius()
 	return nearest, best
 end
 
-local function getAllNearbyTargets()
+function U.getAllNearbyTargets()
 	local list = {}
 	if not root then return list end
-	eachTarget(function(model)
-		if isValidTarget(model)
-			and (getRoot(model).Position - root.Position).Magnitude <= Settings.Radius then
+	U.eachTarget(function(model)
+		if U.isValidTarget(model)
+			and (U.getRoot(model).Position - root.Position).Magnitude <= Settings.Radius then
 			table.insert(list, model)
 		end
 	end)
@@ -441,7 +442,7 @@ for i = 1, RING_SEGMENTS do
 	}, ringFolder)
 end
 
-local function updateRing()
+function U.updateRing()
 	local visible = Settings.Enabled and Settings.RadiusCircle and root and root.Parent
 	if not visible then
 		for _, p in ipairs(ringParts) do p.Transparency = 1 end
@@ -468,12 +469,12 @@ local AURA_TINTS = {
 	{name = "Sun God", main = Color3.fromRGB(255, 252, 238), edge = Color3.fromRGB(255, 214, 110)},
 	{name = "Storm",   main = Color3.fromRGB(240, 246, 255), edge = Color3.fromRGB(110, 170, 255)},
 }
-local function auraTint() return AURA_TINTS[Settings.AuraTintIndex] or AURA_TINTS[1] end
+function U.auraTint() return AURA_TINTS[Settings.AuraTintIndex] or AURA_TINTS[1] end
 
 local TEX_SPARK = "rbxasset://textures/particles/sparkles_main.dds"
 local TEX_SMOKE = "rbxasset://textures/particles/smoke_main.dds"
 local TEX_FIRE = "rbxasset://textures/particles/fire_main.dds"
-local function kp(t, v) return NumberSequenceKeypoint.new(t, v) end
+function U.kp(t, v) return NumberSequenceKeypoint.new(t, v) end
 
 local uiHighlight, auraPulseConnection = nil, nil
 local auraEmitters, auraObjects = {}, {}
@@ -485,12 +486,12 @@ local fovBusy = false
 local auraAlpha = Instance.new("NumberValue")
 auraAlpha.Value = 0
 local auraTween
-local function setAuraAlpha(target, t)
+function U.setAuraAlpha(target, t)
 	if auraTween then auraTween:Cancel() end
-	auraTween = tw(auraAlpha, t, {Value = target}, Enum.EasingStyle.Quad)
+	auraTween = U.tw(auraAlpha, t, {Value = target}, Enum.EasingStyle.Quad)
 end
 
-local function clearBodyAura()
+function U.clearBodyAura()
 	for _, obj in ipairs(auraObjects) do
 		if obj and obj.Parent then obj:Destroy() end
 	end
@@ -498,10 +499,10 @@ local function clearBodyAura()
 end
 
 -- Jagged white lightning bolt crackling around the player
-local function lightningBolt(inten)
+function U.lightningBolt(inten)
 	if not root or not root.Parent then return end
 	inten = inten or 1
-	local tint = auraTint()
+	local tint = U.auraTint()
 	local origin = root.Position + Vector3.new(math.random(-15, 15) / 10, math.random(-20, 25) / 10, math.random(-15, 15) / 10)
 	local dir = Vector3.new(math.random(-100, 100), math.random(-30, 100), math.random(-100, 100))
 	if dir.Magnitude < 1 then dir = Vector3.new(1, 0.4, 0) end
@@ -530,17 +531,17 @@ local function lightningBolt(inten)
 				Transparency = 0.05, Size = Vector3.new(0.14, 0.14, len),
 				CFrame = CFrame.lookAt((p0 + p1) / 2, p1),
 			}, workspace)
-			tw(seg, 0.2, {Transparency = 1, Size = Vector3.new(0.02, 0.02, len)})
+			U.tw(seg, 0.2, {Transparency = 1, Size = Vector3.new(0.02, 0.02, len)})
 			Debris:AddItem(seg, 0.25)
 		end
 	end
 end
 
 -- GEAR 5 power-up: shockwave rings, light pillar, cloud explosion, flash, FOV punch
-local function auraBurst()
+function U.auraBurst()
 	if not Settings.AuraBurst or not Settings.WhiteAura or not Settings.Enabled then return end
 	if not root or not root.Parent then return end
-	local tint = auraTint()
+	local tint = U.auraTint()
 	local inten = Settings.AuraIntensity
 	local pos = root.Position
 	local floorPos = pos - Vector3.new(0, 2.85, 0)
@@ -556,7 +557,7 @@ local function auraBurst()
 				CFrame = CFrame.new(floorPos) * CFrame.Angles(0, 0, math.pi / 2),
 			}, workspace)
 			local d = 45 * inten
-			tw(ring, 0.7, {Size = Vector3.new(0.05, d, d), Transparency = 1}, Enum.EasingStyle.Quad)
+			U.tw(ring, 0.7, {Size = Vector3.new(0.05, d, d), Transparency = 1}, Enum.EasingStyle.Quad)
 			Debris:AddItem(ring, 0.8)
 		end)
 	end
@@ -568,7 +569,7 @@ local function auraBurst()
 		Size = Vector3.new(36, 4.5, 4.5),
 		CFrame = CFrame.new(floorPos + Vector3.new(0, 18, 0)) * CFrame.Angles(0, 0, math.pi / 2),
 	}, workspace)
-	tw(pillar, 0.7, {Size = Vector3.new(40, 0.4, 0.4), Transparency = 1}, Enum.EasingStyle.Quad)
+	U.tw(pillar, 0.7, {Size = Vector3.new(40, 0.4, 0.4), Transparency = 1}, Enum.EasingStyle.Quad)
 	Debris:AddItem(pillar, 0.8)
 
 	-- cloud + spark explosion
@@ -580,8 +581,8 @@ local function auraBurst()
 		Texture = TEX_SMOKE, Color = ColorSequence.new(tint.main, tint.edge), LightEmission = 0.65, Rate = 0,
 		Lifetime = NumberRange.new(0.9, 1.6), Speed = NumberRange.new(14, 30),
 		SpreadAngle = Vector2.new(360, 360), Drag = 3,
-		Size = NumberSequence.new({kp(0, 3), kp(0.4, 7), kp(1, 11)}),
-		Transparency = NumberSequence.new({kp(0, 0.35), kp(0.6, 0.6), kp(1, 1)}),
+		Size = NumberSequence.new({U.kp(0, 3), U.kp(0.4, 7), U.kp(1, 11)}),
+		Transparency = NumberSequence.new({U.kp(0, 0.35), U.kp(0.6, 0.6), U.kp(1, 1)}),
 		Rotation = NumberRange.new(0, 360), RotSpeed = NumberRange.new(-60, 60),
 	}, bp)
 	smoke:Emit(math.floor(60 * inten))
@@ -589,8 +590,8 @@ local function auraBurst()
 		Texture = TEX_SPARK, Color = ColorSequence.new(tint.main), LightEmission = 1, Rate = 0,
 		Lifetime = NumberRange.new(0.5, 1.1), Speed = NumberRange.new(20, 45),
 		SpreadAngle = Vector2.new(360, 360), Drag = 2,
-		Size = NumberSequence.new({kp(0, 1.2), kp(1, 0)}),
-		Transparency = NumberSequence.new({kp(0, 0), kp(1, 1)}),
+		Size = NumberSequence.new({U.kp(0, 1.2), U.kp(1, 0)}),
+		Transparency = NumberSequence.new({U.kp(0, 0), U.kp(1, 1)}),
 	}, bp)
 	spark:Emit(math.floor(50 * inten))
 	Debris:AddItem(bp, 2.5)
@@ -600,7 +601,7 @@ local function auraBurst()
 		Size = UDim2.fromScale(1, 1), BackgroundColor3 = tint.main, BackgroundTransparency = 0.5,
 		BorderSizePixel = 0, ZIndex = 150,
 	}, gui)
-	tw(fl, 0.5, {BackgroundTransparency = 1})
+	U.tw(fl, 0.5, {BackgroundTransparency = 1})
 	Debris:AddItem(fl, 0.6)
 
 	-- FOV punch
@@ -608,30 +609,30 @@ local function auraBurst()
 	if cam and not fovBusy then
 		fovBusy = true
 		local old = cam.FieldOfView
-		tw(cam, 0.1, {FieldOfView = old + 16})
+		U.tw(cam, 0.1, {FieldOfView = old + 16})
 		task.delay(0.12, function()
-			tw(cam, 0.55, {FieldOfView = old})
+			U.tw(cam, 0.55, {FieldOfView = old})
 			task.delay(0.6, function() fovBusy = false end)
 		end)
 	end
 
 	-- extra lightning on activation
 	if Settings.AuraLightning then
-		for _ = 1, 5 do lightningBolt(inten * 1.4) end
+		for _ = 1, 5 do U.lightningBolt(inten * 1.4) end
 	end
 end
 
-local function addEmitter(parent, props, base, pulse)
+function U.addEmitter(parent, props, base, pulse)
 	props.Rate = 0
 	local e = new("ParticleEmitter", props, parent)
 	table.insert(auraEmitters, {e = e, base = base, pulse = pulse or 0})
 	return e
 end
 
-local function buildBodyAura()
-	clearBodyAura()
+function U.buildBodyAura()
+	U.clearBodyAura()
 	if not character then return end
-	local tint = auraTint()
+	local tint = U.auraTint()
 	local cloudColor = ColorSequence.new(tint.main, tint.edge)
 	local hrp = character:FindFirstChild("HumanoidRootPart")
 	if not hrp then return end
@@ -641,20 +642,20 @@ local function buildBodyAura()
 		if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
 			local a = new("Attachment", {Name = "UI_AuraAttachment"}, part)
 			table.insert(auraObjects, a)
-			addEmitter(a, {
+			U.addEmitter(a, {
 				Name = "UI_WhiteAura", Texture = TEX_SPARK, Color = cloudColor, LightEmission = 1,
 				Lifetime = NumberRange.new(0.22, 0.5), Speed = NumberRange.new(0.15, 1.3),
 				SpreadAngle = Vector2.new(360, 360),
-				Size = NumberSequence.new({kp(0, 0.32), kp(0.55, 0.16), kp(1, 0)}),
-				Transparency = NumberSequence.new({kp(0, 0.18), kp(0.7, 0.45), kp(1, 1)}),
+				Size = NumberSequence.new({U.kp(0, 0.32), U.kp(0.55, 0.16), U.kp(1, 0)}),
+				Transparency = NumberSequence.new({U.kp(0, 0.18), U.kp(0.7, 0.45), U.kp(1, 1)}),
 			}, 5, 1.8)
-			addEmitter(a, {
+			U.addEmitter(a, {
 				Name = "UI_CloudWisp", Texture = TEX_SMOKE, Color = cloudColor, LightEmission = 0.7,
 				Lifetime = NumberRange.new(0.7, 1.3), Speed = NumberRange.new(0.5, 2),
 				SpreadAngle = Vector2.new(360, 360), Acceleration = Vector3.new(0, 5, 0), Drag = 1,
 				Rotation = NumberRange.new(0, 360), RotSpeed = NumberRange.new(-40, 40),
-				Size = NumberSequence.new({kp(0, 0.8), kp(0.5, 1.8), kp(1, 2.6)}),
-				Transparency = NumberSequence.new({kp(0, 0.6), kp(0.4, 0.7), kp(1, 1)}),
+				Size = NumberSequence.new({U.kp(0, 0.8), U.kp(0.5, 1.8), U.kp(1, 2.6)}),
+				Transparency = NumberSequence.new({U.kp(0, 0.6), U.kp(0.4, 0.7), U.kp(1, 1)}),
 			}, 3, 0.6)
 		end
 	end
@@ -662,26 +663,26 @@ local function buildBodyAura()
 	-- big billowing cloud mantle around the torso
 	local mantle = new("Attachment", {Name = "UI_AuraMantle", Position = Vector3.new(0, 0.5, 0)}, hrp)
 	table.insert(auraObjects, mantle)
-	addEmitter(mantle, {
+	U.addEmitter(mantle, {
 		Name = "UI_Mantle", Texture = TEX_SMOKE, Color = cloudColor, LightEmission = 0.55,
 		Lifetime = NumberRange.new(1.2, 2), Speed = NumberRange.new(2, 5),
 		SpreadAngle = Vector2.new(60, 60), EmissionDirection = Enum.NormalId.Top,
 		Acceleration = Vector3.new(0, 6, 0), Drag = 1.5,
 		Rotation = NumberRange.new(0, 360), RotSpeed = NumberRange.new(-30, 30),
-		Size = NumberSequence.new({kp(0, 2.5), kp(0.5, 4.5), kp(1, 6.5)}),
-		Transparency = NumberSequence.new({kp(0, 0.55), kp(0.5, 0.7), kp(1, 1)}),
+		Size = NumberSequence.new({U.kp(0, 2.5), U.kp(0.5, 4.5), U.kp(1, 6.5)}),
+		Transparency = NumberSequence.new({U.kp(0, 0.55), U.kp(0.5, 0.7), U.kp(1, 1)}),
 	}, 8, 0.5)
 
 	-- ground clouds at the feet
 	local feet = new("Attachment", {Name = "UI_AuraFeet", Position = Vector3.new(0, -2.6, 0)}, hrp)
 	table.insert(auraObjects, feet)
-	addEmitter(feet, {
+	U.addEmitter(feet, {
 		Name = "UI_FeetCloud", Texture = TEX_SMOKE, Color = cloudColor, LightEmission = 0.5,
 		Lifetime = NumberRange.new(0.9, 1.5), Speed = NumberRange.new(3, 7),
 		SpreadAngle = Vector2.new(360, 360), Acceleration = Vector3.new(0, 1.5, 0), Drag = 2,
 		Rotation = NumberRange.new(0, 360), RotSpeed = NumberRange.new(-25, 25),
-		Size = NumberSequence.new({kp(0, 3), kp(0.5, 5), kp(1, 7)}),
-		Transparency = NumberSequence.new({kp(0, 0.5), kp(0.5, 0.75), kp(1, 1)}),
+		Size = NumberSequence.new({U.kp(0, 3), U.kp(0.5, 5), U.kp(1, 7)}),
+		Transparency = NumberSequence.new({U.kp(0, 0.5), U.kp(0.5, 0.75), U.kp(1, 1)}),
 	}, 6, 0.4)
 
 	-- white flame hair plume (Gear 5 flames)
@@ -689,14 +690,14 @@ local function buildBodyAura()
 	if head then
 		local plume = new("Attachment", {Name = "UI_AuraPlume", Position = Vector3.new(0, 0.5, 0)}, head)
 		table.insert(auraObjects, plume)
-		addEmitter(plume, {
+		U.addEmitter(plume, {
 			Name = "UI_FlameHair", Texture = TEX_FIRE, Color = cloudColor, LightEmission = 1,
 			Lifetime = NumberRange.new(0.45, 0.85), Speed = NumberRange.new(3, 6),
 			SpreadAngle = Vector2.new(25, 25), EmissionDirection = Enum.NormalId.Top,
 			Acceleration = Vector3.new(0, 8, 0),
 			Rotation = NumberRange.new(-20, 20), RotSpeed = NumberRange.new(-30, 30),
-			Size = NumberSequence.new({kp(0, 1.4), kp(0.4, 1.8), kp(1, 0)}),
-			Transparency = NumberSequence.new({kp(0, 0.2), kp(0.7, 0.5), kp(1, 1)}),
+			Size = NumberSequence.new({U.kp(0, 1.4), U.kp(0.4, 1.8), U.kp(1, 0)}),
+			Transparency = NumberSequence.new({U.kp(0, 0.2), U.kp(0.7, 0.5), U.kp(1, 1)}),
 		}, 18, 1.2)
 	end
 
@@ -727,11 +728,11 @@ local function buildBodyAura()
 	visualCharacter = character
 end
 
-local function refreshBodyAura()
+function U.refreshBodyAura()
 	local shouldShow = Settings.Enabled and Settings.UltraActive and Settings.WhiteAura
 	if shouldShow then
 		if not (uiHighlight and uiHighlight.Parent) or visualCharacter ~= character then
-			buildBodyAura()
+			U.buildBodyAura()
 		end
 		if not auraPulseConnection then
 			auraPulseConnection = RunService.RenderStepped:Connect(function()
@@ -740,7 +741,7 @@ local function refreshBodyAura()
 				local now = os.clock()
 				local pulse = (math.sin(now * 5.5) + 1) * 0.5
 				local inten = Settings.AuraIntensity
-				local tint = auraTint()
+				local tint = U.auraTint()
 
 				uiHighlight.FillColor = tint.main
 				uiHighlight.OutlineColor = tint.main:Lerp(tint.edge, pulse)
@@ -771,19 +772,19 @@ local function refreshBodyAura()
 
 				if Settings.AuraLightning and a > 0.6 and now >= nextBolt then
 					nextBolt = now + (math.random(12, 40) / 100) / inten
-					lightningBolt(inten)
-					if math.random() < 0.4 then lightningBolt(inten) end
+					U.lightningBolt(inten)
+					if math.random() < 0.4 then U.lightningBolt(inten) end
 				end
 			end)
 		end
-		setAuraAlpha(1, 0.25)
+		U.setAuraAlpha(1, 0.25)
 	else
-		setAuraAlpha(0, 0.35)
+		U.setAuraAlpha(0, 0.35)
 		task.delay(0.4, function()
 			if auraAlpha.Value <= 0.01 then
 				if auraPulseConnection then auraPulseConnection:Disconnect(); auraPulseConnection = nil end
 				if uiHighlight then uiHighlight:Destroy(); uiHighlight = nil end
-				clearBodyAura()
+				U.clearBodyAura()
 				visualCharacter = nil
 			end
 		end)
@@ -795,17 +796,17 @@ end
 --==================================================
 local redMarks = setmetatable({}, {__mode = "k"})
 
-local function redFadeIn(entry)
+function U.redFadeIn(entry)
 	entry.state = "shown"
 	if entry.tw then entry.tw:Cancel() end
-	entry.tw = tw(entry.h, Settings.RedFadeIn, {FillTransparency = 0.45, OutlineTransparency = 0}, Enum.EasingStyle.Quad)
+	entry.tw = U.tw(entry.h, Settings.RedFadeIn, {FillTransparency = 0.45, OutlineTransparency = 0}, Enum.EasingStyle.Quad)
 end
 
-local function redFadeOut(model, entry)
+function U.redFadeOut(model, entry)
 	if entry.state == "fading" then return end
 	entry.state = "fading"
 	if entry.tw then entry.tw:Cancel() end
-	local t = tw(entry.h, Settings.RedFadeOut, {FillTransparency = 1, OutlineTransparency = 1}, Enum.EasingStyle.Quad)
+	local t = U.tw(entry.h, Settings.RedFadeOut, {FillTransparency = 1, OutlineTransparency = 1}, Enum.EasingStyle.Quad)
 	entry.tw = t
 	t.Completed:Connect(function(state)
 		if state == Enum.PlaybackState.Completed and entry.state == "fading" then
@@ -816,15 +817,15 @@ local function redFadeOut(model, entry)
 end
 
 local lastRedUpdate = 0
-local function updateRedMarks()
+function U.updateRedMarks()
 	local now = os.clock()
 	if now - lastRedUpdate < 0.08 then return end
 	lastRedUpdate = now
 	local active = Settings.Enabled and Settings.UltraActive and root ~= nil and root.Parent ~= nil
 
 	if active then
-		eachTarget(function(model)
-			local hum, r = getHum(model), getRoot(model)
+		U.eachTarget(function(model)
+			local hum, r = U.getHum(model), U.getRoot(model)
 			if not hum or not r or hum.Health <= 0 then return end
 			local inside = (r.Position - root.Position).Magnitude <= Settings.Radius
 			local entry = redMarks[model]
@@ -839,13 +840,13 @@ local function updateRedMarks()
 					}, model)
 					entry = {h = h, lastInside = now, state = "new"}
 					redMarks[model] = entry
-					redFadeIn(entry)
+					U.redFadeIn(entry)
 				else
 					entry.lastInside = now
-					if entry.state ~= "shown" then redFadeIn(entry) end
+					if entry.state ~= "shown" then U.redFadeIn(entry) end
 				end
 			elseif entry and entry.state == "shown" and now - entry.lastInside >= Settings.RedLingerTime then
-				redFadeOut(model, entry)
+				U.redFadeOut(model, entry)
 			end
 		end)
 	end
@@ -855,8 +856,8 @@ local function updateRedMarks()
 			if entry.h then entry.h:Destroy() end
 			redMarks[model] = nil
 		elseif entry.state == "shown" then
-			local hum = getHum(model)
-			if not active or not hum or hum.Health <= 0 then redFadeOut(model, entry) end
+			local hum = U.getHum(model)
+			if not active or not hum or hum.Health <= 0 then U.redFadeOut(model, entry) end
 		end
 	end
 end
@@ -872,7 +873,7 @@ local ESP_COLORS = {
 	{"Yellow", Color3.fromRGB(255, 225, 80)},
 	{"Theme", nil},
 }
-local function espColor()
+function U.espColor()
 	local c = ESP_COLORS[Settings.ESPColorIndex] or ESP_COLORS[1]
 	return c[2] or theme().a
 end
@@ -880,7 +881,7 @@ end
 local espFolder = new("Folder", {Name = "JAYVEE_ESP"}, playerGui)
 local espEntries = {}
 
-local function espDestroy(m)
+function U.espDestroy(m)
 	local e = espEntries[m]
 	if not e then return end
 	if e.box then e.box:Destroy() end
@@ -888,7 +889,7 @@ local function espDestroy(m)
 	espEntries[m] = nil
 end
 
-local function espBuild(model, r)
+function U.espBuild(model, r)
 	local box = new("BillboardGui", {
 		Name = "ESPBox", Adornee = r, AlwaysOnTop = true,
 		Size = UDim2.new(4, 0, 5.6, 0), LightInfluence = 0,
@@ -917,23 +918,23 @@ end
 
 local function updateESP()
 	if not Settings.ESPEnabled then
-		for m in pairs(espEntries) do espDestroy(m) end
+		for m in pairs(espEntries) do U.espDestroy(m) end
 		return
 	end
 	local seen = {}
-	local col = espColor()
-	eachTarget(function(m)
+	local col = U.espColor()
+	U.eachTarget(function(m)
 		local plr = Players:GetPlayerFromCharacter(m)
 		if not plr and not Settings.ESPNPCs then return end
-		local hum, r = getHum(m), getRoot(m)
+		local hum, r = U.getHum(m), U.getRoot(m)
 		if not hum or not r or hum.Health <= 0 then return end
 		local d = root and (r.Position - root.Position).Magnitude or 0
 		if d > Settings.ESPMaxDistance then return end
 
 		local e = espEntries[m]
 		if not e or not e.box.Parent or e.root ~= r then
-			espDestroy(m)
-			e = espBuild(m, r)
+			U.espDestroy(m)
+			e = U.espBuild(m, r)
 			espEntries[m] = e
 		end
 		seen[m] = true
@@ -960,14 +961,14 @@ local function updateESP()
 		e.lbl.TextColor3 = col
 	end)
 	for m in pairs(espEntries) do
-		if not seen[m] then espDestroy(m) end
+		if not seen[m] then U.espDestroy(m) end
 	end
 end
 
 --==================================================
 -- VISUAL EFFECTS
 --==================================================
-local function flash()
+function U.flash()
 	if not root or not Settings.WhiteAura then return end
 	local attachment = new("Attachment", {Name = "UI_WhiteAura"}, root)
 	local emitter = new("ParticleEmitter", {
@@ -990,8 +991,8 @@ local function flash()
 	}, attachment)
 	emitter:Emit(24)
 	if Settings.AuraLightning then
-		lightningBolt(Settings.AuraIntensity)
-		lightningBolt(Settings.AuraIntensity)
+		U.lightningBolt(Settings.AuraIntensity)
+		U.lightningBolt(Settings.AuraIntensity)
 	end
 
 	local hl = new("Highlight", {
@@ -999,12 +1000,12 @@ local function flash()
 		FillColor = Color3.new(1, 1, 1), OutlineColor = Color3.new(1, 1, 1),
 		FillTransparency = 0.72, OutlineTransparency = 0.2,
 	}, character)
-	tw(hl, 0.28, {FillTransparency = 1, OutlineTransparency = 1})
+	U.tw(hl, 0.28, {FillTransparency = 1, OutlineTransparency = 1})
 	Debris:AddItem(attachment, 0.5)
 	Debris:AddItem(hl, 0.35)
 end
 
-local function createAfterimage(fade)
+function U.createAfterimage(fade)
 	fade = fade or 0.45
 	if not Settings.Afterimage or not character then return end
 	local ok, clone = pcall(function() return character:Clone() end)
@@ -1038,13 +1039,13 @@ local function createAfterimage(fade)
 	clone.Parent = workspace
 	for _, obj in ipairs(clone:GetDescendants()) do
 		if obj:IsA("BasePart") and obj.Transparency < 1 then
-			tw(obj, fade, {Transparency = 1}, Enum.EasingStyle.Quad)
+			U.tw(obj, fade, {Transparency = 1}, Enum.EasingStyle.Quad)
 		end
 	end
 	Debris:AddItem(clone, fade + 0.1)
 end
 
-local function createTrail(a, b)
+function U.createTrail(a, b)
 	local dist = (b - a).Magnitude
 	if not Settings.Afterimage or dist < 1 then return end
 	local p = new("Part", {
@@ -1052,11 +1053,11 @@ local function createTrail(a, b)
 		Material = Enum.Material.Neon, Color = Color3.new(1, 1, 1), Transparency = 0.1,
 		Size = Vector3.new(0.55, 0.55, dist), CFrame = CFrame.lookAt((a + b) / 2, b),
 	}, workspace)
-	tw(p, 0.4, {Transparency = 1, Size = Vector3.new(0.05, 0.05, dist)})
+	U.tw(p, 0.4, {Transparency = 1, Size = Vector3.new(0.05, 0.05, dist)})
 	Debris:AddItem(p, 0.45)
 end
 
-local function smokePuff(pos)
+function U.smokePuff(pos)
 	if not Settings.WhiteAura then return end
 	local part = new("Part", {
 		Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false,
@@ -1083,7 +1084,7 @@ local counterGui = new("TextLabel", {
 	TextStrokeTransparency = 0.35, Visible = false, ZIndex = 200,
 }, gui)
 local popupToken = 0
-local function showDodgeIndicator()
+function U.showDodgeIndicator()
 	if not Settings.DodgePopup then return end
 	popupToken += 1
 	local my = popupToken
@@ -1092,42 +1093,42 @@ local function showDodgeIndicator()
 	counterGui.TextTransparency = 0
 	counterGui.TextStrokeTransparency = 0.35
 	counterGui.Position = UDim2.new(0.5, 0, 0.72, 0)
-	tw(counterGui, 0.18, {Position = UDim2.new(0.5, 0, 0.67, 0)})
+	U.tw(counterGui, 0.18, {Position = UDim2.new(0.5, 0, 0.67, 0)})
 	task.delay(0.55, function()
 		if my ~= popupToken or not counterGui.Parent then return end
-		tw(counterGui, 0.25, {TextTransparency = 1, TextStrokeTransparency = 1})
+		U.tw(counterGui, 0.25, {TextTransparency = 1, TextStrokeTransparency = 1})
 		task.delay(0.26, function()
 			if my == popupToken and counterGui.Parent then counterGui.Visible = false end
 		end)
 	end)
 end
 
-local function stopEffect()
+function U.stopEffect()
 	local ring = new("Frame", {
 		Size = UDim2.fromOffset(25, 25), AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5), BackgroundTransparency = 1, ZIndex = 101,
 	}, gui)
-	corner(ring, 200)
+	U.corner(ring, 200)
 	local s = stroke(ring, 3, 0, theme().a)
-	tw(ring, 0.45, {Size = UDim2.fromOffset(230, 230)})
-	tw(s, 0.45, {Transparency = 1})
+	U.tw(ring, 0.45, {Size = UDim2.fromOffset(230, 230)})
+	U.tw(s, 0.45, {Transparency = 1})
 	Debris:AddItem(ring, 0.55)
-	play(stopSound)
+	U.play(stopSound)
 end
 
 --==================================================
 -- CAMERA LOCK
 --==================================================
-local function lockCameraToTarget(target)
+function U.lockCameraToTarget(target)
 	if not Settings.CameraLock or not Settings.UltraActive or not target then return end
 	if humanoid and humanoid.MoveDirection.Magnitude > 0.12 then return end
-	local hum, tr = getHum(target), getRoot(target)
+	local hum, tr = U.getHum(target), U.getRoot(target)
 	if not hum or not tr or hum.Health <= 0 then return end
 	cameraTarget = target
 	cameraLocked = true
 end
 
-local function cancelCameraLock()
+function U.cancelCameraLock()
 	cameraLocked = false
 	cameraTarget = nil
 end
@@ -1142,13 +1143,13 @@ RunService:BindToRenderStep("JAYVEE_CameraLock", Enum.RenderPriority.Camera.Valu
 		return
 	end
 	local cam = workspace.CurrentCamera
-	local targetRoot, targetHum = getRoot(target), getHum(target)
+	local targetRoot, targetHum = U.getRoot(target), U.getHum(target)
 	if not cam or not targetRoot or not targetHum or targetHum.Health <= 0 then
-		cancelCameraLock()
+		U.cancelCameraLock()
 		return
 	end
 	if root and (targetRoot.Position - root.Position).Magnitude > math.max(Settings.Radius, Settings.ThreatRange) * 2.5 then
-		cancelCameraLock()
+		U.cancelCameraLock()
 		return
 	end
 	local point = targetRoot.Position + Vector3.new(0, 2, 0)
@@ -1166,7 +1167,7 @@ end)
 --==================================================
 -- ULTRA ON/OFF + CHAT INTRO (intro only, no outro)
 --==================================================
-local function ultraChatIntro()
+function U.ultraChatIntro()
 	local text = "ULTRA INSTINCT!!!"
 	local sent = false
 
@@ -1212,23 +1213,23 @@ local function setUltra(on)
 	if Settings.UltraActive == on then return end
 	Settings.UltraActive = on
 	if on then
-		if Settings.ChatIntro then ultraChatIntro() end
-		auraBurst()
+		if Settings.ChatIntro then U.ultraChatIntro() end
+		U.auraBurst()
 	else
 		following = false
 		followToken += 1
 		followTarget = nil
-		cancelCameraLock()
+		U.cancelCameraLock()
 	end
-	refreshBodyAura()
+	U.refreshBodyAura()
 end
 
 --==================================================
 -- FOLLOW
 --==================================================
-local function startFollow(target)
+function U.startFollow(target)
 	if not Settings.FollowAfterDodge or not target then return end
-	local targetRoot, targetHum = getRoot(target), getHum(target)
+	local targetRoot, targetHum = U.getRoot(target), U.getHum(target)
 	if not targetRoot or not targetHum then return end
 
 	following = true
@@ -1259,7 +1260,7 @@ local function startFollow(target)
 		if token == followToken then
 			following = false
 			followTarget = nil
-			if Settings.StopEffect then stopEffect() end
+			if Settings.StopEffect then U.stopEffect() end
 		end
 	end)
 end
@@ -1277,7 +1278,7 @@ local ACTIVITY = {
 -- threat = {dir = Vector3, dist = number, away = bool}
 --   away = false : sidestep perpendicular to dir (projectiles / beams)
 --   away = true  : move along dir (explosions / hitboxes around you)
-local function dodgeDestination(targetRoot, threat)
+function U.dodgeDestination(targetRoot, threat)
 	local origin = root.Position
 
 	local ignore = {character, ringFolder}
@@ -1358,19 +1359,19 @@ local function runDodge(target, threat)
 	followToken += 1
 	following = false
 
-	target = (target and isValidTarget(target)) and target or getEnemyInsideRadius()
-	local targetRoot = target and getRoot(target)
+	target = (target and U.isValidTarget(target)) and target or U.getEnemyInsideRadius()
+	local targetRoot = target and U.getRoot(target)
 
-	playRandomDodgeSound()
-	flash()
+	U.playRandomDodgeSound()
+	U.flash()
 	Settings.DodgeCount += 1
-	refreshStats()
-	showDodgeIndicator()
-	if targetRoot then lockCameraToTarget(target) end
+	U.refreshStats()
+	U.showDodgeIndicator()
+	if targetRoot then U.lockCameraToTarget(target) end
 
 	local act = ACTIVITY[Settings.DodgeActivity] or ACTIVITY.High
 	local startPos = root.Position
-	local destination = dodgeDestination(targetRoot, threat)
+	local destination = U.dodgeDestination(targetRoot, threat)
 	local startCF = root.CFrame
 	local endCF
 	if targetRoot then
@@ -1381,8 +1382,8 @@ local function runDodge(target, threat)
 	end
 	endCF = endCF or (CFrame.new(destination) * startCF.Rotation)
 
-	createAfterimage(0.45)
-	smokePuff(startPos)
+	U.createAfterimage(0.45)
+	U.smokePuff(startPos)
 
 	local ghosts = 0
 	local start = os.clock()
@@ -1395,16 +1396,16 @@ local function runDodge(target, threat)
 		end
 		if ghosts < 2 and a >= (ghosts + 1) / 3 then
 			ghosts += 1
-			createAfterimage(0.35)
+			U.createAfterimage(0.35)
 		end
 		if a >= 1 then break end
 		RunService.RenderStepped:Wait()
 	end
 
-	createTrail(startPos + Vector3.new(0, 1, 0), destination + Vector3.new(0, 1, 0))
-	smokePuff(destination)
+	U.createTrail(startPos + Vector3.new(0, 1, 0), destination + Vector3.new(0, 1, 0))
+	U.smokePuff(destination)
 
-	if target then startFollow(target) end
+	if target then U.startFollow(target) end
 
 	task.delay(act.lock, function() dodging = false end)
 end
@@ -1423,8 +1424,8 @@ end
 local trackedTargetHealth = setmetatable({}, {__mode = "k"})
 local trackedTargetStamp = setmetatable({}, {__mode = "k"})
 
-local function detectEnemyHit(target)
-	local hum = getHum(target)
+function U.detectEnemyHit(target)
+	local hum = U.getHum(target)
 	if not hum then return false end
 	local old = trackedTargetHealth[target]
 	trackedTargetHealth[target] = hum.Health
@@ -1437,10 +1438,10 @@ local function detectEnemyHit(target)
 	return false
 end
 
-local function detectAnyEnemyHit(nearby)
+function U.detectAnyEnemyHit(nearby)
 	local found
 	for _, m in ipairs(nearby) do
-		if detectEnemyHit(m) and not found then found = m end
+		if U.detectEnemyHit(m) and not found then found = m end
 	end
 	return found
 end
@@ -1448,7 +1449,7 @@ end
 local ATTACK_WORDS = {"attack", "punch", "kick", "swing", "slash", "hit", "strike", "stab", "bite", "claw", "smash", "combo", "melee", "skill", "slam", "shoot", "fire", "cast", "beam", "blast", "ultimate", "ability", "move", "spell", "throw", "charge", "special", "dash", "m1", "m2"}
 local MOVE_WORDS = {"idle", "walk", "run", "jump", "fall", "climb", "swim", "sit", "emote", "dance", "wave", "point", "cheer", "laugh", "movement"}
 
-local function hasWord(str, list)
+function U.hasWord(str, list)
 	for _, w in ipairs(list) do
 		if str:find(w, 1, true) then return true end
 	end
@@ -1456,8 +1457,8 @@ local function hasWord(str, list)
 end
 
 -- animOnly = true -> only look at animations (used for ranged attackers)
-local function enemyLooksLikeAttacking(model, animOnly)
-	local hum = getHum(model)
+function U.enemyLooksLikeAttacking(model, animOnly)
+	local hum = U.getHum(model)
 	if not hum then return false end
 
 	local animator = hum:FindFirstChildOfClass("Animator") or model:FindFirstChildWhichIsA("Animator", true)
@@ -1469,8 +1470,8 @@ local function enemyLooksLikeAttacking(model, animOnly)
 		for _, track in ipairs(tracks) do
 			local a = track.Animation
 			local n = string.lower(track.Name .. " " .. (a and a.Name or ""))
-			local isMove = hasWord(n, MOVE_WORDS)
-			if hasWord(n, ATTACK_WORDS) and not (isMove and not hasWord(n, {"attack", "punch", "kick", "slash", "skill", "ultimate", "ability"})) then
+			local isMove = U.hasWord(n, MOVE_WORDS)
+			if U.hasWord(n, ATTACK_WORDS) and not (isMove and not U.hasWord(n, {"attack", "punch", "kick", "slash", "skill", "ultimate", "ability"})) then
 				return true
 			end
 			if not track.Looped and track.Priority.Value >= Enum.AnimationPriority.Action.Value
@@ -1481,7 +1482,7 @@ local function enemyLooksLikeAttacking(model, animOnly)
 	end
 	if animOnly then return false end
 
-	local tr = getRoot(model)
+	local tr = U.getRoot(model)
 	if tr and root then
 		local toPlayer = root.Position - tr.Position
 		local dist = toPlayer.Magnitude
@@ -1513,7 +1514,7 @@ overlap.FilterType = Enum.RaycastFilterType.Exclude
 overlap.MaxParts = 800
 
 -- parts that can never be a threat (our effects, character limbs, terrain)
-local function ignorePart(p)
+function U.ignorePart(p)
 	local c = ignoreCache[p]
 	if c ~= nil then return c end
 	local r = false
@@ -1524,7 +1525,7 @@ local function ignorePart(p)
 	else
 		local par = p.Parent
 		if par then
-			if par:IsA("Model") and getHum(par) then
+			if par:IsA("Model") and U.getHum(par) then
 				r = true -- limb of a character (melee is handled by animation / contact)
 			elseif par:IsA("Accoutrement") then
 				r = true
@@ -1561,7 +1562,7 @@ bind(workspace.DescendantAdded, function(d)
 end)
 
 -- Looks at every part around you and predicts whether it will hit you
-local function scanThreats(now)
+function U.scanThreats(now)
 	if not Settings.DodgeProjectiles or not root or not root.Parent then return nil end
 	local list = {ringFolder}
 	if character then table.insert(list, character) end
@@ -1578,7 +1579,7 @@ local function scanThreats(now)
 	local bestFresh, bestFreshGap = nil, math.huge
 
 	for _, p in ipairs(parts) do
-		if not ignorePart(p) then
+		if not U.ignorePart(p) then
 			local pos = p.Position
 			local tr = partTrack[p]
 			local vel = Vector3.zero
@@ -1649,19 +1650,19 @@ local function scanThreats(now)
 	return bestMoving or bestFresh
 end
 
-local function scanRanged(now)
+function U.scanRanged(now)
 	if not Settings.DodgeRanged or not root then return nil end
 	local range = math.max(Settings.ThreatRange, Settings.Radius)
 	local found, bd = nil, math.huge
-	eachTarget(function(m)
-		if not isValidTarget(m) then return end
+	U.eachTarget(function(m)
+		if not U.isValidTarget(m) then return end
 		if (rangedCd[m] or 0) > now then return end
-		local tr = getRoot(m)
+		local tr = U.getRoot(m)
 		local toMe = root.Position - tr.Position
 		local d = toMe.Magnitude
 		if d <= Settings.Radius or d > range or d < 0.1 then return end
 		if tr.CFrame.LookVector:Dot(toMe.Unit) < 0.3 then return end -- not facing you
-		if enemyLooksLikeAttacking(m, true) and d < bd then
+		if U.enemyLooksLikeAttacking(m, true) and d < bd then
 			bd, found = d, m
 		end
 	end)
@@ -1690,15 +1691,15 @@ local function senseStep()
 	end
 	if not threat and now >= nextScan then
 		nextScan = now + 0.03
-		threat = scanThreats(now)
+		threat = U.scanThreats(now)
 	end
 
 	-- melee / damage / contact
-	local nearby = getAllNearbyTargets()
-	local hitTarget = (#nearby > 0) and detectAnyEnemyHit(nearby) or nil
+	local nearby = U.getAllNearbyTargets()
+	local hitTarget = (#nearby > 0) and U.detectAnyEnemyHit(nearby) or nil
 	local contact, attack, attacker = false, false, nil
 	for _, model in ipairs(nearby) do
-		local tr = getRoot(model)
+		local tr = U.getRoot(model)
 		if tr then
 			local d = (tr.Position - root.Position).Magnitude
 			-- contact is ignored while following (follow keeps you close on purpose)
@@ -1706,7 +1707,7 @@ local function senseStep()
 				contact = true
 				attacker = attacker or model
 			end
-			if enemyLooksLikeAttacking(model) then
+			if U.enemyLooksLikeAttacking(model) then
 				attack = true
 				attacker = model
 			end
@@ -1717,15 +1718,15 @@ local function senseStep()
 	local ranged
 	if not (hitTarget or contact or attack or threat) and now >= nextRanged then
 		nextRanged = now + 0.1
-		ranged = scanRanged(now)
+		ranged = U.scanRanged(now)
 	end
 
 	if not (hitTarget or contact or attack or threat or ranged) then return end
 
-	local chosen = hitTarget or attacker or ranged or getEnemyInsideRadius() or nearby[1]
+	local chosen = hitTarget or attacker or ranged or U.getEnemyInsideRadius() or nearby[1]
 	local w = Settings.PerfectDodgeWindow
 	senseCooldown = now + w * (threat and 0.4 or attack and 0.5 or contact and 0.75 or ranged and 0.8 or 1.2)
-	if chosen then lockCameraToTarget(chosen) end
+	if chosen then U.lockCameraToTarget(chosen) end
 	dodge(chosen, (not hitTarget and not attack and not contact) and threat or nil)
 end
 
@@ -1737,17 +1738,17 @@ local function hookTool(tool)
 	tool:SetAttribute("JV_Hooked", true)
 	tool.Activated:Connect(function()
 		lastOwnAction = os.clock()
-		local target = getEnemyInsideRadius()
-		if target then lockCameraToTarget(target) end
+		local target = U.getEnemyInsideRadius()
+		if target then U.lockCameraToTarget(target) end
 	end)
 end
 
-local function hookCharacterTools(char)
+function U.hookCharacterTools(char)
 	for _, obj in ipairs(char:GetChildren()) do hookTool(obj) end
 	char.ChildAdded:Connect(hookTool)
 end
 
-local function hookDamage()
+function U.hookDamage()
 	if damageConnection then damageConnection:Disconnect(); damageConnection = nil end
 	if not humanoid then return end
 	lastHealth = humanoid.Health
@@ -1758,8 +1759,8 @@ local function hookDamage()
 			local fallDamage = (st == Enum.HumanoidStateType.Freefall or st == Enum.HumanoidStateType.Landed)
 			if not fallDamage then
 				-- damage from anything (even unseen sources): dodge again right away
-				local enemyInside = getEnemyInsideRadius()
-				if enemyInside then lockCameraToTarget(enemyInside) end
+				local enemyInside = U.getEnemyInsideRadius()
+				if enemyInside then U.lockCameraToTarget(enemyInside) end
 				senseCooldown = 0
 				task.defer(dodge, enemyInside)
 			end
@@ -1845,12 +1846,12 @@ local function setupCharacter(char)
 	character, humanoid, root = char, hum, hrp
 	dodging, following, followTarget = false, false, nil
 	followToken += 1
-	cancelCameraLock()
-	hookCharacterTools(char)
-	hookDamage()
+	U.cancelCameraLock()
+	U.hookCharacterTools(char)
+	U.hookDamage()
 	task.spawn(Arczis.Setup, char)
-	refreshBodyAura()
-	refreshStats()
+	U.refreshBodyAura()
+	U.refreshStats()
 end
 
 bind(player.CharacterAdded, function(char) task.spawn(setupCharacter, char) end)
@@ -1859,16 +1860,16 @@ if player.Character then task.spawn(setupCharacter, player.Character) end
 --==================================================
 -- UI KIT
 --==================================================
-local function pill(btn, on)
+function U.pill(btn, on)
 	btn.BackgroundColor3 = on and theme().b or COL.off
 end
 
-local function makeCard(page, title, sub)
+function U.makeCard(page, title, sub)
 	local c = new("Frame", {
 		Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
 		BackgroundColor3 = COL.card, BackgroundTransparency = 0.05, BorderSizePixel = 0,
 	}, page)
-	corner(c, 14)
+	U.corner(c, 14)
 	local st = stroke(c, 1.2, 0.5)
 	new("UIPadding", {
 		PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
@@ -1888,29 +1889,29 @@ local function makeCard(page, title, sub)
 			TextColor3 = COL.sub, TextTruncate = Enum.TextTruncate.AtEnd,
 		}, c)
 	end
-	reg(function()
+	U.reg(function()
 		t.TextColor3 = theme().a
 		st.Color = theme().b
 	end)
 	return c
 end
 
-local function infoText(parent, getText, fast, size)
+function U.infoText(parent, getText, fast, size)
 	local l = new("TextLabel", {
 		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
 		Font = Enum.Font.GothamMedium, TextSize = size or 11, TextWrapped = true,
 		TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
 		TextColor3 = COL.text, Text = "",
 	}, parent)
-	reg(function() l.Text = getText() end, fast)
+	U.reg(function() l.Text = getText() end, fast)
 	return l
 end
 
-local function toggleRow(parent, labelText, get, set)
+function U.toggleRow(parent, labelText, get, set)
 	local row = new("TextButton", {
 		Size = UDim2.new(1, 0, 0, 38), BackgroundColor3 = COL.row, Text = "", AutoButtonColor = false,
 	}, parent)
-	corner(row, 10)
+	U.corner(row, 10)
 	new("TextLabel", {
 		BackgroundTransparency = 1, Position = UDim2.fromOffset(12, 0), Size = UDim2.new(1, -80, 1, 0),
 		Text = labelText, Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = COL.text,
@@ -1920,32 +1921,32 @@ local function toggleRow(parent, labelText, get, set)
 		AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -12, 0.5, 0),
 		Size = UDim2.fromOffset(44, 22), BackgroundColor3 = COL.off,
 	}, row)
-	corner(sw, 11)
+	U.corner(sw, 11)
 	local knob = new("Frame", {
 		AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 3, 0.5, 0),
 		Size = UDim2.fromOffset(16, 16), BackgroundColor3 = Color3.new(1, 1, 1),
 	}, sw)
-	corner(knob, 8)
+	U.corner(knob, 8)
 	row.MouseButton1Click:Connect(function()
 		set(not get())
-		play(get() and "toggleOn" or "toggleOff")
-		refreshAll()
+		U.play(get() and "toggleOn" or "toggleOff")
+		U.refreshAll()
 	end)
-	reg(function()
+	U.reg(function()
 		local on = get()
-		tw(sw, 0.18, {BackgroundColor3 = on and theme().b or COL.off})
-		tw(knob, 0.18, {Position = on and UDim2.new(1, -19, 0.5, 0) or UDim2.new(0, 3, 0.5, 0)})
+		U.tw(sw, 0.18, {BackgroundColor3 = on and theme().b or COL.off})
+		U.tw(knob, 0.18, {Position = on and UDim2.new(1, -19, 0.5, 0) or UDim2.new(0, 3, 0.5, 0)})
 	end)
 	return row
 end
 
-local function richValue(labelText, valueText)
+function U.richValue(labelText, valueText)
 	return labelText .. "   <font color=\"#" .. theme().a:ToHex() .. "\">" .. valueText .. "</font>"
 end
 
-local function stepperRow(parent, labelText, getText, onStep, minusText, plusText)
+function U.stepperRow(parent, labelText, getText, onStep, minusText, plusText)
 	local row = new("Frame", {Size = UDim2.new(1, 0, 0, 42), BackgroundColor3 = COL.row}, parent)
-	corner(row, 10)
+	U.corner(row, 10)
 	local lbl = new("TextLabel", {
 		BackgroundTransparency = 1, Position = UDim2.fromOffset(12, 0), Size = UDim2.new(1, -165, 1, 0),
 		Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = COL.text, RichText = true,
@@ -1957,25 +1958,25 @@ local function stepperRow(parent, labelText, getText, onStep, minusText, plusTex
 			Size = UDim2.fromOffset(64, 28), Text = txt, Font = Enum.Font.GothamBlack, TextSize = 12,
 			TextColor3 = Color3.new(1, 1, 1), BackgroundColor3 = COL.off, AutoButtonColor = false,
 		}, row)
-		corner(b, 9)
+		U.corner(b, 9)
 		return b
 	end
 	local minus = mk(-80, minusText or "-")
 	local plus = mk(-10, plusText or "+")
-	minus.MouseButton1Click:Connect(function() play(clickSound); onStep(-1); refreshAll() end)
-	plus.MouseButton1Click:Connect(function() play(clickSound); onStep(1); refreshAll() end)
-	reg(function()
-		lbl.Text = richValue(labelText, getText())
+	minus.MouseButton1Click:Connect(function() U.play(clickSound); onStep(-1); U.refreshAll() end)
+	plus.MouseButton1Click:Connect(function() U.play(clickSound); onStep(1); U.refreshAll() end)
+	U.reg(function()
+		lbl.Text = U.richValue(labelText, getText())
 		plus.BackgroundColor3 = theme().b
 	end)
 	return row
 end
 
-local function choiceRow(parent, labelText, getText, onClick)
+function U.choiceRow(parent, labelText, getText, onClick)
 	local row = new("TextButton", {
 		Size = UDim2.new(1, 0, 0, 38), BackgroundColor3 = COL.row, Text = "", AutoButtonColor = false,
 	}, parent)
-	corner(row, 10)
+	U.corner(row, 10)
 	new("TextLabel", {
 		BackgroundTransparency = 1, Position = UDim2.fromOffset(12, 0), Size = UDim2.new(0.5, -12, 1, 0),
 		Text = labelText, Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = COL.text,
@@ -1986,42 +1987,44 @@ local function choiceRow(parent, labelText, getText, onClick)
 		Size = UDim2.new(0.5, -12, 1, 0), Font = Enum.Font.GothamBlack, TextSize = 11,
 		TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = theme().a, Text = "",
 	}, row)
-	row.MouseButton1Click:Connect(function() play(clickSound); onClick(); refreshAll() end)
-	reg(function()
+	row.MouseButton1Click:Connect(function() U.play(clickSound); onClick(); U.refreshAll() end)
+	U.reg(function()
 		val.Text = string.upper(getText()) .. "  >"
 		val.TextColor3 = theme().a
 	end)
 	return row
 end
 
-local function actionRow(parent, text, onClick, danger)
+function U.actionRow(parent, text, onClick, danger)
 	local b = new("TextButton", {
 		Size = UDim2.new(1, 0, 0, 38), Text = text, Font = Enum.Font.GothamBlack, TextSize = 12,
 		TextColor3 = Color3.new(1, 1, 1), BackgroundColor3 = danger and COL.danger or COL.off,
 		AutoButtonColor = false,
 	}, parent)
-	corner(b, 10)
-	b.MouseButton1Click:Connect(function() play(clickSound); onClick(b) end)
-	if not danger then reg(function() b.BackgroundColor3 = theme().b end) end
+	U.corner(b, 10)
+	b.MouseButton1Click:Connect(function() U.play(clickSound); onClick(b) end)
+	if not danger then U.reg(function() b.BackgroundColor3 = theme().b end) end
 	return b
 end
 
 -- Setting adjusters
-local function adjust(key, step, mn, mx)
+function U.adjust(key, step, mn, mx)
 	return function(dir)
-		Settings[key] = round2(math.clamp(Settings[key] + step * dir, mn, mx))
+		Settings[key] = U.round2(math.clamp(Settings[key] + step * dir, mn, mx))
 	end
 end
 
 --==================================================
 -- SECURITY SCREEN
 --==================================================
-local function fitScale(w, h, extra)
+function U.fitScale(w, h, extra)
 	local cam = workspace.CurrentCamera
 	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
+	-- the viewport can be 0/1 pixels right at startup: use a sane default instead
+	if vp.X < 200 or vp.Y < 200 then vp = Vector2.new(1280, 720) end
 	local base = math.min(1, (vp.X - 20) / w, (vp.Y - 20) / h)
 	local limit = math.min((vp.X - 8) / w, (vp.Y - 8) / h)
-	return math.min(math.max(base * (extra or 1), 0.3), limit)
+	return math.max(math.min(math.max(base * (extra or 1), 0.3), limit), 0.25)
 end
 
 local security = new("Frame", {
@@ -2029,11 +2032,11 @@ local security = new("Frame", {
 	Size = UDim2.fromOffset(420, 310), BackgroundColor3 = Color3.fromRGB(12, 11, 17),
 	BackgroundTransparency = 0.02, Visible = true, ZIndex = 200,
 }, gui)
-corner(security, 22)
+U.corner(security, 22)
 local secStroke = stroke(security, 2, 0)
 local secGradient = new("UIGradient", {}, secStroke)
-local secScale = new("UIScale", {Scale = fitScale(420, 310)}, security)
-draggable(security)
+local secScale = new("UIScale", {Scale = U.fitScale(420, 310)}, security)
+U.draggable(security)
 
 local passBox, unlockBtn, secStatus, loadBar
 do
@@ -2054,13 +2057,13 @@ do
 		PlaceholderColor3 = Color3.fromRGB(120, 115, 135), BackgroundColor3 = Color3.fromRGB(25, 23, 34),
 		ZIndex = 201,
 	}, security)
-	corner(passBox, 13)
+	U.corner(passBox, 13)
 	unlockBtn = new("TextButton", {
 		Size = UDim2.new(1, -40, 0, 48), Position = UDim2.fromOffset(20, 156), Text = "UNLOCK",
 		Font = Enum.Font.GothamBlack, TextSize = 13, TextColor3 = Color3.new(1, 1, 1),
 		BackgroundColor3 = THEMES[1].b, AutoButtonColor = false, ZIndex = 201,
 	}, security)
-	corner(unlockBtn, 13)
+	U.corner(unlockBtn, 13)
 	secStatus = new("TextLabel", {
 		BackgroundTransparency = 1, Size = UDim2.new(1, -40, 0, 24), Position = UDim2.fromOffset(20, 214),
 		Text = "SECURE - WAITING FOR ACCESS", Font = Enum.Font.GothamBold, TextSize = 10,
@@ -2070,14 +2073,14 @@ do
 		Position = UDim2.fromOffset(20, 252), Size = UDim2.new(1, -40, 0, 6),
 		BackgroundColor3 = Color3.fromRGB(30, 28, 42), ZIndex = 201, Visible = true,
 	}, security)
-	corner(barBg, 3)
+	U.corner(barBg, 3)
 	loadBar = new("Frame", {Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = THEMES[1].a, ZIndex = 202}, barBg)
-	corner(loadBar, 3)
+	U.corner(loadBar, 3)
 end
 
 -- typing / focus blips on the security screen
-passBox:GetPropertyChangedSignal("Text"):Connect(function() play("type") end)
-passBox.Focused:Connect(function() play("click") end)
+passBox:GetPropertyChangedSignal("Text"):Connect(function() U.play("type") end)
+passBox.Focused:Connect(function() U.play("click") end)
 
 --==================================================
 -- MAIN WINDOW
@@ -2088,13 +2091,13 @@ local main = new("Frame", {
 	Size = UDim2.fromOffset(MAIN_W, MAIN_H), BackgroundColor3 = Color3.new(1, 1, 1),
 	BackgroundTransparency = Settings.UITransparency, Visible = false, BorderSizePixel = 0,
 }, gui)
-corner(main, 24)
+U.corner(main, 24)
 local mainStroke = stroke(main, 2, 0)
 local mainStrokeGradient = new("UIGradient", {}, mainStroke)
 local mainBg = new("UIGradient", {Rotation = 90}, main)
-local mainScale = new("UIScale", {Scale = fitScale(MAIN_W, MAIN_H, Settings.MenuScale)}, main)
+local mainScale = new("UIScale", {Scale = U.fitScale(MAIN_W, MAIN_H, Settings.MenuScale)}, main)
 
-local function targetScale() return fitScale(MAIN_W, MAIN_H, Settings.MenuScale) end
+function U.targetScale() return U.fitScale(MAIN_W, MAIN_H, Settings.MenuScale) end
 
 -- Header
 local header = new("Frame", {Size = UDim2.new(1, 0, 0, 76), BackgroundTransparency = 1}, main)
@@ -2114,25 +2117,25 @@ local ultraPill = new("TextLabel", {
 	AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -108, 0, 22), Size = UDim2.fromOffset(124, 28),
 	Font = Enum.Font.GothamBlack, TextSize = 10, Text = "", BackgroundColor3 = COL.off,
 }, header)
-corner(ultraPill, 14)
+U.corner(ultraPill, 14)
 
-local function headerBtn(x, text)
+function U.headerBtn(x, text)
 	local b = new("TextButton", {
 		AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, x, 0, 22), Size = UDim2.fromOffset(38, 28),
 		Text = text, Font = Enum.Font.GothamBlack, TextSize = 18, TextColor3 = Color3.fromRGB(225, 222, 235),
 		BackgroundColor3 = Color3.fromRGB(32, 29, 44), AutoButtonColor = false,
 	}, header)
-	corner(b, 10)
+	U.corner(b, 10)
 	return b
 end
-local minimizeBtn = headerBtn(-52, "-")
-local closeBtn = headerBtn(-10, "X")
+local minimizeBtn = U.headerBtn(-52, "-")
+local closeBtn = U.headerBtn(-10, "X")
 
 local glowLine = new("Frame", {
 	Position = UDim2.fromOffset(18, 74), Size = UDim2.new(1, -36, 0, 2),
 	BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0,
 }, main)
-corner(glowLine, 1)
+U.corner(glowLine, 1)
 local glowGradient = new("UIGradient", {}, glowLine)
 
 local content = new("ScrollingFrame", {
@@ -2160,27 +2163,27 @@ local nav = new("Frame", {
 	Position = UDim2.new(0, 14, 1, -62), Size = UDim2.new(1, -28, 0, 50),
 	BackgroundColor3 = Color3.fromRGB(16, 14, 23), BackgroundTransparency = 0.1,
 }, main)
-corner(nav, 16)
+U.corner(nav, 16)
 stroke(nav, 1, 0.7)
 local indicator = new("Frame", {
 	Position = UDim2.new(0, 3, 0, 4), Size = UDim2.new(0.25, -6, 1, -8), BackgroundColor3 = THEMES[1].b,
 }, nav)
-corner(indicator, 13)
+U.corner(indicator, 13)
 local indicatorGradient = new("UIGradient", {Rotation = 90}, indicator)
 
 local tabButtons = {}
 local currentPage = "Home"
-local function showPage(name)
+function U.showPage(name)
 	currentPage = name
 	for n, p in pairs(pages) do p.Visible = (n == name) end
 	local p = pages[name]
 	p.Position = UDim2.fromOffset(0, 16)
-	tw(p, 0.28, {Position = UDim2.fromOffset(0, 0)})
+	U.tw(p, 0.28, {Position = UDim2.fromOffset(0, 0)})
 	content.CanvasPosition = Vector2.new(0, 0)
 	local idx = table.find(PAGE_NAMES, name) or 1
-	tw(indicator, 0.28, {Position = UDim2.new((idx - 1) * 0.25, 3, 0, 4)}, Enum.EasingStyle.Back)
+	U.tw(indicator, 0.28, {Position = UDim2.new((idx - 1) * 0.25, 3, 0, 4)}, Enum.EasingStyle.Back)
 	for n, b in pairs(tabButtons) do
-		tw(b, 0.2, {TextColor3 = (n == name) and Color3.new(1, 1, 1) or COL.sub})
+		U.tw(b, 0.2, {TextColor3 = (n == name) and Color3.new(1, 1, 1) or COL.sub})
 	end
 end
 
@@ -2193,12 +2196,12 @@ for i, name in ipairs(PAGE_NAMES) do
 	tabButtons[name] = b
 	b.MouseButton1Click:Connect(function()
 		if currentPage == name then return end
-		play(clickSound)
-		showPage(name)
+		U.play(clickSound)
+		U.showPage(name)
 	end)
 end
 
-draggable(main, header)
+U.draggable(main, header)
 
 --==================================================
 -- MINIMIZED BUTTON + OPEN/CLOSE
@@ -2208,10 +2211,10 @@ local minimized = new("TextButton", {
 	Font = Enum.Font.GothamBlack, TextSize = 16, TextColor3 = Color3.new(1, 1, 1),
 	BackgroundColor3 = THEMES[1].b, Visible = false, AutoButtonColor = false,
 }, gui)
-corner(minimized, 20)
+U.corner(minimized, 20)
 local minStroke = stroke(minimized, 2, 0)
 local minGradient = new("UIGradient", {}, minStroke)
-local minDrag = draggable(minimized)
+local minDrag = U.draggable(minimized)
 
 local menuOpen, animating = false, false
 local STYLES = {
@@ -2219,35 +2222,35 @@ local STYLES = {
 	Elastic = Enum.EasingStyle.Elastic, Linear = Enum.EasingStyle.Linear,
 }
 
-local function openMenu()
+function U.openMenu()
 	if menuOpen or animating or not unlocked then return end
 	animating, menuOpen = true, true
 	minimized.Visible = false
-	local ts = targetScale()
+	local ts = U.targetScale()
 	local basePos = main.Position
 	mainScale.Scale = ts * 0.85
 	main.Position = basePos + UDim2.fromOffset(0, 26)
 	main.Visible = true
-	play(openSound)
+	U.play(openSound)
 	local style = STYLES[Settings.IntroAnimation] or Enum.EasingStyle.Back
 	local d = math.clamp(Settings.AnimationSpeed, 0.2, 0.9)
-	tw(mainScale, d, {Scale = ts}, style)
-	tw(main, d, {Position = basePos}, style)
+	U.tw(mainScale, d, {Scale = ts}, style)
+	U.tw(main, d, {Position = basePos}, style)
 	task.delay(d, function() animating = false end)
 end
 
 local function closeMenu()
 	if not menuOpen or animating then return end
 	animating, menuOpen = true, false
-	local ts = targetScale()
+	local ts = U.targetScale()
 	local basePos = main.Position
-	play("close")
-	tw(mainScale, 0.2, {Scale = ts * 0.85}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-	tw(main, 0.2, {Position = basePos + UDim2.fromOffset(0, 26)}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	U.play("close")
+	U.tw(mainScale, 0.2, {Scale = ts * 0.85}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	U.tw(main, 0.2, {Position = basePos + UDim2.fromOffset(0, 26)}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
 	task.delay(0.22, function()
 		main.Visible = false
 		main.Position = basePos
-		mainScale.Scale = targetScale()
+		mainScale.Scale = U.targetScale()
 		minimized.Visible = true
 		animating = false
 	end)
@@ -2257,29 +2260,31 @@ minimizeBtn.MouseButton1Click:Connect(closeMenu)
 closeBtn.MouseButton1Click:Connect(closeMenu)
 minimized.MouseButton1Click:Connect(function()
 	if minDrag.moved then return end
-	openMenu()
+	U.openMenu()
 end)
 
 bind(UIS.InputBegan, function(input, processed)
 	if processed or not unlocked then return end
 	if input.KeyCode == Enum.KeyCode.RightShift then
-		if menuOpen then closeMenu() else openMenu() end
+		if menuOpen then closeMenu() else U.openMenu() end
 	end
 end)
 
 local function applyScale()
 	if not animating then
-		if menuOpen then mainScale.Scale = targetScale() end
+		if menuOpen then mainScale.Scale = U.targetScale() end
 	end
-	secScale.Scale = fitScale(420, 310)
+	secScale.Scale = U.fitScale(420, 310)
 end
 
-local function hookViewport()
+function U.hookViewport()
 	local cam = workspace.CurrentCamera
 	if cam then bind(cam:GetPropertyChangedSignal("ViewportSize"), applyScale) end
 end
-hookViewport()
-bind(workspace:GetPropertyChangedSignal("CurrentCamera"), function() hookViewport(); applyScale() end)
+U.hookViewport()
+bind(workspace:GetPropertyChangedSignal("CurrentCamera"), function() U.hookViewport(); applyScale() end)
+task.delay(0.5, function() pcall(applyScale) end)
+task.delay(2, function() pcall(applyScale) end)
 
 -- Click feedback on every button inside the main window
 local function addClickFX(b)
@@ -2288,7 +2293,7 @@ local function addClickFX(b)
 	local s = new("UIScale", {Name = "ClickScale", Scale = 1}, b)
 	b.Activated:Connect(function()
 		s.Scale = 0.95
-		tw(s, 0.2, {Scale = 1}, Enum.EasingStyle.Back)
+		U.tw(s, 0.2, {Scale = 1}, Enum.EasingStyle.Back)
 	end)
 end
 for _, o in ipairs(main:GetDescendants()) do addClickFX(o) end
@@ -2297,7 +2302,7 @@ main.DescendantAdded:Connect(addClickFX)
 --==================================================
 -- THEME REFRESHERS (window chrome)
 --==================================================
-local function glowSeq()
+function U.glowSeq()
 	local t = theme()
 	return ColorSequence.new({
 		ColorSequenceKeypoint.new(0, t.a),
@@ -2305,7 +2310,7 @@ local function glowSeq()
 		ColorSequenceKeypoint.new(1, t.a),
 	})
 end
-local function shimmerSeq()
+function U.shimmerSeq()
 	local t = theme()
 	return ColorSequence.new({
 		ColorSequenceKeypoint.new(0, t.a),
@@ -2314,14 +2319,14 @@ local function shimmerSeq()
 	})
 end
 
-reg(function()
+U.reg(function()
 	local t = theme()
-	local seq = glowSeq()
+	local seq = U.glowSeq()
 	mainStrokeGradient.Color = seq
 	secGradient.Color = seq
 	minGradient.Color = seq
 	glowGradient.Color = seq
-	titleGradient.Color = shimmerSeq()
+	titleGradient.Color = U.shimmerSeq()
 	mainBg.Color = ColorSequence.new(
 		Color3.fromRGB(22, 18, 36):Lerp(t.b, 0.22), Color3.fromRGB(9, 8, 13))
 	indicator.BackgroundColor3 = Color3.new(1, 1, 1)
@@ -2347,7 +2352,7 @@ bind(RunService.RenderStepped, function()
 		titleGradient.Offset = Vector2.new(((t * 0.5) % 2) - 1, 0)
 	end
 	if minimized.Visible then minGradient.Rotation = (t * 90) % 360 end
-	updateRing()
+	U.updateRing()
 end)
 
 --==================================================
@@ -2356,16 +2361,16 @@ end)
 do
 	local p = pages.Home
 
-	local hero = makeCard(p, "ABILITY MENU", "Created by JAYVEE - for my own Roblox experience")
-	infoText(hero,
+	local hero = U.makeCard(p, "ABILITY MENU", "Created by JAYVEE - for my own Roblox experience")
+	U.infoText(hero,
 		function()
 			return "A personal power system that brings Goku's Ultra Instinct to your character: "
 				.. "it senses incoming attacks, dodges automatically, locks the camera on the enemy "
 				.. "and wraps you in a white aura."
 		end, false, 11)
 
-	local about = makeCard(p, "ABOUT THE SCRIPT", "What it does")
-	infoText(about, function()
+	local about = U.makeCard(p, "ABOUT THE SCRIPT", "What it does")
+	U.infoText(about, function()
 		return "- Ultra Instinct with manual ON/OFF and a chat intro when activated.\n"
 			.. "- Dodges EVERYTHING: melee, projectiles, beams, hitboxes, explosions, ranged abilities.\n"
 			.. "- Purple detection circle with live radius control; enemies inside turn red.\n"
@@ -2374,8 +2379,8 @@ do
 			.. "- Themes, scale, sounds and animation settings. Mobile friendly."
 	end)
 
-	local how = makeCard(p, "HOW TO USE", "Quick start")
-	infoText(how, function()
+	local how = U.makeCard(p, "HOW TO USE", "Quick start")
+	U.infoText(how, function()
 		return "1. Open ABILITY and switch ULTRA INSTINCT on.\n"
 			.. "2. Tune radius, dodge chance, threat sense and follow to your taste.\n"
 			.. "3. Use PLAYER for ESP and your dodge counter.\n"
@@ -2383,18 +2388,18 @@ do
 			.. "Tip: press RightShift (or tap the UI bubble) to hide / show the menu."
 	end)
 
-	local status = makeCard(p, "LIVE STATUS", "Updates in real time")
-	infoText(status, function()
+	local status = U.makeCard(p, "LIVE STATUS", "Updates in real time")
+	U.infoText(status, function()
 		return string.format(
 			"System: %s\nUltra Instinct: %s\nRadius: %s studs\nThreat range: %s studs\nDodges: %d\nESP: %s\nTheme: %s",
 			Settings.Enabled and "READY" or "OFF",
 			Settings.UltraActive and "ON" or "OFF",
-			fmt(Settings.Radius), fmt(Settings.ThreatRange), Settings.DodgeCount,
+			U.fmt(Settings.Radius), U.fmt(Settings.ThreatRange), Settings.DodgeCount,
 			Settings.ESPEnabled and "ON" or "OFF", theme().name)
 	end, true, 12)
 
-	local credits = makeCard(p, "CREDITS", nil)
-	infoText(credits, function()
+	local credits = U.makeCard(p, "CREDITS", nil)
+	U.infoText(credits, function()
 		return "Creator: JAYVEE\nStatus: ONLINE - Ability System Ready\nVersion: 3.4"
 	end)
 end
@@ -2405,79 +2410,79 @@ end
 do
 	local p = pages.Ability
 
-	local c1 = makeCard(p, "ULTRA INSTINCT", "Auto dodge - sense - camera lock - aura")
-	toggleRow(c1, "ULTRA INSTINCT", function() return Settings.UltraActive end, setUltra)
-	toggleRow(c1, "SYSTEM", function() return Settings.Enabled end, function(v)
+	local c1 = U.makeCard(p, "ULTRA INSTINCT", "Auto dodge - sense - camera lock - aura")
+	U.toggleRow(c1, "ULTRA INSTINCT", function() return Settings.UltraActive end, setUltra)
+	U.toggleRow(c1, "SYSTEM", function() return Settings.Enabled end, function(v)
 		Settings.Enabled = v
-		refreshBodyAura()
+		U.refreshBodyAura()
 	end)
-	toggleRow(c1, "AUTO DODGE", function() return Settings.AutoDodge end, function(v) Settings.AutoDodge = v end)
-	toggleRow(c1, "CAMERA LOCK", function() return Settings.CameraLock end, function(v)
+	U.toggleRow(c1, "AUTO DODGE", function() return Settings.AutoDodge end, function(v) Settings.AutoDodge = v end)
+	U.toggleRow(c1, "CAMERA LOCK", function() return Settings.CameraLock end, function(v)
 		Settings.CameraLock = v
-		if not v then cancelCameraLock() end
+		if not v then U.cancelCameraLock() end
 	end)
 
-	local c2 = makeCard(p, "PLAYER RADIUS", "Detection circle around your character")
-	stepperRow(c2, "RADIUS", function() return fmt(Settings.Radius) end,
-		adjust("Radius", Settings.RadiusStep, Settings.MinRadius, Settings.MaxRadius), "1 -", "1 +")
-	toggleRow(c2, "RADIUS CIRCLE", function() return Settings.RadiusCircle end, function(v) Settings.RadiusCircle = v end)
-	stepperRow(c2, "CONTACT DISTANCE", function() return fmt(Settings.ContactTriggerDistance) end,
-		adjust("ContactTriggerDistance", 0.5, 1, 10))
-	infoText(c2, function()
+	local c2 = U.makeCard(p, "PLAYER RADIUS", "Detection circle around your character")
+	U.stepperRow(c2, "RADIUS", function() return U.fmt(Settings.Radius) end,
+		U.adjust("Radius", Settings.RadiusStep, Settings.MinRadius, Settings.MaxRadius), "1 -", "1 +")
+	U.toggleRow(c2, "RADIUS CIRCLE", function() return Settings.RadiusCircle end, function(v) Settings.RadiusCircle = v end)
+	U.stepperRow(c2, "CONTACT DISTANCE", function() return U.fmt(Settings.ContactTriggerDistance) end,
+		U.adjust("ContactTriggerDistance", 0.5, 1, 10))
+	U.infoText(c2, function()
 		return "Being inside the radius alone does NOT trigger a dodge. An attack, real damage, close contact or an incoming ability must happen first."
 	end, false, 10)
 
-	local c5 = makeCard(p, "THREAT SENSE", "Dodge everything - not just melee")
-	toggleRow(c5, "PROJECTILES / ABILITIES", function() return Settings.DodgeProjectiles end, function(v) Settings.DodgeProjectiles = v end)
-	toggleRow(c5, "EXPLOSIONS", function() return Settings.DodgeExplosions end, function(v) Settings.DodgeExplosions = v end)
-	toggleRow(c5, "RANGED ATTACKS", function() return Settings.DodgeRanged end, function(v) Settings.DodgeRanged = v end)
-	stepperRow(c5, "THREAT RANGE", function() return fmt(Settings.ThreatRange) end,
-		adjust("ThreatRange", 5, 10, 80))
-	infoText(c5, function()
+	local c5 = U.makeCard(p, "THREAT SENSE", "Dodge everything - not just melee")
+	U.toggleRow(c5, "PROJECTILES / ABILITIES", function() return Settings.DodgeProjectiles end, function(v) Settings.DodgeProjectiles = v end)
+	U.toggleRow(c5, "EXPLOSIONS", function() return Settings.DodgeExplosions end, function(v) Settings.DodgeExplosions = v end)
+	U.toggleRow(c5, "RANGED ATTACKS", function() return Settings.DodgeRanged end, function(v) Settings.DodgeRanged = v end)
+	U.stepperRow(c5, "THREAT RANGE", function() return U.fmt(Settings.ThreatRange) end,
+		U.adjust("ThreatRange", 5, 10, 80))
+	U.infoText(c5, function()
 		return "Detects fast parts flying at you, beams, new hitboxes, explosions and enemies casting from far away. Dodges sideways or away from the danger."
 	end, false, 10)
 
-	local c3 = makeCard(p, "DODGE", "How Ultra Instinct reacts")
-	stepperRow(c3, "DODGE CHANCE", function() return fmt(Settings.DodgeChance) .. "%" end,
-		adjust("DodgeChance", 10, 10, 100))
-	choiceRow(c3, "DODGE ANIMATION", function() return Settings.DodgeAnimation end, function()
-		Settings.DodgeAnimation = cycleList({"Side Burst", "Backstep", "Blink"}, Settings.DodgeAnimation)
+	local c3 = U.makeCard(p, "DODGE", "How Ultra Instinct reacts")
+	U.stepperRow(c3, "DODGE CHANCE", function() return U.fmt(Settings.DodgeChance) .. "%" end,
+		U.adjust("DodgeChance", 10, 10, 100))
+	U.choiceRow(c3, "DODGE ANIMATION", function() return Settings.DodgeAnimation end, function()
+		Settings.DodgeAnimation = U.cycleList({"Side Burst", "Backstep", "Blink"}, Settings.DodgeAnimation)
 	end)
-	choiceRow(c3, "DODGE SPEED", function() return Settings.DodgeActivity end, function()
-		Settings.DodgeActivity = cycleList({"Low", "Normal", "High", "Max"}, Settings.DodgeActivity)
+	U.choiceRow(c3, "DODGE SPEED", function() return Settings.DodgeActivity end, function()
+		Settings.DodgeActivity = U.cycleList({"Low", "Normal", "High", "Max"}, Settings.DodgeActivity)
 	end)
-	stepperRow(c3, "REACTION WINDOW", function() return string.format("%.2fs", Settings.PerfectDodgeWindow) end,
-		adjust("PerfectDodgeWindow", 0.05, 0.1, 0.8))
-	toggleRow(c3, "WHITE AURA", function() return Settings.WhiteAura end, function(v)
+	U.stepperRow(c3, "REACTION WINDOW", function() return string.format("%.2fs", Settings.PerfectDodgeWindow) end,
+		U.adjust("PerfectDodgeWindow", 0.05, 0.1, 0.8))
+	U.toggleRow(c3, "WHITE AURA", function() return Settings.WhiteAura end, function(v)
 		Settings.WhiteAura = v
-		refreshBodyAura()
+		U.refreshBodyAura()
 	end)
-	toggleRow(c3, "WHITE AFTERIMAGE", function() return Settings.Afterimage end, function(v) Settings.Afterimage = v end)
-	choiceRow(c3, "AURA STYLE", function() return auraTint().name end, function()
+	U.toggleRow(c3, "WHITE AFTERIMAGE", function() return Settings.Afterimage end, function(v) Settings.Afterimage = v end)
+	U.choiceRow(c3, "AURA STYLE", function() return U.auraTint().name end, function()
 		Settings.AuraTintIndex = (Settings.AuraTintIndex % #AURA_TINTS) + 1
 		visualCharacter = nil -- force rebuild with the new colors
-		refreshBodyAura()
+		U.refreshBodyAura()
 	end)
-	stepperRow(c3, "AURA POWER", function() return string.format("%d%%", math.floor(Settings.AuraIntensity * 100 + 0.5)) end,
-		adjust("AuraIntensity", 0.25, 0.5, 2))
-	toggleRow(c3, "AURA LIGHTNING", function() return Settings.AuraLightning end, function(v) Settings.AuraLightning = v end)
-	toggleRow(c3, "POWER-UP BURST", function() return Settings.AuraBurst end, function(v) Settings.AuraBurst = v end)
+	U.stepperRow(c3, "AURA POWER", function() return string.format("%d%%", math.floor(Settings.AuraIntensity * 100 + 0.5)) end,
+		U.adjust("AuraIntensity", 0.25, 0.5, 2))
+	U.toggleRow(c3, "AURA LIGHTNING", function() return Settings.AuraLightning end, function(v) Settings.AuraLightning = v end)
+	U.toggleRow(c3, "POWER-UP BURST", function() return Settings.AuraBurst end, function(v) Settings.AuraBurst = v end)
 
-	local c4 = makeCard(p, "FOLLOW SYSTEM", "What happens after a successful dodge")
-	toggleRow(c4, "FOLLOW AFTER DODGE", function() return Settings.FollowAfterDodge end, function(v)
+	local c4 = U.makeCard(p, "FOLLOW SYSTEM", "What happens after a successful dodge")
+	U.toggleRow(c4, "FOLLOW AFTER DODGE", function() return Settings.FollowAfterDodge end, function(v)
 		Settings.FollowAfterDodge = v
 		if not v then following = false; followToken += 1; followTarget = nil end
 	end)
-	stepperRow(c4, "DURATION", function() return fmt(Settings.FollowDuration) .. "s" end,
-		adjust("FollowDuration", 1, 1, 15))
-	stepperRow(c4, "DISTANCE", function() return fmt(Settings.FollowDistance) end,
-		adjust("FollowDistance", 1, 1, 10))
-	stepperRow(c4, "FOLLOW SPEED", function() return tostring(math.floor(Settings.FollowSpeed * 100 + 0.5)) end,
-		adjust("FollowSpeed", 0.02, 0.06, 0.30))
-	choiceRow(c4, "MODE", function() return Settings.FollowMode end, function()
+	U.stepperRow(c4, "DURATION", function() return U.fmt(Settings.FollowDuration) .. "s" end,
+		U.adjust("FollowDuration", 1, 1, 15))
+	U.stepperRow(c4, "DISTANCE", function() return U.fmt(Settings.FollowDistance) end,
+		U.adjust("FollowDistance", 1, 1, 10))
+	U.stepperRow(c4, "FOLLOW SPEED", function() return tostring(math.floor(Settings.FollowSpeed * 100 + 0.5)) end,
+		U.adjust("FollowSpeed", 0.02, 0.06, 0.30))
+	U.choiceRow(c4, "MODE", function() return Settings.FollowMode end, function()
 		Settings.FollowMode = Settings.FollowMode == "Behind" and "Side" or "Behind"
 	end)
-	toggleRow(c4, "STOP EFFECT", function() return Settings.StopEffect end, function(v) Settings.StopEffect = v end)
+	U.toggleRow(c4, "STOP EFFECT", function() return Settings.StopEffect end, function(v) Settings.StopEffect = v end)
 end
 
 --==================================================
@@ -2486,44 +2491,44 @@ end
 do
 	local p = pages.Player
 
-	local c1 = makeCard(p, "PLAYER INFO", "Live character information")
+	local c1 = U.makeCard(p, "PLAYER INFO", "Live character information")
 	local fps = 60
 	bind(RunService.Heartbeat, function(dt) if dt > 0 then fps = fps * 0.9 + (1 / dt) * 0.1 end end)
-	infoText(c1, function()
+	U.infoText(c1, function()
 		local hp, mhp, ws = 0, 0, "-"
 		if humanoid then
 			hp, mhp = math.floor(humanoid.Health), math.floor(humanoid.MaxHealth)
-			ws = fmt(math.floor(humanoid.WalkSpeed * 10 + 0.5) / 10)
+			ws = U.fmt(math.floor(humanoid.WalkSpeed * 10 + 0.5) / 10)
 		end
 		return string.format(
 			"Name: %s\nDisplay Name: %s\nUser ID: %d\nHealth: %d / %d\nWalkSpeed: %s\nAbility: %s\nFPS: %d",
 			player.Name, player.DisplayName, player.UserId, hp, mhp, ws, Settings.Ability, math.floor(fps + 0.5))
 	end, true, 12)
 
-	local c2 = makeCard(p, "DODGE COUNTER", "How many attacks you've dodged")
+	local c2 = U.makeCard(p, "DODGE COUNTER", "How many attacks you've dodged")
 	local big = new("TextLabel", {
 		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 52), Font = Enum.Font.GothamBlack,
 		TextSize = 40, TextColor3 = Color3.new(1, 1, 1), Text = "0x",
 	}, c2)
-	reg(function()
+	U.reg(function()
 		big.Text = tostring(Settings.DodgeCount) .. "x"
 		big.TextColor3 = theme().a
 	end, true)
-	actionRow(c2, "RESET COUNTER", function()
+	U.actionRow(c2, "RESET COUNTER", function()
 		Settings.DodgeCount = 0
-		refreshStats()
+		U.refreshStats()
 	end)
 
-	local c3 = makeCard(p, "PLAYER ESP", "See other players through walls")
-	toggleRow(c3, "ESP", function() return Settings.ESPEnabled end, function(v) Settings.ESPEnabled = v end)
-	toggleRow(c3, "NAMES", function() return Settings.ESPNames end, function(v) Settings.ESPNames = v end)
-	toggleRow(c3, "HEALTH", function() return Settings.ESPHealth end, function(v) Settings.ESPHealth = v end)
-	toggleRow(c3, "DISTANCE", function() return Settings.ESPDistance end, function(v) Settings.ESPDistance = v end)
-	toggleRow(c3, "BOXES", function() return Settings.ESPBoxes end, function(v) Settings.ESPBoxes = v end)
-	toggleRow(c3, "INCLUDE NPCs / BOTS", function() return Settings.ESPNPCs end, function(v) Settings.ESPNPCs = v end)
-	stepperRow(c3, "MAX DISTANCE", function() return fmt(Settings.ESPMaxDistance) end,
-		adjust("ESPMaxDistance", 50, 50, 2000))
-	choiceRow(c3, "ESP COLOR", function() return ESP_COLORS[Settings.ESPColorIndex][1] end, function()
+	local c3 = U.makeCard(p, "PLAYER ESP", "See other players through walls")
+	U.toggleRow(c3, "ESP", function() return Settings.ESPEnabled end, function(v) Settings.ESPEnabled = v end)
+	U.toggleRow(c3, "NAMES", function() return Settings.ESPNames end, function(v) Settings.ESPNames = v end)
+	U.toggleRow(c3, "HEALTH", function() return Settings.ESPHealth end, function(v) Settings.ESPHealth = v end)
+	U.toggleRow(c3, "DISTANCE", function() return Settings.ESPDistance end, function(v) Settings.ESPDistance = v end)
+	U.toggleRow(c3, "BOXES", function() return Settings.ESPBoxes end, function(v) Settings.ESPBoxes = v end)
+	U.toggleRow(c3, "INCLUDE NPCs / BOTS", function() return Settings.ESPNPCs end, function(v) Settings.ESPNPCs = v end)
+	U.stepperRow(c3, "MAX DISTANCE", function() return U.fmt(Settings.ESPMaxDistance) end,
+		U.adjust("ESPMaxDistance", 50, 50, 2000))
+	U.choiceRow(c3, "ESP COLOR", function() return ESP_COLORS[Settings.ESPColorIndex][1] end, function()
 		Settings.ESPColorIndex = (Settings.ESPColorIndex % #ESP_COLORS) + 1
 	end)
 end
@@ -2535,52 +2540,52 @@ local unloadFn -- assigned below
 do
 	local p = pages.Settings
 
-	local c1 = makeCard(p, "APPEARANCE", "Make the menu yours")
-	choiceRow(c1, "THEME", function() return theme().name end, function()
+	local c1 = U.makeCard(p, "APPEARANCE", "Make the menu yours")
+	U.choiceRow(c1, "THEME", function() return theme().name end, function()
 		Settings.ThemeIndex = (Settings.ThemeIndex % #THEMES) + 1
 	end)
-	stepperRow(c1, "MENU SIZE", function() return string.format("%d%%", math.floor(Settings.MenuScale * 100 + 0.5)) end,
+	U.stepperRow(c1, "MENU SIZE", function() return string.format("%d%%", math.floor(Settings.MenuScale * 100 + 0.5)) end,
 		function(dir)
-			adjust("MenuScale", 0.05, 0.6, 1.4)(dir)
+			U.adjust("MenuScale", 0.05, 0.6, 1.4)(dir)
 			applyScale()
 		end)
-	stepperRow(c1, "TRANSPARENCY", function() return string.format("%d%%", math.floor(Settings.UITransparency * 100 + 0.5)) end,
-		adjust("UITransparency", 0.05, 0, 0.5))
-	toggleRow(c1, "ANIMATED BORDER", function() return Settings.BorderGlow end, function(v) Settings.BorderGlow = v end)
+	U.stepperRow(c1, "TRANSPARENCY", function() return string.format("%d%%", math.floor(Settings.UITransparency * 100 + 0.5)) end,
+		U.adjust("UITransparency", 0.05, 0, 0.5))
+	U.toggleRow(c1, "ANIMATED BORDER", function() return Settings.BorderGlow end, function(v) Settings.BorderGlow = v end)
 
-	local c2 = makeCard(p, "ANIMATION", "Open / close behavior")
-	choiceRow(c2, "INTRO STYLE", function() return Settings.IntroAnimation end, function()
-		Settings.IntroAnimation = cycleList({"Back", "Quint", "Elastic", "Linear"}, Settings.IntroAnimation)
+	local c2 = U.makeCard(p, "ANIMATION", "Open / close behavior")
+	U.choiceRow(c2, "INTRO STYLE", function() return Settings.IntroAnimation end, function()
+		Settings.IntroAnimation = U.cycleList({"Back", "Quint", "Elastic", "Linear"}, Settings.IntroAnimation)
 	end)
-	stepperRow(c2, "ANIMATION TIME", function() return string.format("%.2fs", Settings.AnimationSpeed) end,
-		adjust("AnimationSpeed", 0.05, 0.2, 0.9))
-	toggleRow(c2, "DODGE POPUP", function() return Settings.DodgePopup end, function(v) Settings.DodgePopup = v end)
+	U.stepperRow(c2, "ANIMATION TIME", function() return string.format("%.2fs", Settings.AnimationSpeed) end,
+		U.adjust("AnimationSpeed", 0.05, 0.2, 0.9))
+	U.toggleRow(c2, "DODGE POPUP", function() return Settings.DodgePopup end, function(v) Settings.DodgePopup = v end)
 
-	local c3 = makeCard(p, "SOUND", "UI and chat")
-	toggleRow(c3, "UI SOUNDS", function() return Settings.UISounds end, function(v) Settings.UISounds = v end)
-	stepperRow(c3, "VOLUME", function() return string.format("%d%%", math.floor(Settings.UIVolume * 100 + 0.5)) end,
-		adjust("UIVolume", 0.05, 0, 1))
-	toggleRow(c3, "CHAT INTRO (ULTRA)", function() return Settings.ChatIntro end, function(v) Settings.ChatIntro = v end)
+	local c3 = U.makeCard(p, "SOUND", "UI and chat")
+	U.toggleRow(c3, "UI SOUNDS", function() return Settings.UISounds end, function(v) Settings.UISounds = v end)
+	U.stepperRow(c3, "VOLUME", function() return string.format("%d%%", math.floor(Settings.UIVolume * 100 + 0.5)) end,
+		U.adjust("UIVolume", 0.05, 0, 1))
+	U.toggleRow(c3, "CHAT INTRO (ULTRA)", function() return Settings.ChatIntro end, function(v) Settings.ChatIntro = v end)
 
-	local c4 = makeCard(p, "CHARACTER", nil)
-	toggleRow(c4, "CUSTOM WALK / RUN ANIMATION", function() return Settings.CustomMovement end, function(v)
+	local c4 = U.makeCard(p, "CHARACTER", nil)
+	U.toggleRow(c4, "CUSTOM WALK / RUN ANIMATION", function() return Settings.CustomMovement end, function(v)
 		Settings.CustomMovement = v
 		if not v then Arczis.Stop() end
 	end)
 
-	local c5 = makeCard(p, "CONTROLS", nil)
-	infoText(c5, function()
+	local c5 = U.makeCard(p, "CONTROLS", nil)
+	U.infoText(c5, function()
 		return "Hide / show menu: RightShift (PC) or tap the UI bubble.\nDrag the header to move the menu.\nThe menu auto-fits your screen size."
 	end, false, 11)
 
-	local c6 = makeCard(p, "DATA", "Reset or unload")
-	actionRow(c6, "RESET UI SETTINGS", function()
+	local c6 = U.makeCard(p, "DATA", "Reset or unload")
+	U.actionRow(c6, "RESET UI SETTINGS", function()
 		for _, k in ipairs(UI_KEYS) do Settings[k] = Defaults[k] end
 		applyScale()
-		refreshAll()
+		U.refreshAll()
 	end)
 	local confirmToken = 0
-	actionRow(c6, "UNLOAD SCRIPT", function(btn)
+	U.actionRow(c6, "UNLOAD SCRIPT", function(btn)
 		if btn:GetAttribute("armed") then
 			if unloadFn then unloadFn() end
 			return
@@ -2599,7 +2604,7 @@ do
 end
 
 -- Tab text colors need theme refresh too
-reg(function()
+U.reg(function()
 	for n, b in pairs(tabButtons) do
 		b.TextColor3 = (n == currentPage) and Color3.new(1, 1, 1) or COL.sub
 	end
@@ -2614,19 +2619,19 @@ do
 		-- aura follows new character
 		if character and character ~= visualCharacter
 			and Settings.Enabled and Settings.UltraActive and Settings.WhiteAura then
-			refreshBodyAura()
+			U.refreshBodyAura()
 		end
 
 		-- joystick / keyboard movement releases lock + follow
 		if humanoid and humanoid.MoveDirection.Magnitude > 0.12 then
-			if cameraLocked then cancelCameraLock() end
+			if cameraLocked then U.cancelCameraLock() end
 			if following then
 				following = false
 				followToken += 1
 			end
 		end
 
-		updateRedMarks()
+		U.updateRedMarks()
 		local okS, errS = pcall(senseStep)
 		if not okS then warn("[JAYVEE] Sense error:", errS) end
 
@@ -2640,7 +2645,7 @@ do
 		statAcc += dt
 		if statAcc >= 0.3 then
 			statAcc = 0
-			refreshStats()
+			U.refreshStats()
 		end
 	end)
 end
@@ -2660,12 +2665,12 @@ unloadFn = function()
 	pcall(Arczis.Disconnect)
 	if humanoid then pcall(function() humanoid.AutoRotate = true end) end
 	if uiHighlight then uiHighlight:Destroy(); uiHighlight = nil end
-	clearBodyAura()
+	U.clearBodyAura()
 	for model, entry in pairs(redMarks) do
 		if entry.h then entry.h:Destroy() end
 		redMarks[model] = nil
 	end
-	for m in pairs(espEntries) do espDestroy(m) end
+	for m in pairs(espEntries) do U.espDestroy(m) end
 	espFolder:Destroy()
 	ringFolder:Destroy()
 	for _, s in ipairs(sounds) do s:Destroy() end
@@ -2680,39 +2685,39 @@ shared.JAYVEE_AbilityMenu_Destroy = unloadFn
 local unlocking = false
 unlockBtn.MouseButton1Click:Connect(function()
 	if unlocking then return end
-	play(clickSound)
+	U.play(clickSound)
 
 	if passBox.Text == PASSWORD then
 		unlocking = true
 		secStatus.Text = "ACCESS GRANTED - LOADING..."
 		secStatus.TextColor3 = Color3.fromRGB(175, 255, 195)
-		play("success")
-		tw(loadBar, 0.9, {Size = UDim2.new(1, 0, 1, 0)}, Enum.EasingStyle.Quad)
+		U.play("success")
+		U.tw(loadBar, 0.9, {Size = UDim2.new(1, 0, 1, 0)}, Enum.EasingStyle.Quad)
 		task.wait(1)
-		tw(secScale, 0.25, {Scale = secScale.Scale * 0.85}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+		U.tw(secScale, 0.25, {Scale = secScale.Scale * 0.85}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
 		task.wait(0.25)
 		security.Visible = false
 		unlocked = true
-		showPage("Home")
-		openMenu()
+		U.showPage("Home")
+		U.openMenu()
 	else
-		play("error")
+		U.play("error")
 		secStatus.Text = "ACCESS DENIED - INVALID KEY"
 		secStatus.TextColor3 = Color3.fromRGB(255, 120, 130)
 		local old = security.Position
-		tw(security, 0.07, {Position = old + UDim2.fromOffset(8, 0)}, Enum.EasingStyle.Linear)
+		U.tw(security, 0.07, {Position = old + UDim2.fromOffset(8, 0)}, Enum.EasingStyle.Linear)
 		task.wait(0.07)
-		tw(security, 0.07, {Position = old - UDim2.fromOffset(8, 0)}, Enum.EasingStyle.Linear)
+		U.tw(security, 0.07, {Position = old - UDim2.fromOffset(8, 0)}, Enum.EasingStyle.Linear)
 		task.wait(0.07)
-		tw(security, 0.07, {Position = old}, Enum.EasingStyle.Linear)
+		U.tw(security, 0.07, {Position = old}, Enum.EasingStyle.Linear)
 	end
 end)
 
 -- INITIALIZE
 Settings.UltraActive = false
-showPage("Home")
-refreshAll()
-refreshBodyAura()
+U.showPage("Home")
+U.refreshAll()
+U.refreshBodyAura()
 security.Visible = true
 main.Visible = false
 minimized.Visible = false
