@@ -1,5 +1,5 @@
 --==================================================================
--- ABILITY MENU - JAYVEE  (v3.7)
+-- ABILITY MENU - JAYVEE  (v4.0)
 -- Own-game LocalScript
 -- Place in: StarterPlayer > StarterPlayerScripts
 --
@@ -17,7 +17,7 @@
 --   * Damage fallback dodges even when no enemy is inside the radius.
 --==================================================================
 
-print("[JAYVEE] Ability Menu v3.4 loading...")
+print("[JAYVEE] Ability Menu v4.0 loading...")
 
 -- On-screen status banner: shows "loading", "loaded" or the exact ERROR on your screen.
 local function JV_Banner(text, isError)
@@ -68,7 +68,13 @@ local U = {} -- helper functions live here (Luau allows only 200 locals per scop
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local PASSWORD = "ULTRAINSTINCTBYJAYVEEV2"
+local SCRIPT_VERSION = "v4.0"
+local VERSION_MAJOR = SCRIPT_VERSION:match("%d+") or "4"
+local PASSWORD_PREFIX = "ULTRAINSTINCTBYJAYVEE"
+local PASSWORD = PASSWORD_PREFIX .. "V" .. VERSION_MAJOR
+local function expectedPassword()
+	return PASSWORD_PREFIX .. "V" .. VERSION_MAJOR
+end
 
 --==================================================
 -- CLEAN OLD COPY (safe re-execute)
@@ -159,7 +165,7 @@ local Settings = {
 	BorderGlow = true,
 	DodgePopup = true,
 	ChatIntro = true,
-	CustomMovement = true,
+	CustomMovement = false,
 }
 
 local Defaults = table.clone(Settings)
@@ -1946,6 +1952,7 @@ do
 	end
 	function Arczis.Setup(char)
 		Arczis.Disconnect()
+		if not Settings.CustomMovement then return end
 		hum = char:WaitForChild("Humanoid", 8)
 		if not hum then return end
 		local animator = hum:FindFirstChildOfClass("Animator")
@@ -1953,7 +1960,12 @@ do
 		local anim = Instance.new("Animation")
 		anim.AnimationId = Arczis.Id
 		local ok, t = pcall(function() return animator:LoadAnimation(anim) end)
-		if not ok or not t then return end
+		if not ok or not t then
+			-- Invalid/unavailable custom animation: leave Roblox's normal movement animation alone.
+			Settings.CustomMovement = false
+			Arczis.Disconnect()
+			return
+		end
 		t.Priority = Enum.AnimationPriority.Movement
 		t.Looped = true
 		track = t
@@ -2175,23 +2187,21 @@ local function clampGuiToViewport(frame, margin)
 	local cam = workspace.CurrentCamera
 	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
 	if vp.X < 200 or vp.Y < 200 then return end
-	margin = margin or 6
-	local abs = frame.AbsoluteSize
-	local ax, ay = frame.AnchorPoint.X, frame.AnchorPoint.Y
-	local minX = margin + abs.X * ax
-	local maxX = vp.X - margin - abs.X * (1 - ax)
-	local minY = margin + abs.Y * ay
-	local maxY = vp.Y - margin - abs.Y * (1 - ay)
-	local centerX = vp.X * 0.5 + frame.Position.X.Offset
-	local centerY = vp.Y * 0.5 + frame.Position.Y.Offset
-	if ax == 0.5 then
-		centerX = math.clamp(centerX, minX, maxX)
-		centerY = math.clamp(centerY, minY, maxY)
-		frame.Position = UDim2.fromOffset(centerX - vp.X * 0.5, centerY - vp.Y * 0.5)
-	else
-		local px = math.clamp(frame.AbsolutePosition.X, margin, math.max(margin, vp.X - abs.X - margin))
-		local py = math.clamp(frame.AbsolutePosition.Y, margin, math.max(margin, vp.Y - abs.Y - margin))
-		frame.Position = UDim2.fromOffset(px, py)
+	margin = margin or 8
+
+	-- AbsolutePosition/AbsoluteSize are used here so UIScale, mobile aspect ratios,
+	-- and the GUI inset are accounted for by Roblox instead of guessed from offsets.
+	local absPos = frame.AbsolutePosition
+	local absSize = frame.AbsoluteSize
+	local maxX = math.max(margin, vp.X - absSize.X - margin)
+	local maxY = math.max(margin, vp.Y - absSize.Y - margin)
+	local x = math.clamp(absPos.X, margin, maxX)
+	local y = math.clamp(absPos.Y, margin, maxY)
+
+	if math.abs(x - absPos.X) > 0.5 or math.abs(y - absPos.Y) > 0.5 then
+		local delta = Vector2.new(x - absPos.X, y - absPos.Y)
+		local pos = frame.Position
+		frame.Position = UDim2.new(pos.X.Scale, pos.X.Offset + delta.X, pos.Y.Scale, pos.Y.Offset + delta.Y)
 	end
 end
 
@@ -2281,7 +2291,7 @@ local titleLabel = new("TextLabel", {
 local titleGradient = new("UIGradient", {}, titleLabel)
 local subLabel = new("TextLabel", {
 	BackgroundTransparency = 1, Size = UDim2.new(1, -290, 0, 18), Position = UDim2.fromOffset(26, 46),
-	Text = "JAYVEE  -  POWER SYSTEM  -  v3.9", Font = Enum.Font.GothamBold, TextSize = 10,
+	Text = "JAYVEE  -  POWER SYSTEM  -  " .. SCRIPT_VERSION, Font = Enum.Font.GothamBold, TextSize = 10,
 	TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = COL.sub,
 }, header)
 
@@ -2646,16 +2656,22 @@ function U.openMenu()
 	animating, menuOpen = true, true
 	minimized.Visible = false
 	local ts = U.targetScale()
+	mainScale.Scale = ts
+	main.Visible = true
+	-- Never let the unlock/open animation start from an off-screen saved position.
+	clampGuiToViewport(main, 8)
 	local basePos = main.Position
 	mainScale.Scale = ts * 0.85
 	main.Position = basePos + UDim2.fromOffset(0, 26)
-	main.Visible = true
 	U.play(openSound)
 	local style = STYLES[Settings.IntroAnimation] or Enum.EasingStyle.Back
 	local d = math.clamp(Settings.AnimationSpeed, 0.2, 0.9)
 	U.tw(mainScale, d, {Scale = ts}, style)
 	U.tw(main, d, {Position = basePos}, style)
-	task.delay(d, function() animating = false end)
+	task.delay(d, function()
+		clampGuiToViewport(main, 8)
+		animating = false
+	end)
 end
 
 local function closeMenu()
@@ -3115,7 +3131,7 @@ unlockBtn.Activated:Connect(function()
 	if unlocking then return end
 	U.play(clickSound)
 
-	if passBox.Text == PASSWORD then
+	if passBox.Text == expectedPassword() then
 		unlocking = true
 		secStatus.Text = "ACCESS GRANTED - LOADING..."
 		secStatus.TextColor3 = Color3.fromRGB(175, 255, 195)
@@ -3127,6 +3143,9 @@ unlockBtn.Activated:Connect(function()
 		security.Visible = false
 		unlocked = true
 		U.showPage("Home")
+		-- Re-fit and clamp after the security screen disappears, before the menu animation.
+		applyScale()
+		clampGuiToViewport(main, 8)
 		U.openMenu()
 	else
 		U.play("error")
@@ -3150,7 +3169,7 @@ security.Visible = true
 main.Visible = false
 minimized.Visible = false
 
-print("[JAYVEE] Ability Menu v3.7 loaded - Security screen should be visible.")
+print("[JAYVEE] Ability Menu " .. SCRIPT_VERSION .. " loaded - Security screen should be visible.")
 
 end, function(e) return tostring(e) .. "\n" .. debug.traceback() end)
 
