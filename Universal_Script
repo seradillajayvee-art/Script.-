@@ -1,5 +1,5 @@
 --==================================================================
--- ABILITY MENU - JAYVEE  (v4.3)
+-- ABILITY MENU - JAYVEE  (v4.5)
 -- Own-game LocalScript
 -- Place in: StarterPlayer > StarterPlayerScripts
 --
@@ -10,6 +10,15 @@
 --   PLAYER   : player info, dodge counter (+reset), Player ESP
 --   SETTINGS : theme, scale, sounds, animations, keybind, reset/unload
 --
+-- v4.6 CHANGES
+--   * Fixed startup failure on clients where the executor does not expose `shared`.
+--   * Added safe shared-state fallback so UI initialization can continue.
+--   * Kept Delta/local-asset compatibility and all existing features.
+--   * Fixed duplicate Ultra intro audio declaration.
+--   * Hardened audio/chat compatibility for mobile clients.
+--   * Fixed re-execution audio cleanup bookkeeping.
+--   * Version/password metadata now consistently reports v4.5.
+
 -- v4.3 CHANGES
 --   * Ultra Instinct intro sound support (local asset / Roblox asset ID).
 --   * Dodge chat reactions every 5 dodges with randomized, non-repeating lines.
@@ -40,12 +49,14 @@
 --   * Damage fallback dodges even when no enemy is inside the radius.
 --==================================================================
 
-print("[JAYVEE] Ability Menu v4.3 loading...")
+print("[JAYVEE] Ability Menu v4.5 loading...")
 
 -- On-screen status banner: shows "loading", "loaded" or the exact ERROR on your screen.
 local function JV_Banner(text, isError)
 	pcall(function()
-		local pg = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui", 10)
+		local lp = game:GetService("Players").LocalPlayer
+		if not lp then return end
+		local pg = lp:WaitForChild("PlayerGui", 15)
 		if not pg then return end
 		local g = pg:FindFirstChild("JAYVEE_Status")
 		if not g then
@@ -81,6 +92,9 @@ JV_Banner("[JAYVEE] Script is running... loading", false)
 local JV_ok, JV_err = xpcall(function()
 
 local Players = game:GetService("Players")
+
+-- Some clients expose `shared`, others do not. Never let that stop UI startup.
+local JV_SHARED = (type(shared) == "table") and shared or {}
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
@@ -91,7 +105,7 @@ local U = {} -- helper functions live here (Luau allows only 200 locals per scop
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local SCRIPT_VERSION = "v4.3"
+local SCRIPT_VERSION = "v4.6"
 local VERSION_MAJOR = SCRIPT_VERSION:match("%d+") or "4"
 local PASSWORD_PREFIX = "ULTRAINSTINCTBYJAYVEE"
 local PASSWORD = PASSWORD_PREFIX .. "V" .. VERSION_MAJOR
@@ -102,9 +116,9 @@ end
 --==================================================
 -- CLEAN OLD COPY (safe re-execute)
 --==================================================
-if shared.JAYVEE_AbilityMenu_Destroy then
-	pcall(shared.JAYVEE_AbilityMenu_Destroy)
-	shared.JAYVEE_AbilityMenu_Destroy = nil
+if type(JV_SHARED.JAYVEE_AbilityMenu_Destroy) == "function" then
+	pcall(JV_SHARED.JAYVEE_AbilityMenu_Destroy)
+	JV_SHARED.JAYVEE_AbilityMenu_Destroy = nil
 end
 do
 	local old = playerGui:FindFirstChild("AbilityMenu_JAYVEE")
@@ -320,7 +334,6 @@ end
 
 -- Sounds
 local sounds = {}
-local ultraIntroSound
 function U.makeSound(id, volume)
 	local s = Instance.new("Sound")
 	s.SoundId = "rbxassetid://" .. tostring(id)
@@ -396,8 +409,16 @@ local ultraIntroSound
 local ultraOutroSound
 
 local function setupUltraAudio()
-	if ultraIntroSound then pcall(function() ultraIntroSound:Destroy() end) end
-	if ultraOutroSound then pcall(function() ultraOutroSound:Destroy() end) end
+	if ultraIntroSound then
+		pcall(function() ultraIntroSound:Stop() end)
+		pcall(function() ultraIntroSound:Destroy() end)
+		ultraIntroSound = nil
+	end
+	if ultraOutroSound then
+		pcall(function() ultraOutroSound:Stop() end)
+		pcall(function() ultraOutroSound:Destroy() end)
+		ultraOutroSound = nil
+	end
 	ultraIntroSound = makeUltraAudio(
 		"JAYVEE_UltraInstinctIntro",
 		Settings.UltraIntroSound,
@@ -1441,21 +1462,21 @@ end
 -- Dodge reactions: one message every N successful dodges, with a no-repeat bag
 -- so the same line is not spammed over and over.
 local DODGE_CHAT_LINES = {
-	"Heh... too slow ðŸ˜ðŸ’¨",
-	"Did you really think that would hit me? ðŸ‘€âœ¨",
-	"My body moved before I even thought about it... ðŸ¥¶âš¡",
-	"Keep swinging. I can do this all day ðŸ˜ŽðŸ”¥",
-	"You missed again! ðŸ˜‚ðŸ’«",
-	"Reflexes on autopilot. ðŸ§˜â€â™‚ï¸âš¡",
-	"Almost... but not quite. ðŸ˜ˆðŸ’¨",
-	"That was close! Too bad I already moved ðŸ˜âœ¨",
-	"Bro is fighting the air now ðŸ’€ðŸ˜‚",
-	"You cannot touch what you cannot catch ðŸª½âš¡",
-	"Another dodge? Easy. ðŸ˜ŒðŸ’¨",
-	"Ultra reflexes kicking in! ðŸ‘ï¸âš¡",
-	"I saw that coming from a mile away ðŸ˜ŽðŸ‘€",
-	"Try again... maybe next century ðŸ˜‚ðŸ”¥",
-	"Instinct > reaction time. ðŸ§˜â€â™‚ï¸âœ¨",
+	"Heh... too slow 😏💨",
+	"Did you really think that would hit me? 👀✨",
+	"My body moved before I even thought about it... 🥶⚡",
+	"Keep swinging. I can do this all day 😎🔥",
+	"You missed again! 😂💫",
+	"Reflexes on autopilot. 🧘‍♂️⚡",
+	"Almost... but not quite. 😈💨",
+	"That was close! Too bad I already moved 😏✨",
+	"Bro is fighting the air now 💀😂",
+	"You cannot touch what you cannot catch 🪽⚡",
+	"Another dodge? Easy. 😌💨",
+	"Ultra reflexes kicking in! 👁️⚡",
+	"I saw that coming from a mile away 😎👀",
+	"Try again... maybe next century 😂🔥",
+	"Instinct > reaction time. 🧘‍♂️✨",
 }
 
 local function dodgeChatAlreadyUsed(index)
@@ -1489,7 +1510,10 @@ local function sendChatLine(text)
 		if TCS.ChatVersion == Enum.ChatVersion.TextChatService then
 			local channels = TCS:FindFirstChild("TextChannels")
 			local ch = channels and (channels:FindFirstChild("RBXGeneral") or channels:FindFirstChildWhichIsA("TextChannel"))
-			if ch then ch:SendAsync(text); sent = true end
+			if ch and ch.Parent then
+				ch:SendAsync(tostring(text))
+				sent = true
+			end
 		end
 	end)
 	if sent then return true end
@@ -3439,9 +3463,9 @@ unloadFn = function()
 		local statusGui = playerGui:FindFirstChild("JAYVEE_Status")
 		if statusGui then statusGui:Destroy() end
 	end)
-	if shared.JAYVEE_AbilityMenu_Destroy == unloadFn then shared.JAYVEE_AbilityMenu_Destroy = nil end
+	if JV_SHARED.JAYVEE_AbilityMenu_Destroy == unloadFn then JV_SHARED.JAYVEE_AbilityMenu_Destroy = nil end
 end
-shared.JAYVEE_AbilityMenu_Destroy = unloadFn
+JV_SHARED.JAYVEE_AbilityMenu_Destroy = unloadFn
 
 --==================================================
 -- UNLOCK FLOW:  Security -> Password -> Loading -> Menu
