@@ -85,6 +85,7 @@ local Settings = {
 	DodgeChance = 100,               -- Chance from 1 to 100.
 	DodgeAnimation = "Side Burst",  -- Dodge animation preset.
 	PerfectDodgeWindow = 0.30,       -- Attack timing window.
+	DodgeActivity = "High",          -- Dodge speed: "Low" / "Normal" / "High" / "Max" (does NOT change triggers).
 
 	-- Visual effects
 	WhiteAura = true,               -- White aura ON/OFF.
@@ -250,7 +251,7 @@ gui.Name = "AbilityMenu_JAYVEE"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.DisplayOrder = 10000
-gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Enabled = true
 gui.Parent = player:WaitForChild("PlayerGui")
 
@@ -263,157 +264,377 @@ local secScale
 -- ULTRA INSTINCT LOADING SCREEN
 --==================================================
 
-local loading = Instance.new("Frame")
+local loading = Instance.new("CanvasGroup")
 loading.Name = "UltraInstinctLoading"
 loading.Size = UDim2.fromScale(1, 1)
-loading.BackgroundColor3 = Color3.fromRGB(5, 5, 9)
+loading.BackgroundColor3 = Color3.new(1, 1, 1)
+loading.BorderSizePixel = 0
 loading.ZIndex = 100000
 loading.Visible = false
 loading.Active = false
 loading.Parent = gui
 
-local loadGlow = Instance.new("Frame")
-loadGlow.Size = UDim2.fromOffset(270, 270)
-loadGlow.Position = UDim2.new(0.5, -135, 0.42, -135)
-loadGlow.BackgroundColor3 = Color3.fromRGB(104, 72, 158)
-loadGlow.BackgroundTransparency = 0.86
-loadGlow.ZIndex = 1001
-loadGlow.Parent = loading
-corner(loadGlow, 135)
+local loadBg = Instance.new("UIGradient")
+loadBg.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(26, 12, 52)),
+	ColorSequenceKeypoint.new(0.5, Color3.fromRGB(8, 6, 18)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(2, 2, 7)),
+})
+loadBg.Rotation = 90
+loadBg.Parent = loading
 
-local loadRing = Instance.new("Frame")
-loadRing.Size = UDim2.fromOffset(170, 170)
-loadRing.Position = UDim2.new(0.5, -85, 0.42, -85)
-loadRing.BackgroundTransparency = 1
-loadRing.ZIndex = 1002
-loadRing.Parent = loading
-local loadStroke = addStroke(loadRing, 0.05)
-loadStroke.Thickness = 3
+-- floating light particles
+local loadParticleLayer = Instance.new("Frame")
+loadParticleLayer.Size = UDim2.fromScale(1, 1)
+loadParticleLayer.BackgroundTransparency = 1
+loadParticleLayer.Parent = loading
 
-local loadCore = Instance.new("Frame")
-loadCore.Size = UDim2.fromOffset(112, 112)
-loadCore.Position = UDim2.new(0.5, -56, 0.42, -56)
-loadCore.BackgroundColor3 = Color3.fromRGB(16, 14, 23)
-loadCore.BackgroundTransparency = 0.08
-loadCore.ZIndex = 1003
-loadCore.Parent = loading
-corner(loadCore, 56)
-local coreStroke = addStroke(loadCore, 0.15)
+local loadParticles = {}
+for i = 1, 38 do
+	local size = math.random(2, 4)
+	local f = Instance.new("Frame")
+	f.Size = UDim2.fromOffset(size, size)
+	f.BackgroundColor3 = (i % 3 == 0) and Color3.fromRGB(190, 150, 255) or Color3.new(1, 1, 1)
+	f.BorderSizePixel = 0
+	f.Parent = loadParticleLayer
+	corner(f, 4)
+	loadParticles[i] = {
+		frame = f,
+		x = math.random(),
+		y = math.random(),
+		speed = 0.02 + math.random() * 0.06,
+		freq = 0.8 + math.random() * 1.6,
+		phase = math.random() * 6.28,
+	}
+end
+
+-- cinematic bars
+local loadBarTop = Instance.new("Frame")
+loadBarTop.Size = UDim2.new(1, 0, 0, 0)
+loadBarTop.BackgroundColor3 = Color3.new(0, 0, 0)
+loadBarTop.BorderSizePixel = 0
+loadBarTop.Parent = loading
+local loadBarBottom = Instance.new("Frame")
+loadBarBottom.AnchorPoint = Vector2.new(0, 1)
+loadBarBottom.Position = UDim2.fromScale(0, 1)
+loadBarBottom.Size = UDim2.new(1, 0, 0, 0)
+loadBarBottom.BackgroundColor3 = Color3.new(0, 0, 0)
+loadBarBottom.BorderSizePixel = 0
+loadBarBottom.Parent = loading
+
+-- emblem (glow + 3 counter-rotating gradient rings + core)
+local emblem = Instance.new("Frame")
+emblem.AnchorPoint = Vector2.new(0.5, 0.5)
+emblem.Size = UDim2.fromOffset(150, 150)
+emblem.Position = UDim2.fromScale(0.5, 0.33)
+emblem.BackgroundTransparency = 1
+emblem.Parent = loading
+local emblemScale = Instance.new("UIScale")
+emblemScale.Parent = emblem
+
+local function emblemCircle(size, color, transparency)
+	local c = Instance.new("Frame")
+	c.AnchorPoint = Vector2.new(0.5, 0.5)
+	c.Position = UDim2.fromScale(0.5, 0.5)
+	c.Size = UDim2.fromOffset(size, size)
+	c.BackgroundColor3 = color
+	c.BackgroundTransparency = transparency
+	c.BorderSizePixel = 0
+	c.Parent = emblem
+	corner(c, 500)
+	return c
+end
+
+local loadGlowOuter = emblemCircle(220, Color3.fromRGB(120, 80, 220), 0.9)
+local loadGlowInner = emblemCircle(165, Color3.fromRGB(190, 160, 255), 0.88)
+
+local function emblemRing(size, thickness, c1, c2)
+	local r = emblemCircle(size, Color3.new(1, 1, 1), 1)
+	local st = Instance.new("UIStroke")
+	st.Thickness = thickness
+	st.Color = Color3.new(1, 1, 1)
+	st.Parent = r
+	local g = Instance.new("UIGradient")
+	g.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, c1),
+		ColorSequenceKeypoint.new(0.45, c2),
+		ColorSequenceKeypoint.new(1, c1),
+	})
+	g.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0),
+		NumberSequenceKeypoint.new(0.42, 0.1),
+		NumberSequenceKeypoint.new(0.5, 1),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	g.Parent = st
+	return g
+end
+
+local loadRing1 = emblemRing(150, 3, Color3.fromRGB(150, 105, 225), Color3.new(1, 1, 1))
+local loadRing2 = emblemRing(118, 2, Color3.fromRGB(110, 80, 190), Color3.fromRGB(220, 205, 255))
+local loadRing3 = emblemRing(88, 1.5, Color3.fromRGB(255, 255, 255), Color3.fromRGB(160, 120, 240))
+
+local loadCore = emblemCircle(62, Color3.fromRGB(12, 10, 20), 0.05)
+local coreStroke = Instance.new("UIStroke")
 coreStroke.Thickness = 2
+coreStroke.Color = Color3.fromRGB(235, 225, 255)
+coreStroke.Parent = loadCore
 
+local loadCoreText = Instance.new("TextLabel")
+loadCoreText.BackgroundTransparency = 1
+loadCoreText.Size = UDim2.fromScale(1, 1)
+loadCoreText.Text = "UI"
+loadCoreText.Font = Enum.Font.GothamBlack
+loadCoreText.TextSize = 26
+loadCoreText.TextColor3 = Color3.new(1, 1, 1)
+loadCoreText.Parent = loadCore
+
+-- title / subtitle
 local loadTitle = Instance.new("TextLabel")
+loadTitle.AnchorPoint = Vector2.new(0.5, 0.5)
 loadTitle.BackgroundTransparency = 1
 loadTitle.Size = UDim2.new(1, -30, 0, 34)
-loadTitle.Position = UDim2.new(0, 15, 0.42, 62)
+loadTitle.Position = UDim2.new(0.5, 0, 0.33, 112)
 loadTitle.Text = "ULTRA INSTINCT"
 loadTitle.Font = Enum.Font.GothamBlack
-loadTitle.TextSize = 25
+loadTitle.TextSize = 28
 loadTitle.TextColor3 = Color3.new(1, 1, 1)
-loadTitle.ZIndex = 1004
+loadTitle.TextTransparency = 1
 loadTitle.Parent = loading
+local loadTitleGrad = Instance.new("UIGradient")
+loadTitleGrad.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+	ColorSequenceKeypoint.new(0.5, Color3.fromRGB(215, 195, 255)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255)),
+})
+loadTitleGrad.Parent = loadTitle
 
 local loadSub = Instance.new("TextLabel")
+loadSub.AnchorPoint = Vector2.new(0.5, 0.5)
 loadSub.BackgroundTransparency = 1
-loadSub.Size = UDim2.new(1, -30, 0, 22)
-loadSub.Position = UDim2.new(0, 15, 0.42, 99)
-loadSub.Text = "JAYVEE • ABILITY CORE"
+loadSub.Size = UDim2.new(1, -30, 0, 20)
+loadSub.Position = UDim2.new(0.5, 0, 0.33, 140)
+loadSub.Text = "J A Y V E E   •   A B I L I T Y   C O R E"
 loadSub.Font = Enum.Font.GothamBold
 loadSub.TextSize = 10
-loadSub.TextColor3 = Color3.fromRGB(170, 165, 190)
-loadSub.ZIndex = 1004
+loadSub.TextColor3 = Color3.fromRGB(170, 160, 205)
+loadSub.TextTransparency = 1
 loadSub.Parent = loading
 
+-- status + progress
 local loadStatus = Instance.new("TextLabel")
+loadStatus.AnchorPoint = Vector2.new(0.5, 0.5)
 loadStatus.BackgroundTransparency = 1
-loadStatus.Size = UDim2.new(1, -60, 0, 24)
-loadStatus.Position = UDim2.new(0, 30, 0.72, 0)
+loadStatus.Size = UDim2.new(1, -60, 0, 20)
+loadStatus.Position = UDim2.fromScale(0.5, 0.76)
 loadStatus.Text = "INITIALIZING..."
 loadStatus.Font = Enum.Font.GothamBold
 loadStatus.TextSize = 11
-loadStatus.TextColor3 = Color3.fromRGB(210, 205, 225)
-loadStatus.ZIndex = 1004
+loadStatus.TextColor3 = Color3.fromRGB(220, 212, 240)
 loadStatus.Parent = loading
 
 local loadBarBack = Instance.new("Frame")
-loadBarBack.Size = UDim2.new(0, 330, 0, 6)
-loadBarBack.Position = UDim2.new(0.5, -165, 0.77, 0)
-loadBarBack.BackgroundColor3 = Color3.fromRGB(32, 29, 42)
-loadBarBack.ZIndex = 1004
+loadBarBack.AnchorPoint = Vector2.new(0.5, 0.5)
+loadBarBack.Size = UDim2.fromOffset(340, 8)
+loadBarBack.Position = UDim2.fromScale(0.5, 0.82)
+loadBarBack.BackgroundColor3 = Color3.fromRGB(26, 23, 38)
+loadBarBack.BorderSizePixel = 0
 loadBarBack.Parent = loading
-corner(loadBarBack, 6)
+corner(loadBarBack, 8)
+local loadBarStroke = addStroke(loadBarBack, 0.55)
+loadBarStroke.Color = Color3.fromRGB(110, 80, 190)
 
 local loadBar = Instance.new("Frame")
 loadBar.Size = UDim2.new(0, 0, 1, 0)
-loadBar.BackgroundColor3 = Color3.fromRGB(150, 105, 225)
-loadBar.ZIndex = 1005
+loadBar.BackgroundColor3 = Color3.new(1, 1, 1)
+loadBar.BorderSizePixel = 0
+loadBar.ClipsDescendants = true
 loadBar.Parent = loadBarBack
-corner(loadBar, 6)
+corner(loadBar, 8)
+local loadBarGrad = Instance.new("UIGradient")
+loadBarGrad.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(120, 80, 220)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(235, 220, 255)),
+})
+loadBarGrad.Parent = loadBar
+
+local loadShimmer = Instance.new("Frame")
+loadShimmer.Size = UDim2.new(0, 70, 1, 0)
+loadShimmer.BackgroundColor3 = Color3.new(1, 1, 1)
+loadShimmer.BorderSizePixel = 0
+loadShimmer.Parent = loadBar
+local shimmerGrad = Instance.new("UIGradient")
+shimmerGrad.Transparency = NumberSequence.new({
+	NumberSequenceKeypoint.new(0, 1),
+	NumberSequenceKeypoint.new(0.5, 0.35),
+	NumberSequenceKeypoint.new(1, 1),
+})
+shimmerGrad.Parent = loadShimmer
+
+local loadKnob = Instance.new("Frame")
+loadKnob.AnchorPoint = Vector2.new(0.5, 0.5)
+loadKnob.Size = UDim2.fromOffset(14, 14)
+loadKnob.Position = UDim2.fromScale(0, 0.5)
+loadKnob.BackgroundColor3 = Color3.new(1, 1, 1)
+loadKnob.BorderSizePixel = 0
+loadKnob.Parent = loadBarBack
+corner(loadKnob, 14)
+local knobStroke = Instance.new("UIStroke")
+knobStroke.Thickness = 3
+knobStroke.Color = Color3.fromRGB(170, 130, 255)
+knobStroke.Transparency = 0.45
+knobStroke.Parent = loadKnob
 
 local loadPercent = Instance.new("TextLabel")
+loadPercent.AnchorPoint = Vector2.new(0.5, 0.5)
 loadPercent.BackgroundTransparency = 1
 loadPercent.Size = UDim2.fromOffset(100, 22)
-loadPercent.Position = UDim2.new(0.5, -50, 0.80, 0)
+loadPercent.Position = UDim2.new(0.5, 0, 0.82, 24)
 loadPercent.Text = "0%"
 loadPercent.Font = Enum.Font.GothamBlack
-loadPercent.TextSize = 10
-loadPercent.TextColor3 = Color3.fromRGB(190, 185, 210)
-loadPercent.ZIndex = 1004
+loadPercent.TextSize = 13
+loadPercent.TextColor3 = Color3.new(1, 1, 1)
 loadPercent.Parent = loading
 
+local loadTip = Instance.new("TextLabel")
+loadTip.AnchorPoint = Vector2.new(0.5, 0.5)
+loadTip.BackgroundTransparency = 1
+loadTip.Size = UDim2.new(1, -40, 0, 18)
+loadTip.Position = UDim2.fromScale(0.5, 0.94)
+loadTip.Text = ""
+loadTip.Font = Enum.Font.Gotham
+loadTip.TextSize = 10
+loadTip.TextColor3 = Color3.fromRGB(135, 128, 160)
+loadTip.Parent = loading
+
+local loadFlash = Instance.new("Frame")
+loadFlash.Size = UDim2.fromScale(1, 1)
+loadFlash.BackgroundColor3 = Color3.new(1, 1, 1)
+loadFlash.BackgroundTransparency = 1
+loadFlash.BorderSizePixel = 0
+loadFlash.ZIndex = 10
+loadFlash.Parent = loading
+
 local loadingStatuses = {
-    "INITIALIZING ULTRA INSTINCT...",
-    "SYNCING MOVEMENT CORE...",
-    "LOADING DODGE SENSE...",
-    "CALIBRATING FOLLOW SYSTEM...",
-    "ARMING SECURITY LAYER...",
-    "ABILITY CORE READY."
+	"INITIALIZING ULTRA INSTINCT...",
+	"SYNCING MOVEMENT CORE...",
+	"LOADING DODGE SENSE...",
+	"CALIBRATING FOLLOW SYSTEM...",
+	"ARMING SECURITY LAYER...",
+	"ABILITY CORE READY."
+}
+
+local loadingTips = {
+	"Move the joystick to release the enemy lock.",
+	"Radius alone never triggers a dodge.",
+	"Enemies inside the circle turn red on dodge.",
+	"Change Dodge Activity in Power > Ultra Instinct.",
+	"Follow can be switched ON/OFF in the Follow System.",
+	"Almost there...",
 }
 
 -- ================================================================
 -- LOADING SCREEN
--- Startup loading animation shown before the Security UI.
+-- Shown after the correct key is entered, then opens the menu.
 -- ================================================================
+local loadConn
+local loadShownPct, loadTargetPct = 0, 0
+
+local function runLoadingSteps()
+	gui.Enabled = true
+	loading.Visible = true
+	loading.Active = true
+	loading.GroupTransparency = 1
+	loadFlash.BackgroundTransparency = 1
+	security.Visible = false
+	main.Visible = false
+	minimized.Visible = false
+
+	loadShownPct, loadTargetPct = 0, 0
+	loadBar.Size = UDim2.new(0, 0, 1, 0)
+	loadPercent.Text = "0%"
+	loadTitle.TextTransparency = 1
+	loadSub.TextTransparency = 1
+	loadBarTop.Size = UDim2.new(1, 0, 0, 0)
+	loadBarBottom.Size = UDim2.new(1, 0, 0, 0)
+
+	if loadConn then loadConn:Disconnect() end
+	local t0 = os.clock()
+	local last = t0
+	loadConn = RunService.RenderStepped:Connect(function()
+		local now = os.clock()
+		local dt = math.min(now - last, 0.05)
+		last = now
+		local t = now - t0
+
+		loadRing1.Rotation = (t * 140) % 360
+		loadRing2.Rotation = (-t * 210) % 360
+		loadRing3.Rotation = (t * 320) % 360
+		loadBg.Rotation = 90 + math.sin(t * 0.5) * 14
+
+		local p = (math.sin(t * 2.4) + 1) / 2
+		loadGlowOuter.Size = UDim2.fromOffset(210 + p * 30, 210 + p * 30)
+		loadGlowOuter.BackgroundTransparency = 0.92 - p * 0.05
+		loadGlowInner.Size = UDim2.fromOffset(160 + p * 14, 160 + p * 14)
+		loadCoreText.TextTransparency = 0.05 + (1 - p) * 0.12
+
+		loadShownPct += (loadTargetPct - loadShownPct) * math.min(dt * 8, 1)
+		loadPercent.Text = math.floor(loadShownPct + 0.5) .. "%"
+		loadKnob.Position = UDim2.new(loadBar.Size.X.Scale, 0, 0.5, 0)
+		loadShimmer.Position = UDim2.new(((t * 0.9) % 1.6) - 0.3, 0, 0, 0)
+
+		for _, pt in ipairs(loadParticles) do
+			pt.y -= pt.speed * dt
+			if pt.y < -0.02 then
+				pt.y = 1.02
+				pt.x = math.random()
+			end
+			pt.frame.Position = UDim2.fromScale(pt.x + math.sin(t * pt.freq + pt.phase) * 0.01, pt.y)
+			pt.frame.BackgroundTransparency = 0.3 + 0.5 * ((math.sin(t * pt.freq * 2 + pt.phase) + 1) / 2)
+		end
+	end)
+
+	-- intro
+	tween(loading, 0.35, {GroupTransparency = 0}):Play()
+	tween(loadBarTop, 0.5, {Size = UDim2.new(1, 0, 0.07, 0)}):Play()
+	tween(loadBarBottom, 0.5, {Size = UDim2.new(1, 0, 0.07, 0)}):Play()
+	emblemScale.Scale = 0.55
+	tween(emblemScale, 0.7, {Scale = 1}, Enum.EasingStyle.Back, Enum.EasingDirection.Out):Play()
+	tween(loadTitle, 0.6, {TextTransparency = 0}):Play()
+	tween(loadSub, 0.8, {TextTransparency = 0}):Play()
+
+	for i, status in ipairs(loadingStatuses) do
+		loadStatus.Text = status
+		loadStatus.TextTransparency = 0.75
+		tween(loadStatus, 0.25, {TextTransparency = 0}):Play()
+		loadTip.Text = loadingTips[((i - 1) % #loadingTips) + 1]
+
+		local progress = i / #loadingStatuses
+		loadTargetPct = progress * 100
+		tween(loadBar, 0.45, {Size = UDim2.new(progress, 0, 1, 0)}, Enum.EasingStyle.Quint):Play()
+		task.wait(0.42)
+	end
+
+	task.wait(0.25)
+
+	-- outro: white flash, emblem bursts outward, everything fades
+	tween(loadFlash, 0.16, {BackgroundTransparency = 0.4}):Play()
+	tween(emblemScale, 0.6, {Scale = 1.5}, Enum.EasingStyle.Quint):Play()
+	task.wait(0.16)
+	tween(loadFlash, 0.5, {BackgroundTransparency = 1}):Play()
+	tween(loading, 0.55, {GroupTransparency = 1}):Play()
+	task.wait(0.58)
+end
+
 local function runLoadingScreen()
-    -- Startup order: Loading Screen -> Security -> Main UI.
-    gui.Enabled = true
-    loading.Visible = true
-    loading.ZIndex = 100000
-    security.Visible = false
-    main.Visible = false
-    minimized.Visible = false
-
-    task.spawn(function()
-        while loading.Parent and loading.Visible do
-            loadRing.Rotation += 1.2
-            local pulse = 270 + math.sin(os.clock() * 3) * 10
-            loadGlow.Size = UDim2.fromOffset(pulse, pulse)
-            loadGlow.Position = UDim2.new(0.5, -pulse/2, 0.42, -pulse/2)
-            task.wait()
-        end
-    end)
-
-    for i, status in ipairs(loadingStatuses) do
-        loadStatus.Text = status
-        local progress = i / #loadingStatuses
-        tween(loadBar, 0.38, {Size = UDim2.new(progress, 0, 1, 0)}, Enum.EasingStyle.Quint):Play()
-        loadPercent.Text = tostring(math.floor(progress * 100)) .. "%"
-        task.wait(0.38)
-    end
-
-    task.wait(0.15)
-
-    for _, obj in ipairs({loading, loadGlow, loadCore, loadBarBack}) do
-        tween(obj, 0.55, {BackgroundTransparency = 1}, Enum.EasingStyle.Quint):Play()
-    end
-    for _, obj in ipairs({loadTitle, loadSub, loadStatus, loadPercent}) do
-        tween(obj, 0.55, {TextTransparency = 1}, Enum.EasingStyle.Quint):Play()
-    end
-    tween(loadStroke, 0.55, {Transparency = 1}, Enum.EasingStyle.Quint):Play()
-    tween(coreStroke, 0.55, {Transparency = 1}, Enum.EasingStyle.Quint):Play()
-    task.wait(0.58)
-
-    loading.Visible = false
-    loading.Active = false
+	local ok, err = pcall(runLoadingSteps)
+	if loadConn then
+		loadConn:Disconnect()
+		loadConn = nil
+	end
+	loading.Visible = false
+	loading.Active = false
+	if not ok then error(err, 0) end
 end
 
 --==================================================
@@ -440,7 +661,7 @@ local secTitle = Instance.new("TextLabel")
 secTitle.BackgroundTransparency = 1
 secTitle.Size = UDim2.new(1, -30, 0, 42)
 secTitle.Position = UDim2.fromOffset(15, 13)
-secTitle.Text = "ABILITY MENU"
+secTitle.Text = "SECURITY"
 secTitle.Font = Enum.Font.GothamBlack
 secTitle.TextSize = 28
 secTitle.TextColor3 = Color3.new(1, 1, 1)
@@ -450,7 +671,7 @@ local secSub = Instance.new("TextLabel")
 secSub.BackgroundTransparency = 1
 secSub.Size = UDim2.new(1, -30, 0, 24)
 secSub.Position = UDim2.fromOffset(15, 53)
-secSub.Text = "SECURITY ACCESS  •  JAYVEE"
+secSub.Text = "ACCESS KEY REQUIRED  •  JAYVEE"
 secSub.Font = Enum.Font.GothamBold
 secSub.TextSize = 11
 secSub.TextColor3 = Color3.fromRGB(155, 150, 175)
@@ -919,6 +1140,18 @@ local followCard = card(powerPage, UDim2.fromOffset(0, 538), UDim2.new(1, 0, 0, 
 label(followCard, "FOLLOW SYSTEM", UDim2.fromOffset(18, 10), UDim2.new(1,-36,0,20), 12)
 label(followCard, "Edit what happens after a successful dodge.", UDim2.fromOffset(18, 32), UDim2.new(1,-36,0,18), 9)
 
+local followCardToggle = Instance.new("TextButton")
+followCardToggle.Size = UDim2.fromOffset(120,26)
+followCardToggle.Position = UDim2.new(1,-138,0,8)
+followCardToggle.Text = "FOLLOW • ON"
+followCardToggle.Font = Enum.Font.GothamBlack
+followCardToggle.TextSize = 10
+followCardToggle.TextColor3 = Color3.new(1,1,1)
+followCardToggle.BackgroundColor3 = Color3.fromRGB(65,55,88)
+followCardToggle.AutoButtonColor = false
+followCardToggle.Parent = followCard
+corner(followCardToggle,9)
+
 local followDurationText = label(followCard, "DURATION  " .. Settings.FollowDuration .. "s", UDim2.fromOffset(18, 60), UDim2.new(0,170,0,30), 11)
 local followDurationMinus = Instance.new("TextButton")
 followDurationMinus.Size = UDim2.fromOffset(70, 32)
@@ -1055,6 +1288,8 @@ local function refreshPower()
 	dodgeToggle.BackgroundColor3 = Settings.AutoDodge and Color3.fromRGB(65,55,88) or Color3.fromRGB(55,38,43)
 	cameraToggle.BackgroundColor3 = Settings.CameraLock and Color3.fromRGB(65,55,88) or Color3.fromRGB(55,38,43)
 	followToggle.BackgroundColor3 = Settings.FollowAfterDodge and Color3.fromRGB(65,55,88) or Color3.fromRGB(55,38,43)
+	followCardToggle.Text = Settings.FollowAfterDodge and "FOLLOW • ON" or "FOLLOW • OFF"
+	followCardToggle.BackgroundColor3 = Settings.FollowAfterDodge and Color3.fromRGB(104,72,158) or Color3.fromRGB(55,38,43)
 
 	ultra.BackgroundColor3 = Settings.Ability == "Ultra Instinct"
 		and Color3.fromRGB(104,72,158)
@@ -1158,6 +1393,18 @@ resetDodge.AutoButtonColor = false
 resetDodge.Parent = ultraConfig
 corner(resetDodge,10)
 
+local activityButton = Instance.new("TextButton")
+activityButton.Size = UDim2.new(1,-36,0,36)
+activityButton.Position = UDim2.fromOffset(18,280)
+activityButton.Text = "DODGE ACTIVITY • HIGH"
+activityButton.Font = Enum.Font.GothamBold
+activityButton.TextSize = 10
+activityButton.TextColor3 = Color3.new(1,1,1)
+activityButton.BackgroundColor3 = Color3.fromRGB(65,55,88)
+activityButton.AutoButtonColor = false
+activityButton.Parent = ultraConfig
+corner(activityButton,10)
+
 local function refreshUltraConfig()
 	dodgeChanceButton.Text = "DODGE CHANCE • " .. Settings.DodgeChance .. "%"
 	dodgeAnimButton.Text = "DODGE ANIMATION • " .. string.upper(Settings.DodgeAnimation)
@@ -1165,6 +1412,7 @@ local function refreshUltraConfig()
 	auraButton.Text = Settings.WhiteAura and "WHITE AURA • ON" or "WHITE AURA • OFF"
 	afterButton.Text = Settings.Afterimage and "WHITE AFTERIMAGE • ON" or "WHITE AFTERIMAGE • OFF"
 	dodgeCountText.Text = "DODGE STREAK  •  " .. Settings.DodgeCount .. "x"
+	activityButton.Text = "DODGE ACTIVITY • " .. string.upper(Settings.DodgeActivity)
 end
 
 dodgeChanceButton.MouseButton1Click:Connect(function()
@@ -1194,6 +1442,12 @@ afterButton.MouseButton1Click:Connect(function()
 end)
 resetDodge.MouseButton1Click:Connect(function()
 	Settings.DodgeCount = 0
+	refreshUltraConfig()
+end)
+activityButton.MouseButton1Click:Connect(function()
+	local modes = {"Low","Normal","High","Max"}
+	local i = table.find(modes, Settings.DodgeActivity) or 3
+	Settings.DodgeActivity = modes[(i % #modes) + 1]
 	refreshUltraConfig()
 end)
 
@@ -1512,6 +1766,13 @@ cameraToggle.MouseButton1Click:Connect(function()
 	refreshPower()
 end)
 
+followCardToggle.MouseButton1Click:Connect(function()
+	play(clickSound)
+	Settings.FollowAfterDodge = not Settings.FollowAfterDodge
+	if not Settings.FollowAfterDodge then following = false; followToken += 1 end
+	refreshPower()
+end)
+
 followToggle.MouseButton1Click:Connect(function()
 	play(clickSound)
 	Settings.FollowAfterDodge = not Settings.FollowAfterDodge
@@ -1805,30 +2066,88 @@ local function flash()
 	Debris:AddItem(highlight, 0.35)
 end
 
-local function createAfterimage()
+local function createAfterimage(fade)
+	fade = fade or 0.45
 	if not Settings.Afterimage or not character then return end
-	local clone = character:Clone()
+	local ok, clone = pcall(function() return character:Clone() end)
+	if not ok or not clone then return end
 	for _, obj in ipairs(clone:GetDescendants()) do
-		if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ModuleScript") or obj:IsA("Tool") or obj:IsA("Humanoid") then
+		if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ModuleScript") or obj:IsA("Tool")
+			or obj:IsA("Humanoid") or obj:IsA("Decal") or obj:IsA("Shirt") or obj:IsA("Pants")
+			or obj:IsA("ShirtGraphic") or obj:IsA("BodyColors") or obj:IsA("ParticleEmitter")
+			or obj:IsA("Highlight") or obj:IsA("Trail") or obj:IsA("Beam") or obj:IsA("BillboardGui")
+			or obj:IsA("Sound") then
 			obj:Destroy()
-		elseif obj:IsA("BasePart") then
+		end
+	end
+	for _, obj in ipairs(clone:GetDescendants()) do
+		if obj:IsA("BasePart") then
 			obj.Anchored = true
 			obj.CanCollide = false
 			obj.CanTouch = false
 			obj.CanQuery = false
+			obj.CastShadow = false
 			obj.Material = Enum.Material.Neon
-			obj.Color = Color3.fromRGB(245,245,255)
-			obj.Transparency = math.clamp(obj.Transparency + 0.45,0,0.9)
+			obj.Color = Color3.new(1, 1, 1)
+			if obj:IsA("MeshPart") then obj.TextureID = "" end
+			obj.Transparency = (obj.Transparency >= 0.95) and 1 or 0.08
+		elseif obj:IsA("SpecialMesh") then
+			obj.TextureId = ""
 		end
 	end
 	clone.Name = "UI_Afterimage"
 	clone.Parent = workspace
 	for _, obj in ipairs(clone:GetDescendants()) do
-		if obj:IsA("BasePart") then
-			tween(obj,0.32,{Transparency=1}):Play()
+		if obj:IsA("BasePart") and obj.Transparency < 1 then
+			tween(obj, fade, {Transparency = 1}, Enum.EasingStyle.Quad):Play()
 		end
 	end
-	Debris:AddItem(clone,0.38)
+	Debris:AddItem(clone, fade + 0.1)
+end
+
+local function createTrail(a, b)
+	local dist = (b - a).Magnitude
+	if not Settings.Afterimage or dist < 1 then return end
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = false
+	p.Material = Enum.Material.Neon
+	p.Color = Color3.new(1, 1, 1)
+	p.Transparency = 0.1
+	p.Size = Vector3.new(0.55, 0.55, dist)
+	p.CFrame = CFrame.lookAt((a + b) / 2, b)
+	p.Parent = workspace
+	tween(p, 0.4, {Transparency = 1, Size = Vector3.new(0.05, 0.05, dist)}):Play()
+	Debris:AddItem(p, 0.45)
+end
+
+local function smokePuff(pos)
+	if not Settings.WhiteAura then return end
+	local part = Instance.new("Part")
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.Transparency = 1
+	part.Size = Vector3.new(1, 1, 1)
+	part.Position = pos
+	part.Parent = workspace
+	local e = Instance.new("ParticleEmitter")
+	e.Texture = "rbxasset://textures/particles/smoke_main.dds"
+	e.Color = ColorSequence.new(Color3.new(1, 1, 1))
+	e.LightEmission = 0.8
+	e.Rate = 0
+	e.Lifetime = NumberRange.new(0.3, 0.55)
+	e.Speed = NumberRange.new(4, 10)
+	e.SpreadAngle = Vector2.new(360, 360)
+	e.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 1.2), NumberSequenceKeypoint.new(1, 3.2)})
+	e.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 1)})
+	e.Parent = part
+	e:Emit(14)
+	Debris:AddItem(part, 0.8)
 end
 
 local counterGui = Instance.new("TextLabel")
@@ -1859,6 +2178,41 @@ local function showDodgeIndicator()
 	end)
 end
 
+local function markEnemiesRed()
+	if not root then return end
+	local duration = Settings.FollowAfterDodge and (Settings.FollowDuration + 0.5) or 1.5
+	local function mark(model)
+		if not model or model == character then return end
+		local hum, r = getHum(model), getRoot(model)
+		if not hum or not r or hum.Health <= 0 then return end
+		if (r.Position - root.Position).Magnitude > Settings.Radius then return end
+		local h = model:FindFirstChild("UI_RedMark")
+		if not h then
+			h = Instance.new("Highlight")
+			h.Name = "UI_RedMark"
+			h.Adornee = model
+			h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+			h.FillColor = Color3.fromRGB(255, 30, 30)
+			h.OutlineColor = Color3.fromRGB(255, 70, 70)
+			h.FillTransparency = 0.45
+			h.OutlineTransparency = 0
+			h.Parent = model
+		end
+		h:SetAttribute("Expire", os.clock() + duration)
+		task.delay(duration, function()
+			if h.Parent and (h:GetAttribute("Expire") or 0) <= os.clock() + 0.05 then
+				h:Destroy()
+			end
+		end)
+	end
+	for _, other in ipairs(Players:GetPlayers()) do
+		if other ~= player then mark(other.Character) end
+	end
+	for _, obj in ipairs(workspace:GetChildren()) do
+		if obj:IsA("Model") and not Players:GetPlayerFromCharacter(obj) then mark(obj) end
+	end
+end
+
 local function stopEffect()
 	local ring = Instance.new("Frame")
 	ring.Size = UDim2.fromOffset(25,25)
@@ -1885,24 +2239,15 @@ end
 -- ULTRA INSTINCT DODGE
 --==================================================
 
-local cameraLockToken = 0
 local function lockCameraToTarget(target)
 	if not Settings.CameraLock or not target then return end
+	if humanoid and humanoid.MoveDirection.Magnitude > 0.12 then return end -- joystick = no lock
 	local hum = getHum(target)
 	local tr = getRoot(target)
 	if not hum or not tr or hum.Health <= 0 then return end
 	cameraTarget = target
 	cameraLocked = true
 	cameraManualLock = true
-	cameraLockToken += 1
-	local myToken = cameraLockToken
-	task.delay(Settings.FollowDuration + 1, function()
-		if myToken == cameraLockToken and cameraTarget == target then
-			cameraLocked = false
-			cameraTarget = nil
-			cameraManualLock = false
-		end
-	end)
 end
 
 local function cancelCameraLock()
@@ -1959,9 +2304,6 @@ local function followForFiveSeconds(target)
 		if token == followToken then
 			following = false
 			followTarget = nil
-			if cameraTarget == target then
-				cancelCameraLock()
-			end
 			if Settings.StopEffect then
 				stopEffect()
 			end
@@ -1973,6 +2315,57 @@ end
 -- DODGE CORE
 -- Executes the dodge animation, effects, camera and follow logic.
 -- ================================================================
+local ACTIVITY = {
+	Low    = {dur = 0.22, lock = 0.12},
+	Normal = {dur = 0.16, lock = 0.08},
+	High   = {dur = 0.12, lock = 0.04},
+	Max    = {dur = 0.08, lock = 0.02},
+}
+
+-- Where the dodge dash ends. Side Burst = slips around the side of the enemy,
+-- Blink = behind the enemy, Backstep = away from the enemy.
+local function dodgeDestination(targetRoot)
+	local origin = root.Position
+	local dest
+	if targetRoot then
+		local tp = targetRoot.Position
+		local look = Vector3.new(targetRoot.CFrame.LookVector.X, 0, targetRoot.CFrame.LookVector.Z)
+		look = look.Magnitude > 0.05 and look.Unit or Vector3.new(0, 0, -1)
+		local right = Vector3.new(-look.Z, 0, look.X)
+		local dist = math.max(Settings.FollowDistance, 3.5)
+		local mode = Settings.DodgeAnimation
+		if mode == "Backstep" then
+			local away = Vector3.new(origin.X - tp.X, 0, origin.Z - tp.Z)
+			away = away.Magnitude > 0.05 and away.Unit or -look
+			dest = origin + away * 8
+		elseif mode == "Blink" then
+			dest = tp - look * dist
+		else
+			local side = ((origin - tp):Dot(right) >= 0) and -1 or 1
+			dest = tp + right * side * dist - look * (dist * 0.4)
+		end
+	else
+		local side = math.random(1, 2) == 1 and 1 or -1
+		dest = origin + root.CFrame.RightVector * side * 8
+	end
+	dest = Vector3.new(dest.X, origin.Y, dest.Z)
+
+	-- never dash through walls
+	local ignore = {character}
+	if targetRoot and targetRoot.Parent then table.insert(ignore, targetRoot.Parent) end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = ignore
+	local dir = dest - origin
+	if dir.Magnitude > 0.1 then
+		local hit = workspace:Raycast(origin, dir, params)
+		if hit then
+			dest = hit.Position - dir.Unit * 2
+		end
+	end
+	return dest
+end
+
 local function runDodge()
 	if dodging then return end
 	if not Settings.Enabled or not Settings.AutoDodge then return end
@@ -1987,8 +2380,8 @@ local function runDodge()
 	local targetRoot = target and getRoot(target)
 
 	playRandomDodgeSound()
+	markEnemiesRed()
 	flash()
-	createAfterimage()
 	Settings.DodgeCount += 1
 	refreshUltraConfig()
 	showDodgeIndicator()
@@ -1997,52 +2390,49 @@ local function runDodge()
 		lockCameraToTarget(target)
 	end
 
-	local direction
-
-	if targetRoot then
-		local away = root.Position - targetRoot.Position
-		away = Vector3.new(away.X,0,away.Z)
-
-		if away.Magnitude > 0.1 then
-			direction = away.Unit
-		end
-	end
-
-	if not direction then
-		local back = Vector3.new(-root.CFrame.LookVector.X, 0, -root.CFrame.LookVector.Z)
-		direction = back.Magnitude > 0.05 and back.Unit or Vector3.new(0, 0, 1)
-	end
-
+	local act = ACTIVITY[Settings.DodgeActivity] or ACTIVITY.High
+	local startPos = root.Position
+	local destination = dodgeDestination(targetRoot)
 	local startCF = root.CFrame
-
-	-- Short, smooth Ultra-Instinct-style evasive burst:
-	-- mostly sideways/backward, with a small lift and quick return.
-	local burstDistance = Settings.DodgeAnimation == "Backstep" and 6 or (Settings.DodgeAnimation == "Blink" and 10 or 8)
-	local lift = Settings.DodgeAnimation == "Blink" and 0.6 or 1.2
-	local destination = root.Position + direction * burstDistance + Vector3.new(0, lift, 0)
-	local endCF = CFrame.lookAt(
-		destination,
-		destination + root.CFrame.LookVector
-	)
-
-	local start = os.clock()
-
-	while os.clock() - start < 0.24 do
-		local a = math.clamp((os.clock() - start) / 0.24,0,1)
-		a = 1 - (1-a)^4
-
-		if root and root.Parent then
-			root.CFrame = startCF:Lerp(endCF,a)
+	local endCF
+	if targetRoot then
+		local faceFlat = Vector3.new(targetRoot.Position.X, destination.Y, targetRoot.Position.Z)
+		if (faceFlat - destination).Magnitude > 0.1 then
+			endCF = CFrame.lookAt(destination, faceFlat)
 		end
+	end
+	endCF = endCF or (CFrame.new(destination) * startCF.Rotation)
 
+	-- white ghost where you were + smoke
+	createAfterimage(0.45)
+	smokePuff(startPos)
+
+	local ghosts = 0
+	local start = os.clock()
+	while true do
+		local a = math.clamp((os.clock() - start) / act.dur, 0, 1)
+		local e = 1 - (1 - a) ^ 3
+		if root and root.Parent then
+			root.CFrame = startCF:Lerp(endCF, e)
+			root.AssemblyLinearVelocity = Vector3.zero
+		end
+		-- extra ghosts along the path
+		if ghosts < 2 and a >= (ghosts + 1) / 3 then
+			ghosts += 1
+			createAfterimage(0.35)
+		end
+		if a >= 1 then break end
 		RunService.RenderStepped:Wait()
 	end
+
+	createTrail(startPos + Vector3.new(0, 1, 0), destination + Vector3.new(0, 1, 0))
+	smokePuff(destination)
 
 	if target then
 		followForFiveSeconds(target)
 	end
 
-	task.delay(0.12,function()
+	task.delay(act.lock, function()
 		dodging = false
 	end)
 end
@@ -2060,8 +2450,13 @@ end
 --==================================================
 
 RunService.RenderStepped:Connect(function()
-	if cameraLocked and humanoid and humanoid.MoveDirection.Magnitude > 0.12 then
-		cancelCameraLock()
+	if humanoid and humanoid.MoveDirection.Magnitude > 0.12 then
+		-- moving the joystick releases the lock (and the follow)
+		if cameraLocked then cancelCameraLock() end
+		if following then
+			following = false
+			followToken += 1
+		end
 	end
 	updateRing()
 	updatePlayerInfo()
@@ -2073,18 +2468,40 @@ RunService.RenderStepped:Connect(function()
 
 end)
 
+local bodyLocked = false
 RunService:BindToRenderStep("JAYVEE_CameraLock", Enum.RenderPriority.Camera.Value + 1, function()
-	if not (cameraLocked and (cameraTarget or followTarget)) then return end
-	local cam = workspace.CurrentCamera
-	if not cam then return end
 	local target = cameraTarget or followTarget
+	if not (cameraLocked and target) then
+		if bodyLocked then
+			bodyLocked = false
+			if humanoid then humanoid.AutoRotate = true end
+		end
+		return
+	end
+	local cam = workspace.CurrentCamera
 	local targetRoot = getRoot(target)
 	local targetHum = getHum(target)
-	if not targetRoot or not targetHum or targetHum.Health <= 0 then
+	if not cam or not targetRoot or not targetHum or targetHum.Health <= 0 then
 		cancelCameraLock()
-	else
-		local point = targetRoot.Position + Vector3.new(0,2,0)
-		cam.CFrame = cam.CFrame:Lerp(CFrame.lookAt(cam.CFrame.Position, point), 0.16)
+		return
+	end
+	if root and (targetRoot.Position - root.Position).Magnitude > Settings.Radius * 2.5 then
+		cancelCameraLock()
+		return
+	end
+
+	-- camera locks on the enemy
+	local point = targetRoot.Position + Vector3.new(0, 2, 0)
+	cam.CFrame = cam.CFrame:Lerp(CFrame.lookAt(cam.CFrame.Position, point), 0.4)
+
+	-- body locks on the enemy too
+	if root and humanoid and humanoid.Health > 0 then
+		bodyLocked = true
+		humanoid.AutoRotate = false
+		local flat = Vector3.new(targetRoot.Position.X, root.Position.Y, targetRoot.Position.Z)
+		if (flat - root.Position).Magnitude > 0.1 then
+			root.CFrame = CFrame.lookAt(root.Position, flat)
+		end
 	end
 end)
 
