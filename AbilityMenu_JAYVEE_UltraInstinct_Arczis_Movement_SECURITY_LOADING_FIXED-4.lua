@@ -37,6 +37,8 @@
 -- must be detected first.
 -- ================================================================
 
+print("[JAYVEE] Ability Menu loading...")
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
@@ -140,31 +142,32 @@ end
 
 local clickSound = makeSound(9118828568, 0.4)
 local openSound = makeSound(9118823107, 0.45)
-local dodgeSoundIds = {
-	"rbxassetid://87566211283329",
-	"rbxassetid://81857580097150",
-	"rbxassetid://129561737395908",
-	"rbxassetid://122312400582724",
-	"rbxassetid://136080815136211"
-}
-
-local dodgeSounds = {}
-for _, soundId in ipairs(dodgeSoundIds) do
-	local s = Instance.new("Sound")
-	s.SoundId = soundId
-	s.Volume = 0.65
-	s.Parent = SoundService
-	table.insert(dodgeSounds, s)
-end
-
 local stopSound = makeSound(9118828568, 0.3)
 
-local function playRandomDodgeSound()
-	if #dodgeSounds == 0 then return end
-	local sound = dodgeSounds[math.random(1, #dodgeSounds)]
-	pcall(function()
-		sound:Play()
-	end)
+local playRandomDodgeSound
+do
+	local ids = {
+		"rbxassetid://87566211283329",
+		"rbxassetid://81857580097150",
+		"rbxassetid://129561737395908",
+		"rbxassetid://122312400582724",
+		"rbxassetid://136080815136211"
+	}
+	local list = {}
+	for _, soundId in ipairs(ids) do
+		local snd = Instance.new("Sound")
+		snd.SoundId = soundId
+		snd.Volume = 0.65
+		snd.Parent = SoundService
+		table.insert(list, snd)
+	end
+	playRandomDodgeSound = function()
+		if #list == 0 then return end
+		local sound = list[math.random(1, #list)]
+		pcall(function()
+			sound:Play()
+		end)
+	end
 end
 
 local uiSoundsEnabled = true
@@ -247,6 +250,19 @@ end
 -- ScreenGui
 --==================================================
 
+do -- remove old copies when re-executing
+	pcall(function()
+		local pg = player:WaitForChild("PlayerGui")
+		local old = pg:FindFirstChild("AbilityMenu_JAYVEE")
+		if old then old:Destroy() end
+	end)
+	pcall(function()
+		local oldRing = workspace:FindFirstChild("AbilityRadiusRing")
+		if oldRing then oldRing:Destroy() end
+	end)
+	pcall(function() RunService:UnbindFromRenderStep("JAYVEE_CameraLock") end)
+end
+
 local gui = Instance.new("ScreenGui")
 gui.Name = "AbilityMenu_JAYVEE"
 gui.ResetOnSpawn = false
@@ -281,6 +297,7 @@ secScale = Instance.new("UIScale")
 secScale.Scale = 0.84
 secScale.Parent = security
 
+do
 local secTitle = Instance.new("TextLabel")
 secTitle.BackgroundTransparency = 1
 secTitle.Size = UDim2.new(1, -30, 0, 42)
@@ -300,6 +317,7 @@ secSub.Font = Enum.Font.GothamBold
 secSub.TextSize = 11
 secSub.TextColor3 = Color3.fromRGB(155, 150, 175)
 secSub.Parent = security
+end
 
 local passBox = Instance.new("TextBox")
 passBox.Size = UDim2.new(1, -40, 0, 48)
@@ -348,6 +366,7 @@ securityStatus.Parent = security
 -- The model exposes this explicit AnimationId:
 -- 117414822036545
 
+do
 local ArczisMovement = {}
 ArczisMovement.Enabled = true
 ArczisMovement.WalkSpeed = 10
@@ -527,6 +546,7 @@ player.CharacterAdded:Connect(function(char)
 	task.wait(0.15)
 	arczisSetup(char)
 end)
+end
 
 -- =========================
 -- END ARCZIS MOVEMENT ADAPTER
@@ -555,6 +575,7 @@ header.Size = UDim2.new(1, 0, 0, 76)
 header.BackgroundTransparency = 1
 header.Parent = main
 
+do
 local menuTitle = Instance.new("TextLabel")
 menuTitle.BackgroundTransparency = 1
 menuTitle.Size = UDim2.new(1, -120, 0, 39)
@@ -576,6 +597,7 @@ menuSub.TextSize = 10
 menuSub.TextXAlignment = Enum.TextXAlignment.Left
 menuSub.TextColor3 = Color3.fromRGB(145, 140, 165)
 menuSub.Parent = header
+end
 
 local minimize = Instance.new("TextButton")
 minimize.Size = UDim2.fromOffset(38, 34)
@@ -671,6 +693,8 @@ end
 -- HOME
 --==================================================
 
+local statusText, configRadiusText, configMinus, configPlus, radiusToggle
+do
 local homeCard = card(homePage, UDim2.fromOffset(0, 0), UDim2.new(1, 0, 0, 105))
 label(homeCard, "SCRIPT INFO", UDim2.fromOffset(18, 12), UDim2.new(1,-36,0,22), 12)
 label(homeCard,
@@ -680,7 +704,7 @@ label(homeCard,
 
 local statusCard = card(homePage, UDim2.fromOffset(0, 118), UDim2.new(1, 0, 0, 105))
 label(statusCard, "STATUS", UDim2.fromOffset(18, 12), UDim2.new(1,-36,0,22), 12)
-local statusText = label(statusCard,
+statusText = label(statusCard,
 	"System: " .. (Settings.Enabled and "READY" or "OFF")
 	.. "\nAbility: " .. Settings.Ability
 	.. "\nRadius: " .. Settings.Radius,
@@ -701,8 +725,8 @@ local configCard = card(homePage, UDim2.fromOffset(0, 314), UDim2.new(1, 0, 0, 2
 label(configCard, "CONFIGURATION", UDim2.fromOffset(18, 10), UDim2.new(1,-36,0,22), 12)
 label(configCard, "Player radius and detection settings", UDim2.fromOffset(18, 32), UDim2.new(1,-36,0,18), 9)
 
-local configRadiusText = label(configCard, "RADIUS  " .. Settings.Radius, UDim2.fromOffset(18, 64), UDim2.new(0,180,0,30), 13)
-local configMinus = Instance.new("TextButton")
+configRadiusText = label(configCard, "RADIUS  " .. Settings.Radius, UDim2.fromOffset(18, 64), UDim2.new(0,180,0,30), 13)
+configMinus = Instance.new("TextButton")
 configMinus.Size = UDim2.fromOffset(82,34)
 configMinus.Position = UDim2.new(1,-174,0,62)
 configMinus.Text = "1 −"
@@ -713,7 +737,7 @@ configMinus.BackgroundColor3 = Color3.fromRGB(47,42,59)
 configMinus.AutoButtonColor = false
 configMinus.Parent = configCard
 corner(configMinus,10)
-local configPlus = Instance.new("TextButton")
+configPlus = Instance.new("TextButton")
 configPlus.Size = UDim2.fromOffset(82,34)
 configPlus.Position = UDim2.new(1,-84,0,62)
 configPlus.Text = "1 +"
@@ -725,7 +749,7 @@ configPlus.AutoButtonColor = false
 configPlus.Parent = configCard
 corner(configPlus,10)
 
-local radiusToggle = Instance.new("TextButton")
+radiusToggle = Instance.new("TextButton")
 radiusToggle.Size = UDim2.new(1,-36,0,34)
 radiusToggle.Position = UDim2.fromOffset(18,106)
 radiusToggle.Text = "RADIUS CIRCLE • ON"
@@ -738,6 +762,7 @@ radiusToggle.Parent = configCard
 corner(radiusToggle,10)
 
 local targetInfo = label(configCard, "Detection: enemies inside radius only\nRange: 3–50 • Step: 1", UDim2.fromOffset(18, 148), UDim2.new(1,-36,0,48), 9)
+end
 --==================================================
 -- POWER
 --==================================================
@@ -755,10 +780,12 @@ ultra.AutoButtonColor = false
 ultra.Parent = gokuCard
 corner(ultra, 15)
 
+do
 local ultraTitle = label(ultra, "ULTRA INSTINCT", UDim2.fromOffset(18, 9), UDim2.new(1,-36,0,24), 14)
 ultraTitle.TextColor3 = Color3.new(1,1,1)
 local ultraDesc = label(ultra, "Auto dodge • sense • camera lock • aura", UDim2.fromOffset(18, 36), UDim2.new(1,-36,0,20), 10)
 ultraDesc.TextColor3 = Color3.fromRGB(235,230,245)
+end
 
 -- ULTRA INSTINCT ON/OFF toggle (OFF by default)
 local ultraToggle = Instance.new("TextButton")
@@ -957,6 +984,8 @@ end
 -- ULTRA INSTINCT CONFIGURATION
 --==================================================
 
+local refreshUltraConfig
+do
 local ultraConfig = card(ultra, UDim2.fromOffset(12, 62), UDim2.new(1,-24,0,330))
 label(ultraConfig, "ULTRA INSTINCT", UDim2.fromOffset(18,10), UDim2.new(1,-36,0,22), 13)
 label(ultraConfig, "---", UDim2.fromOffset(18,32), UDim2.new(1,-36,0,16), 9)
@@ -1046,7 +1075,7 @@ activityButton.AutoButtonColor = false
 activityButton.Parent = ultraConfig
 corner(activityButton,10)
 
-local function refreshUltraConfig()
+refreshUltraConfig = function()
 	dodgeChanceButton.Text = "DODGE CHANCE • " .. Settings.DodgeChance .. "%"
 	dodgeAnimButton.Text = "DODGE ANIMATION • " .. string.upper(Settings.DodgeAnimation)
 	perfectButton.Text = string.format("PERFECT DODGE • %.2fs", Settings.PerfectDodgeWindow)
@@ -1091,6 +1120,7 @@ activityButton.MouseButton1Click:Connect(function()
 	Settings.DodgeActivity = modes[(i % #modes) + 1]
 	refreshUltraConfig()
 end)
+end
 
 --==================================================
 -- PLAYER PAGE
@@ -2331,7 +2361,7 @@ local function detectAnyEnemyHit()
 	return found
 end
 
-local ATTACK_WORDS = {"attack","punch","kick","swing","slash","hit","strike","stab","bite","claw","smash","combo","melee","m1","skill","slam","shoot","fire"}
+local ATTACK_WORDS = {"attack","punch","kick","swing","slash","hit","strike","stab","bite","claw","smash","combo","melee","skill","slam","shoot","fire"}
 local MOVE_WORDS = {"idle","walk","run","jump","fall","climb","swim","sit","emote","dance","wave","point","cheer","laugh"}
 
 local function hasWord(str, list)
@@ -2679,3 +2709,5 @@ unlock.MouseButton1Click:Connect(function()
 		tween(security,0.07,{Position=old},Enum.EasingStyle.Linear):Play()
 	end
 end)
+
+print("[JAYVEE] Ability Menu loaded - Security screen should be visible.")
