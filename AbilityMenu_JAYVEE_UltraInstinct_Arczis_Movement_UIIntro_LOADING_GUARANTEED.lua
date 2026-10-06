@@ -117,7 +117,16 @@ local function refreshCharacter()
 	lastHealth = humanoid.Health
 end
 
-refreshCharacter()
+-- Do not block UI creation waiting for the character.
+-- The UI must appear even while the character is still loading.
+if player.Character then
+	task.spawn(function()
+		local ok = pcall(refreshCharacter)
+		if not ok then
+			character, humanoid, root = nil, nil, nil
+		end
+	end)
+end
 
 local function makeSound(id, volume)
 	local s = Instance.new("Sound")
@@ -366,10 +375,9 @@ local loadingStatuses = {
 -- Startup loading animation shown before the Security UI.
 -- ================================================================
 local function runLoadingScreen()
-    -- Startup order: Security UI -> Loading Screen -> Main UI.
+    -- Startup order: Loading Screen -> Security -> Main UI.
     gui.Enabled = true
     loading.Visible = true
-    loading.Active = true
     loading.ZIndex = 100000
     security.Visible = false
     main.Visible = false
@@ -2595,40 +2603,53 @@ refreshUltraConfig()
 refreshFollowConfig()
 hookDamage()
 
-security.Visible = true
+security.Visible = false
 main.Visible = false
 minimized.Visible = false
+
+-- Startup order is intentionally: Security -> Password -> Loading -> Ability Menu.
+-- Show Security immediately so character/movement loading can never hide the UI.
 loading.Visible = false
 loading.Active = false
+security.Visible = true
 security.ZIndex = 200
+main.Visible = false
+minimized.Visible = false
+secScale.Scale = 1
 
-player.CharacterAdded:Connect(function()
-	task.wait(0.25)
-	refreshCharacter()
-	hookDamage()
+player.CharacterAdded:Connect(function(char)
+	character = char
+	task.spawn(function()
+		humanoid = char:WaitForChild("Humanoid", 10)
+		root = char:WaitForChild("HumanoidRootPart", 10)
+		if humanoid then lastHealth = humanoid.Health end
+		if humanoid and root then hookDamage() end
+	end)
 end)
 
 unlock.MouseButton1Click:Connect(function()
 	play(clickSound)
 
 	if passBox.Text == PASSWORD then
-		securityStatus.Text = "ACCESS GRANTED • ABILITY MENU READY"
+		securityStatus.Text = "ACCESS GRANTED • LOADING..."
 		securityStatus.TextColor3 = Color3.fromRGB(175,255,195)
 		play(openSound)
 
-		tween(secScale,0.25,{Scale=0.7},Enum.EasingStyle.Back,Enum.EasingDirection.In):Play()
-		task.wait(0.2)
-
 		security.Visible = false
+		loading.Visible = true
+		loading.Active = true
+		loadBar.Size = UDim2.new(0, 0, 1, 0)
+		loadPercent.Text = "0%"
+		loadStatus.Text = loadingStatuses[1]
 
-		local ok, err = pcall(runLoadingScreen)
-		if not ok then
-			warn("[JAYVEE UI] Loading screen error:", err)
-			loading.Visible = false
-			loading.Active = false
-		end
-
-		openMenu()
+		task.spawn(function()
+			local ok, err = pcall(runLoadingScreen)
+			if not ok then
+				warn("[JAYVEE UI] Loading error:", err)
+				loading.Visible = false
+				openMenu()
+			end
+		end)
 	else
 		securityStatus.Text = "ACCESS DENIED • INVALID KEY"
 		securityStatus.TextColor3 = Color3.fromRGB(255,120,130)
