@@ -359,13 +359,14 @@ function U.play(key)
 	end
 end
 
--- Draggable (mobile friendly). Returns state table with .moved
-function U.draggable(frame, handle)
+-- Draggable (mobile friendly). Optional bounds callback keeps the frame on-screen.
+function U.draggable(frame, handle, canDrag)
 	handle = handle or frame
 	local st = {moved = false}
 	local dragging, dragStart, startPos = false, nil, nil
 	handle.InputBegan:Connect(function(input)
 		if handle:GetAttribute("DragEnabled") == false then return end
+		if canDrag and not canDrag() then return end
 		if input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = true
@@ -383,8 +384,25 @@ function U.draggable(frame, handle)
 			and input.UserInputType ~= Enum.UserInputType.Touch then return end
 		local delta = input.Position - dragStart
 		if delta.Magnitude > 6 then st.moved = true end
-		frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
+		local nextPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
 			startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		if frame:GetAttribute("JV_ClampToViewport") then
+			local cam = workspace.CurrentCamera
+			local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
+			local abs = frame.AbsoluteSize
+			local halfW, halfH = abs.X * 0.5, abs.Y * 0.5
+			local margin = 6
+			local center = Vector2.new(vp.X * 0.5 + nextPos.X.Offset, vp.Y * 0.5 + nextPos.Y.Offset)
+			if frame.AnchorPoint.X ~= 0.5 then center = Vector2.new(nextPos.X.Offset + abs.X * frame.AnchorPoint.X, center.Y) end
+			if frame.AnchorPoint.Y ~= 0.5 then center = Vector2.new(center.X, nextPos.Y.Offset + abs.Y * frame.AnchorPoint.Y) end
+			center = Vector2.new(math.clamp(center.X, margin + halfW, vp.X - margin - halfW), math.clamp(center.Y, margin + halfH, vp.Y - margin - halfH))
+			if frame.AnchorPoint.X == 0.5 and frame.AnchorPoint.Y == 0.5 then
+				nextPos = UDim2.fromOffset(center.X - vp.X * 0.5, center.Y - vp.Y * 0.5)
+			else
+				nextPos = UDim2.fromOffset(center.X - abs.X * frame.AnchorPoint.X, center.Y - abs.Y * frame.AnchorPoint.Y)
+			end
+		end
+		frame.Position = nextPos
 	end)
 	return st
 end
@@ -1256,52 +1274,8 @@ function U.ultraChatIntro()
 end
 
 --==================================================
--- ULTRA INSTINCT SHIRT + CINEMATIC INTRO / OUTRO
+-- ULTRA INSTINCT CINEMATIC INTRO / OUTRO
 --==================================================
-local ULTRA_TSHIRT_ID = "rbxassetid://15840324"
-local ultraShirtStates = setmetatable({}, {__mode = "k"})
-local ultraFxToken = 0
-
-local function rememberAndApplyUltraTShirt(char, enabled)
-	if not char or not char.Parent then return end
-	local state = ultraShirtStates[char]
-
-	if enabled then
-		if not state then
-			state = {items = {}, created = {}}
-			for _, obj in ipairs(char:GetChildren()) do
-				if obj:IsA("ShirtGraphic") then
-					table.insert(state.items, {obj = obj, graphic = obj.Graphic})
-				end
-			end
-			ultraShirtStates[char] = state
-		end
-
-		local graphics = {}
-		for _, obj in ipairs(char:GetChildren()) do
-			if obj:IsA("ShirtGraphic") then table.insert(graphics, obj) end
-		end
-		if #graphics == 0 then
-			local sg = Instance.new("ShirtGraphic")
-			sg.Name = "JAYVEE_UltraInstinct_TShirt"
-			sg.Graphic = ULTRA_TSHIRT_ID
-			sg.Parent = char
-			table.insert(state.created, sg)
-		else
-			for _, sg in ipairs(graphics) do sg.Graphic = ULTRA_TSHIRT_ID end
-		end
-	else
-		if not state then return end
-		for _, sg in ipairs(state.created) do
-			if sg and sg.Parent then sg:Destroy() end
-		end
-		for _, item in ipairs(state.items) do
-			if item.obj and item.obj.Parent then item.obj.Graphic = item.graphic end
-		end
-		ultraShirtStates[char] = nil
-	end
-end
-
 local function ultraCinematic(enabled)
 	ultraFxToken += 1
 	local my = ultraFxToken
@@ -1373,7 +1347,6 @@ local function setUltra(on)
 	if Settings.UltraActive == on then return end
 	Settings.UltraActive = on
 	if on then
-		rememberAndApplyUltraTShirt(character, true)
 		ultraCinematic(true)
 		U.play("toggleOn")
 		if Settings.ChatIntro then U.ultraChatIntro() end
@@ -1381,7 +1354,6 @@ local function setUltra(on)
 	else
 		ultraCinematic(false)
 		U.play("toggleOff")
-		rememberAndApplyUltraTShirt(character, false)
 		following = false
 		followToken += 1
 		followTarget = nil
@@ -2020,7 +1992,6 @@ local function setupCharacter(char)
 	U.hookDamage()
 	task.spawn(Arczis.Setup, char)
 	if Settings.UltraActive then
-		task.defer(function() rememberAndApplyUltraTShirt(char, true) end)
 	end
 	U.refreshBodyAura()
 	U.refreshStats()
@@ -2199,6 +2170,31 @@ function U.fitScale(w, h, extra)
 	return math.max(math.min(math.max(base * (extra or 1), 0.3), limit), 0.25)
 end
 
+local function clampGuiToViewport(frame, margin)
+	if not frame or not frame.Parent then return end
+	local cam = workspace.CurrentCamera
+	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
+	if vp.X < 200 or vp.Y < 200 then return end
+	margin = margin or 6
+	local abs = frame.AbsoluteSize
+	local ax, ay = frame.AnchorPoint.X, frame.AnchorPoint.Y
+	local minX = margin + abs.X * ax
+	local maxX = vp.X - margin - abs.X * (1 - ax)
+	local minY = margin + abs.Y * ay
+	local maxY = vp.Y - margin - abs.Y * (1 - ay)
+	local centerX = vp.X * 0.5 + frame.Position.X.Offset
+	local centerY = vp.Y * 0.5 + frame.Position.Y.Offset
+	if ax == 0.5 then
+		centerX = math.clamp(centerX, minX, maxX)
+		centerY = math.clamp(centerY, minY, maxY)
+		frame.Position = UDim2.fromOffset(centerX - vp.X * 0.5, centerY - vp.Y * 0.5)
+	else
+		local px = math.clamp(frame.AbsolutePosition.X, margin, math.max(margin, vp.X - abs.X - margin))
+		local py = math.clamp(frame.AbsolutePosition.Y, margin, math.max(margin, vp.Y - abs.Y - margin))
+		frame.Position = UDim2.fromOffset(px, py)
+	end
+end
+
 local security = new("Frame", {
 	Name = "Security", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
 	Size = UDim2.fromOffset(420, 310), BackgroundColor3 = Color3.fromRGB(12, 11, 17),
@@ -2285,7 +2281,7 @@ local titleLabel = new("TextLabel", {
 local titleGradient = new("UIGradient", {}, titleLabel)
 local subLabel = new("TextLabel", {
 	BackgroundTransparency = 1, Size = UDim2.new(1, -290, 0, 18), Position = UDim2.fromOffset(26, 46),
-	Text = "JAYVEE  -  POWER SYSTEM  -  v3.6", Font = Enum.Font.GothamBold, TextSize = 10,
+	Text = "JAYVEE  -  POWER SYSTEM  -  v3.9", Font = Enum.Font.GothamBold, TextSize = 10,
 	TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = COL.sub,
 }, header)
 
@@ -2363,7 +2359,7 @@ local function toolButton(parent, x, width, label)
 end
 
 local sizeBtn = toolButton(toolBar, -116, 72, "SIZE 100%")
-local moveBtn = toolButton(toolBar, -38, 72, "MOVE OFF")
+local moveBtn = toolButton(toolBar, -38, 72, "HOLD MOVE")
 
 local content = new("ScrollingFrame", {
 	Position = UDim2.fromOffset(18, 122), Size = UDim2.new(1, -36, 1, -194),
@@ -2371,6 +2367,20 @@ local content = new("ScrollingFrame", {
 	ScrollBarImageTransparency = 0.3, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
 	ScrollingDirection = Enum.ScrollingDirection.Y, ElasticBehavior = Enum.ElasticBehavior.Always,
 	ClipsDescendants = true,
+}, main)
+
+local searchEmpty = new("TextLabel", {
+	Name = "SearchEmpty",
+	Position = UDim2.fromOffset(24, 166),
+	Size = UDim2.new(1, -48, 0, 52),
+	BackgroundTransparency = 1,
+	Text = "NO RESULTS\nTry another keyword",
+	TextColor3 = COL.sub,
+	Font = Enum.Font.GothamBold,
+	TextSize = 13,
+	TextWrapped = true,
+	Visible = false,
+	ZIndex = 8,
 }, main)
 
 local pages = {}
@@ -2428,34 +2438,139 @@ for i, name in ipairs(PAGE_NAMES) do
 	end)
 end
 
-header:SetAttribute("DragEnabled", false)
-U.draggable(main, header)
-local moveMode = false
-moveBtn.Activated:Connect(function()
-	moveMode = not moveMode
-	header:SetAttribute("DragEnabled", moveMode)
-	moveBtn.Text = moveMode and "MOVE ON" or "MOVE OFF"
-	moveBtn.BackgroundColor3 = moveMode and THEMES[1].b or Color3.fromRGB(28, 25, 38)
+-- HOLD-MOVE: press/hold the MOVE button and drag it to reposition the whole menu.
+-- There is no ON/OFF state. Releasing the button immediately ends move mode.
+moveBtn.Text = "HOLD MOVE"
+moveBtn.Active = true
+moveBtn.AutoButtonColor = false
+moveBtn:SetAttribute("DragEnabled", true)
+main:SetAttribute("JV_ClampToViewport", true)
+
+local moveHeld, moveStart, moveOrigin = false, nil, nil
+moveBtn.InputBegan:Connect(function(input)
+	if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+	moveHeld = true
+	moveStart = input.Position
+	moveOrigin = main.Position
+	moveBtn.BackgroundColor3 = THEMES[1].b
 	U.play("click")
+	input.Changed:Connect(function()
+		if input.UserInputState == Enum.UserInputState.End then
+			moveHeld = false
+			moveBtn.BackgroundColor3 = Color3.fromRGB(28, 25, 38)
+		end
+	end)
 end)
 
--- Search only the cards of the currently visible page.
+bind(UIS.InputChanged, function(input)
+	if not moveHeld then return end
+	if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then return end
+	local d = input.Position - moveStart
+	local p = UDim2.new(moveOrigin.X.Scale, moveOrigin.X.Offset + d.X, moveOrigin.Y.Scale, moveOrigin.Y.Offset + d.Y)
+	main.Position = p
+	clampGuiToViewport(main, 6)
+end)
+
+-- SMART SEARCH: exact text + aliases + token matching + small typo tolerance.
+local SEARCH_ALIASES = {
+	ui = {"menu", "interface", "gui"},
+	cam = {"camera", "view", "lock"},
+	tp = {"teleport", "teleportation"},
+	tele = {"teleport", "teleportation"},
+	dodge = {"evade", "dash", "roll"},
+	settings = {"config", "options", "settings"},
+	player = {"character", "movement", "player"},
+	ultra = {"ultra instinct", "ui", "aura"},
+	sound = {"audio", "music", "sfx"},
+	anim = {"animation", "animations", "moveset", "movesets"},
+}
+
+local function normalizeSearch(v)
+	v = string.lower(tostring(v or ""))
+	v = v:gsub("[%p%c]", " "):gsub("%s+", " ")
+	return v:match("^%s*(.-)%s*$") or ""
+end
+
+local function editDistance(a, b)
+	if a == b then return 0 end
+	if #a == 0 then return #b end
+	if #b == 0 then return #a end
+	local prev = {}
+	for j = 0, #b do prev[j] = j end
+	for i = 1, #a do
+		local cur = {[0] = i}
+		for j = 1, #b do
+			local cost = (a:sub(i,i) == b:sub(j,j)) and 0 or 1
+			cur[j] = math.min(prev[j] + 1, cur[j-1] + 1, prev[j-1] + cost)
+		end
+		prev = cur
+	end
+	return prev[#b]
+end
+
+local function smartSearchScore(query, hay)
+	query, hay = normalizeSearch(query), normalizeSearch(hay)
+	if query == "" then return 1 end
+	if hay == query then return 1000 end
+	if string.find(hay, query, 1, true) then return 900 end
+	local score, matched = 0, 0
+	for token in query:gmatch("%S+") do
+		local best = 0
+		if string.find(hay, token, 1, true) then
+			best = 200
+		else
+			for word in hay:gmatch("%S+") do
+				if word:sub(1, #token) == token then best = math.max(best, 150) end
+				if #token >= 4 and #word >= 4 and editDistance(token, word) <= 1 then best = math.max(best, 120) end
+			end
+		end
+		if best > 0 then matched += 1; score += best end
+	end
+	return matched == 0 and 0 or (score + matched * 25)
+end
+
+local function searchHaystack(pageName, child)
+	local parts = {pageName, child.Name}
+	for _, d in ipairs(child:GetDescendants()) do
+		if d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox") then
+			parts[#parts + 1] = d.Text or ""
+		end
+	end
+	local base = table.concat(parts, " ")
+	local q = normalizeSearch(searchBox.Text)
+	for token in q:gmatch("%S+") do
+		for alias, words in pairs(SEARCH_ALIASES) do
+			if token == alias then base ..= " " .. table.concat(words, " ") end
+		end
+	end
+	return base
+end
+
 local function applyMenuSearch()
-	local q = string.lower(searchBox.Text or "")
-	local page = pages[currentPage]
-	if not page then return end
-	for _, child in ipairs(page:GetChildren()) do
-		if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then
-			if q == "" then
-				child.Visible = true
-			else
-				local hay = child.Name .. " "
-				for _, d in ipairs(child:GetDescendants()) do
-					if d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox") then
-						hay ..= " " .. (d.Text or "")
-					end
+	local q = normalizeSearch(searchBox.Text)
+	local firstMatch, bestScore = nil, -1
+	for pageName, page in pairs(pages) do
+		local pageMatch = false
+		for _, child in ipairs(page:GetChildren()) do
+			if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then
+				local score = smartSearchScore(q, searchHaystack(pageName, child))
+				local match = q == "" or score > 0
+				child.Visible = match
+				if match then pageMatch = true end
+				if q ~= "" and score > bestScore then bestScore, firstMatch = score, pageName end
+			end
+		end
+		if q ~= "" and pageMatch and not firstMatch then firstMatch = pageName end
+	end
+	searchEmpty.Visible = (q ~= "" and not firstMatch)
+	if q ~= "" and firstMatch then
+		if firstMatch ~= currentPage then U.showPage(firstMatch) end
+	else
+		if q == "" then
+			for _, page in pairs(pages) do
+				for _, child in ipairs(page:GetChildren()) do
+					if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then child.Visible = true end
 				end
-				child.Visible = string.find(string.lower(hay), q, 1, true) ~= nil
 			end
 		end
 	end
@@ -2480,28 +2595,43 @@ local minimized = new("TextButton", {
 	BackgroundColor3 = THEMES[1].b, Visible = false, AutoButtonColor = false,
 }, gui)
 U.corner(minimized, 20)
+minimized:SetAttribute("JV_ClampToViewport", true)
 local minStroke = stroke(minimized, 2, 0)
 local minGradient = new("UIGradient", {}, minStroke)
 local minDrag = U.draggable(minimized)
 
-local SIZE_STEPS = {0.80, 0.90, 1.00, 1.10, 1.20, 1.30}
+-- DRAG-SIZE: drag the SIZE button left/right to resize continuously.
+-- No cycling and no ON/OFF state.
+local SIZE_MIN, SIZE_MAX = 0.70, 1.30
+local sizeDragging, sizeStartX, sizeStartValue = false, 0, Settings.MenuScale
 local function refreshSizeButton()
 	sizeBtn.Text = string.format("SIZE %d%%", math.floor(Settings.MenuScale * 100 + 0.5))
 end
-sizeBtn.Activated:Connect(function()
-	local current = Settings.MenuScale
-	local nextValue = SIZE_STEPS[1]
-	for i, v in ipairs(SIZE_STEPS) do
-		if math.abs(v - current) < 0.026 then
-			nextValue = SIZE_STEPS[(i % #SIZE_STEPS) + 1]
-			break
+sizeBtn.Active = true
+sizeBtn.AutoButtonColor = false
+sizeBtn.InputBegan:Connect(function(input)
+	if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+	sizeDragging = true
+	sizeStartX = input.Position.X
+	sizeStartValue = Settings.MenuScale
+	sizeBtn.BackgroundColor3 = THEMES[1].b
+	U.play("click")
+	input.Changed:Connect(function()
+		if input.UserInputState == Enum.UserInputState.End then
+			sizeDragging = false
+			sizeBtn.BackgroundColor3 = Color3.fromRGB(28, 25, 38)
 		end
-	end
-	Settings.MenuScale = nextValue
+	end)
+end)
+bind(UIS.InputChanged, function(input)
+	if not sizeDragging then return end
+	if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then return end
+	local delta = input.Position.X - sizeStartX
+	Settings.MenuScale = math.clamp(sizeStartValue + delta / 420, SIZE_MIN, SIZE_MAX)
 	refreshSizeButton()
 	applyScale()
 	U.refreshAll()
-	U.play("click")
+	main:SetAttribute("JV_ClampToViewport", true)
 end)
 refreshSizeButton()
 
@@ -2564,6 +2694,10 @@ applyScale = function()
 		if menuOpen then mainScale.Scale = U.targetScale() end
 	end
 	secScale.Scale = U.fitScale(420, 310)
+	task.defer(function()
+		clampGuiToViewport(main, 6)
+		clampGuiToViewport(minimized, 6)
+	end)
 end
 
 function U.hookViewport()
@@ -2945,7 +3079,6 @@ end
 --==================================================
 unloadFn = function()
 	Settings.UltraActive = false
-	rememberAndApplyUltraTShirt(character, false)
 	following = false
 	followToken += 1
 	for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
