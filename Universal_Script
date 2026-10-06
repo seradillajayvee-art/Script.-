@@ -1,5 +1,5 @@
 --==================================================================
--- ABILITY MENU - JAYVEE  (v4.9)
+-- ABILITY MENU - JAYVEE  (v5.2)
 -- Own-game LocalScript
 -- Place in: StarterPlayer > StarterPlayerScripts
 --
@@ -57,7 +57,7 @@
 --   * Damage fallback dodges even when no enemy is inside the radius.
 --==================================================================
 
-print("[JAYVEE] Ability Menu v4.7 loading...")
+print("[JAYVEE] Ability Menu v5.2 loading...")
 
 -- On-screen status banner: shows "loading", "loaded" or the exact ERROR on your screen.
 local function JV_Banner(text, isError)
@@ -116,7 +116,7 @@ if not player then error("LocalPlayer is not available yet") end
 local playerGui = player:WaitForChild("PlayerGui", 15)
 if not playerGui then error("PlayerGui did not become available within 15 seconds") end
 
-local SCRIPT_VERSION = "v4.9"
+local SCRIPT_VERSION = "v5.2"
 local VERSION_MAJOR = SCRIPT_VERSION:match("%d+") or "4"
 local PASSWORD_PREFIX = "ULTRAINSTINCTBYJAYVEE"
 local PASSWORD = PASSWORD_PREFIX .. "V" .. VERSION_MAJOR
@@ -608,6 +608,7 @@ local character, humanoid, root, lastHealth, damageConnection
 local halfHPTriggered = false
 local dodgeChatLastAt = 0
 local dodgeChatRecent = {}
+local lastDamageAmount = 0
 local dodging, following, followTarget, followToken = false, false, nil, 0
 local dodgeToken = 0
 local cameraLocked, cameraTarget, bodyLocked = false, nil, false
@@ -1464,48 +1465,80 @@ function U.ultraChatIntro()
 	Debris:AddItem(bb, 3)
 end
 
--- Dodge reactions: one message every N successful dodges, with a no-repeat bag
--- so the same line is not spammed over and over.
+-- Dodge reactions: one message every N successful dodges.
+-- The tone changes with current HP and the damage just received:
+-- high HP = calm/confident, mid HP = alert, low HP = intense,
+-- critical HP = fierce/survival-focused. Every line has exactly one emoji.
 local DODGE_CHAT_LINES = {
-	"Heh... too slow 😏💨",
-	"Did you really think that would hit me? 👀✨",
-	"My body moved before I even thought about it... 🥶⚡",
-	"Keep swinging. I can do this all day 😎🔥",
-	"You missed again! 😂💫",
-	"Reflexes on autopilot. 🧘‍♂️⚡",
-	"Almost... but not quite. 😈💨",
-	"That was close! Too bad I already moved 😏✨",
-	"Bro is fighting the air now 💀😂",
-	"You cannot touch what you cannot catch 🪽⚡",
-	"Another dodge? Easy. 😌💨",
-	"Ultra reflexes kicking in! 👁️⚡",
-	"I saw that coming from a mile away 😎👀",
-	"Try again... maybe next century 😂🔥",
-	"Instinct > reaction time. 🧘‍♂️✨",
+	calm = {
+		"Your attack was already behind me. 🌌",
+		"I can see your movements before they happen. 👁️",
+		"Too slow... my instincts are already ahead of you. ⚡",
+		"You missed. My body moved before I even thought. 🪽",
+		"Keep trying. I have no reason to rush. 😌",
+	},
+	alert = {
+		"That one was close... now I am paying attention. 👀",
+		"You are getting faster, but so am I. 🔥",
+		"I felt that one... you will not get the next chance. 🥶",
+		"Your attacks are changing. So are my instincts. ⚔️",
+		"Closer than before... but still not enough. 😏",
+	},
+	intense = {
+		"You actually hurt me... now my instincts are awake. ⚡",
+		"My body is moving faster because I refuse to fall. 🐉",
+		"Every wound makes the next attack easier to read. 🔥",
+		"Do not mistake my damage for weakness. 😈",
+		"I am running out of room for mistakes... so I will make none. 🥋",
+	},
+	critical = {
+		"My body is breaking... but my instinct will not. 🩶",
+		"One more hit and I fall... so you will not land it. 👁️",
+		"This pain is not stopping me. It is sharpening me. ⚔️",
+		"I have nothing left to waste. Come at me. 😤",
+		"If this is the end... then my instincts will decide it. 🌑",
+	},
 }
 
-local function dodgeChatAlreadyUsed(index)
+local function dodgeChatAlreadyUsed(key)
 	for _, used in ipairs(dodgeChatRecent) do
-		if used == index then return true end
+		if used == key then return true end
 	end
 	return false
 end
 
+local function getDodgeEmotionTier()
+	if not humanoid or humanoid.MaxHealth <= 0 then return "calm" end
+	local hp = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
+	if hp <= 0.25 then return "critical" end
+	if hp <= 0.50 then return "intense" end
+	if hp <= 0.75 then return "alert" end
+	return "calm"
+end
+
 local function pickDodgeChatLine()
+	local tier = getDodgeEmotionTier()
+	local pool = DODGE_CHAT_LINES[tier]
 	local available = {}
-	for i = 1, #DODGE_CHAT_LINES do
-		if not dodgeChatAlreadyUsed(i) then table.insert(available, i) end
+	for i = 1, #pool do
+		local key = tier .. ":" .. i
+		if not dodgeChatAlreadyUsed(key) then
+			table.insert(available, {key = key, text = pool[i]})
+		end
 	end
 	if #available == 0 then
-		dodgeChatRecent = {}
-		for i = 1, #DODGE_CHAT_LINES do table.insert(available, i) end
+		-- Clear only this emotion tier, so a change in HP can still change the tone.
+		local kept = {}
+		for _, used in ipairs(dodgeChatRecent) do
+			if not tostring(used):match("^" .. tier .. ":") then table.insert(kept, used) end
+		end
+		dodgeChatRecent = kept
+		for i = 1, #pool do table.insert(available, {key = tier .. ":" .. i, text = pool[i]}) end
 	end
-	local index = available[math.random(1, #available)]
-	table.insert(dodgeChatRecent, index)
-	if #dodgeChatRecent > math.min(5, #DODGE_CHAT_LINES - 1) then
-		table.remove(dodgeChatRecent, 1)
-	end
-	return DODGE_CHAT_LINES[index]
+	local chosen = available[math.random(1, #available)]
+	table.insert(dodgeChatRecent, chosen.key)
+	if #dodgeChatRecent > 6 then table.remove(dodgeChatRecent, 1) end
+	return chosen.text
 end
 
 local function sendChatLine(text)
@@ -2234,6 +2267,8 @@ function U.hookDamage()
 	if not humanoid then return end
 	lastHealth = humanoid.Health
 	damageConnection = humanoid.HealthChanged:Connect(function(newHealth)
+		local damageTaken = (lastHealth and newHealth < lastHealth) and (lastHealth - newHealth) or 0
+		if damageTaken > 0 then lastDamageAmount = damageTaken end
 		-- Alternate Ultra Instinct trigger: crossing from above 50% HP to 50% or below.
 		-- It deliberately checks UltraActive == false, so it cannot retrigger while Ultra is ON.
 		if Settings.UltraHalfHPTrigger and Settings.Enabled and not Settings.UltraActive
@@ -2346,6 +2381,7 @@ local function setupCharacter(char)
 	if not hum or not hrp then return end
 	character, humanoid, root = char, hum, hrp
 	halfHPTriggered = false
+	lastDamageAmount = 0
 	dodging, following, followTarget = false, false, nil
 	followToken += 1
 	U.cancelCameraLock()
