@@ -47,7 +47,6 @@ local TweenService = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
 local SoundService = game:GetService("SoundService")
 local Debris = game:GetService("Debris")
-local TextChatService = game:GetService("TextChatService")
 
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
@@ -56,7 +55,7 @@ local PASSWORD = "ULTRAINSTINCTBYJAYVEEV2"
 
 local Settings = {
 	-- Master switches
-	Enabled = false,                -- Master ON/OFF. Starts OFF when the menu opens.
+	Enabled = true,                 -- Master ON/OFF.
 	AutoDodge = true,               -- Automatic dodge detection.
 	CameraLock = true,              -- Camera reaction during combat.
 
@@ -94,11 +93,6 @@ local Settings = {
 	UIVolume = 0.45,
 	UITransparency = 0.04,
 	AnimationSpeed = 0.45,
-
-	-- Performance optimization
-	Optimization = false,           -- Disabled so UI input/visuals stay fully responsive.
-	UIUpdateRate = 0.016,           -- Full-rate UI refresh.
-	EffectUpdateRate = 0.016,       -- Full-rate effect refresh.
 }
 
 local character
@@ -123,7 +117,16 @@ local function refreshCharacter()
 	lastHealth = humanoid.Health
 end
 
-refreshCharacter()
+-- Do not block UI creation waiting for the character.
+-- The UI must appear even while the character is still loading.
+if player.Character then
+	task.spawn(function()
+		local ok = pcall(refreshCharacter)
+		if not ok then
+			character, humanoid, root = nil, nil, nil
+		end
+	end)
+end
 
 local function makeSound(id, volume)
 	local s = Instance.new("Sound")
@@ -258,6 +261,167 @@ local minimized
 local secScale
 
 --==================================================
+-- ULTRA INSTINCT LOADING SCREEN
+--==================================================
+
+local loading = Instance.new("Frame")
+loading.Name = "UltraInstinctLoading"
+loading.Size = UDim2.fromScale(1, 1)
+loading.BackgroundColor3 = Color3.fromRGB(5, 5, 9)
+loading.ZIndex = 100000
+loading.Visible = false
+loading.Active = false
+loading.Parent = gui
+
+local loadGlow = Instance.new("Frame")
+loadGlow.Size = UDim2.fromOffset(270, 270)
+loadGlow.Position = UDim2.new(0.5, -135, 0.42, -135)
+loadGlow.BackgroundColor3 = Color3.fromRGB(104, 72, 158)
+loadGlow.BackgroundTransparency = 0.86
+loadGlow.ZIndex = 1001
+loadGlow.Parent = loading
+corner(loadGlow, 135)
+
+local loadRing = Instance.new("Frame")
+loadRing.Size = UDim2.fromOffset(170, 170)
+loadRing.Position = UDim2.new(0.5, -85, 0.42, -85)
+loadRing.BackgroundTransparency = 1
+loadRing.ZIndex = 1002
+loadRing.Parent = loading
+local loadStroke = addStroke(loadRing, 0.05)
+loadStroke.Thickness = 3
+
+local loadCore = Instance.new("Frame")
+loadCore.Size = UDim2.fromOffset(112, 112)
+loadCore.Position = UDim2.new(0.5, -56, 0.42, -56)
+loadCore.BackgroundColor3 = Color3.fromRGB(16, 14, 23)
+loadCore.BackgroundTransparency = 0.08
+loadCore.ZIndex = 1003
+loadCore.Parent = loading
+corner(loadCore, 56)
+local coreStroke = addStroke(loadCore, 0.15)
+coreStroke.Thickness = 2
+
+local loadTitle = Instance.new("TextLabel")
+loadTitle.BackgroundTransparency = 1
+loadTitle.Size = UDim2.new(1, -30, 0, 34)
+loadTitle.Position = UDim2.new(0, 15, 0.42, 62)
+loadTitle.Text = "ULTRA INSTINCT"
+loadTitle.Font = Enum.Font.GothamBlack
+loadTitle.TextSize = 25
+loadTitle.TextColor3 = Color3.new(1, 1, 1)
+loadTitle.ZIndex = 1004
+loadTitle.Parent = loading
+
+local loadSub = Instance.new("TextLabel")
+loadSub.BackgroundTransparency = 1
+loadSub.Size = UDim2.new(1, -30, 0, 22)
+loadSub.Position = UDim2.new(0, 15, 0.42, 99)
+loadSub.Text = "JAYVEE • ABILITY CORE"
+loadSub.Font = Enum.Font.GothamBold
+loadSub.TextSize = 10
+loadSub.TextColor3 = Color3.fromRGB(170, 165, 190)
+loadSub.ZIndex = 1004
+loadSub.Parent = loading
+
+local loadStatus = Instance.new("TextLabel")
+loadStatus.BackgroundTransparency = 1
+loadStatus.Size = UDim2.new(1, -60, 0, 24)
+loadStatus.Position = UDim2.new(0, 30, 0.72, 0)
+loadStatus.Text = "INITIALIZING..."
+loadStatus.Font = Enum.Font.GothamBold
+loadStatus.TextSize = 11
+loadStatus.TextColor3 = Color3.fromRGB(210, 205, 225)
+loadStatus.ZIndex = 1004
+loadStatus.Parent = loading
+
+local loadBarBack = Instance.new("Frame")
+loadBarBack.Size = UDim2.new(0, 330, 0, 6)
+loadBarBack.Position = UDim2.new(0.5, -165, 0.77, 0)
+loadBarBack.BackgroundColor3 = Color3.fromRGB(32, 29, 42)
+loadBarBack.ZIndex = 1004
+loadBarBack.Parent = loading
+corner(loadBarBack, 6)
+
+local loadBar = Instance.new("Frame")
+loadBar.Size = UDim2.new(0, 0, 1, 0)
+loadBar.BackgroundColor3 = Color3.fromRGB(150, 105, 225)
+loadBar.ZIndex = 1005
+loadBar.Parent = loadBarBack
+corner(loadBar, 6)
+
+local loadPercent = Instance.new("TextLabel")
+loadPercent.BackgroundTransparency = 1
+loadPercent.Size = UDim2.fromOffset(100, 22)
+loadPercent.Position = UDim2.new(0.5, -50, 0.80, 0)
+loadPercent.Text = "0%"
+loadPercent.Font = Enum.Font.GothamBlack
+loadPercent.TextSize = 10
+loadPercent.TextColor3 = Color3.fromRGB(190, 185, 210)
+loadPercent.ZIndex = 1004
+loadPercent.Parent = loading
+
+local loadingStatuses = {
+    "INITIALIZING ULTRA INSTINCT...",
+    "SYNCING MOVEMENT CORE...",
+    "LOADING DODGE SENSE...",
+    "CALIBRATING FOLLOW SYSTEM...",
+    "ARMING SECURITY LAYER...",
+    "ABILITY CORE READY."
+}
+
+-- ================================================================
+-- LOADING SCREEN
+-- Startup loading animation shown before the Security UI.
+-- ================================================================
+local function runLoadingScreen()
+    -- Startup order: Loading Screen -> Security -> Main UI.
+    gui.Enabled = true
+    loading.Visible = true
+    loading.ZIndex = 100000
+    security.Visible = false
+    main.Visible = false
+    minimized.Visible = false
+
+    task.spawn(function()
+        while loading.Parent and loading.Visible do
+            loadRing.Rotation += 1.2
+            local pulse = 270 + math.sin(os.clock() * 3) * 10
+            loadGlow.Size = UDim2.fromOffset(pulse, pulse)
+            loadGlow.Position = UDim2.new(0.5, -pulse/2, 0.42, -pulse/2)
+            task.wait()
+        end
+    end)
+
+    for i, status in ipairs(loadingStatuses) do
+        loadStatus.Text = status
+        local progress = i / #loadingStatuses
+        tween(loadBar, 0.38, {Size = UDim2.new(progress, 0, 1, 0)}, Enum.EasingStyle.Quint):Play()
+        loadPercent.Text = tostring(math.floor(progress * 100)) .. "%"
+        task.wait(0.38)
+    end
+
+    task.wait(0.15)
+
+    for _, obj in ipairs({loading, loadGlow, loadCore, loadBarBack}) do
+        tween(obj, 0.55, {BackgroundTransparency = 1}, Enum.EasingStyle.Quint):Play()
+    end
+    for _, obj in ipairs({loadTitle, loadSub, loadStatus, loadPercent}) do
+        tween(obj, 0.55, {TextTransparency = 1}, Enum.EasingStyle.Quint):Play()
+    end
+    tween(loadStroke, 0.55, {Transparency = 1}, Enum.EasingStyle.Quint):Play()
+    tween(coreStroke, 0.55, {Transparency = 1}, Enum.EasingStyle.Quint):Play()
+    task.wait(0.58)
+
+    loading.Visible = false
+    loading.Active = false
+    security.Visible = true
+    security.ZIndex = 200
+    secScale.Scale = 0.72
+    tween(secScale, 0.42, {Scale = 1}, Enum.EasingStyle.Back, Enum.EasingDirection.Out):Play()
+end
+
+--==================================================
 -- SECURITY
 --==================================================
 
@@ -265,10 +429,10 @@ security = Instance.new("Frame")
 security.Size = UDim2.fromOffset(410, 275)
 security.Position = UDim2.new(0.5, -205, 0.5, -138)
 security.BackgroundColor3 = Color3.fromRGB(12, 11, 17)
-security.BackgroundTransparency = 0
+security.BackgroundTransparency = 0.04
 security.Parent = gui
 security.Visible = false
-security.ZIndex = 200
+security.ZIndex = 100
 corner(security, 22)
 addStroke(security, 0.1)
 draggable(security)
@@ -285,7 +449,6 @@ secTitle.Text = "ABILITY MENU"
 secTitle.Font = Enum.Font.GothamBlack
 secTitle.TextSize = 28
 secTitle.TextColor3 = Color3.new(1, 1, 1)
-secTitle.ZIndex = 201
 secTitle.Parent = security
 
 local secSub = Instance.new("TextLabel")
@@ -296,7 +459,6 @@ secSub.Text = "SECURITY ACCESS  •  JAYVEE"
 secSub.Font = Enum.Font.GothamBold
 secSub.TextSize = 11
 secSub.TextColor3 = Color3.fromRGB(155, 150, 175)
-secSub.ZIndex = 201
 secSub.Parent = security
 
 local passBox = Instance.new("TextBox")
@@ -310,9 +472,6 @@ passBox.TextSize = 13
 passBox.TextColor3 = Color3.new(1, 1, 1)
 passBox.PlaceholderColor3 = Color3.fromRGB(120, 115, 135)
 passBox.BackgroundColor3 = Color3.fromRGB(25, 23, 34)
-passBox.ZIndex = 205
-passBox.Active = true
-passBox.Selectable = true
 passBox.Parent = security
 corner(passBox, 13)
 
@@ -325,7 +484,6 @@ unlock.TextSize = 13
 unlock.TextColor3 = Color3.new(1, 1, 1)
 unlock.BackgroundColor3 = Color3.fromRGB(104, 72, 158)
 unlock.AutoButtonColor = false
-unlock.ZIndex = 205
 unlock.Parent = security
 corner(unlock, 13)
 
@@ -337,7 +495,6 @@ securityStatus.Text = "SECURE • WAITING FOR ACCESS"
 securityStatus.Font = Enum.Font.GothamBold
 securityStatus.TextSize = 10
 securityStatus.TextColor3 = Color3.fromRGB(145, 140, 165)
-securityStatus.ZIndex = 201
 securityStatus.Parent = security
 
 --==================================================
@@ -510,12 +667,7 @@ local function arczisSetup(character)
 	arczisConnections[#arczisConnections+1] = arczisHumanoid.StateChanged:Connect(function()
 		arczisState()
 	end)
-	local arczisAccumulator = 0
-	arczisConnections[#arczisConnections+1] = RunService.Heartbeat:Connect(function(dt)
-		arczisAccumulator += dt
-		local interval = Settings.Optimization and Settings.EffectUpdateRate or 0.016
-		if arczisAccumulator < interval then return end
-		arczisAccumulator = 0
+	arczisConnections[#arczisConnections+1] = RunService.RenderStepped:Connect(function()
 		if arczisHumanoid and arczisHumanoid.Parent then
 			arczisState()
 		end
@@ -1531,14 +1683,10 @@ end)
 
 systemToggle.MouseButton1Click:Connect(function()
 	play(clickSound)
-	local wasEnabled = Settings.Enabled
 	Settings.Enabled = not Settings.Enabled
 	refreshPower()
 	refreshRadius()
 	refreshBodyAura()
-	if not wasEnabled and Settings.Enabled and Settings.Ability == "Ultra Instinct" then
-		playUltraInstinctIntro()
-	end
 end)
 
 dodgeToggle.MouseButton1Click:Connect(function()
@@ -1764,105 +1912,12 @@ local function hideBodyAura(fadeOut)
 end
 
 local auraPulseConnection
-local uiIntroRunning = false
-
---==================================================
--- ULTRA INSTINCT ACTIVATION INTRO
---==================================================
--- Runs only when the user turns the Ultra Instinct system ON.
--- It sends "ULTRA INSTINCT!!!" to the current Roblox chat system,
--- fades in a white Super-Saiyan-style outline/aura, then fades it out.
--- The permanent UI aura remains controlled by WhiteAura afterwards.
-local function sendUltraInstinctChat()
-	local sent = false
-	pcall(function()
-		local channels = TextChatService:FindFirstChild("TextChannels")
-		local general = channels and channels:FindFirstChild("RBXGeneral")
-		if general then
-			general:SendAsync("ULTRA INSTINCT!!!")
-			sent = true
-		end
-	end)
-	if not sent then
-		pcall(function()
-			local events = game:GetService("ReplicatedStorage"):FindFirstChild("DefaultChatSystemChatEvents")
-			local say = events and events:FindFirstChild("SayMessageRequest")
-			if say then
-				say:FireServer("ULTRA INSTINCT!!!", "All")
-			end
-		end)
-	end
-end
-
-local function playUltraInstinctIntro()
-	if uiIntroRunning or not character then return end
-	uiIntroRunning = true
-
-	task.spawn(function()
-		sendUltraInstinctChat()
-
-		-- Temporary white power-up highlight.
-		local h = Instance.new("Highlight")
-		h.Name = "UI_SuperSaiyanIntro"
-		h.Adornee = character
-		h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-		h.FillColor = Color3.new(1,1,1)
-		h.OutlineColor = Color3.new(1,1,1)
-		h.FillTransparency = 1
-		h.OutlineTransparency = 1
-		h.Parent = character
-
-		-- Temporary aura burst.
-		local temp = Instance.new("Attachment")
-		temp.Name = "UI_SuperSaiyanIntroAura"
-		temp.Parent = root or character:FindFirstChild("HumanoidRootPart") or character
-		local emitter = Instance.new("ParticleEmitter")
-		emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-		emitter.Color = ColorSequence.new(Color3.new(1,1,1))
-		emitter.LightEmission = 1
-		emitter.Rate = 55
-		emitter.Lifetime = NumberRange.new(0.25,0.6)
-		emitter.Speed = NumberRange.new(2,7)
-		emitter.SpreadAngle = Vector2.new(360,360)
-		emitter.Size = NumberSequence.new({
-			NumberSequenceKeypoint.new(0,0.45),
-			NumberSequenceKeypoint.new(0.5,0.22),
-			NumberSequenceKeypoint.new(1,0)
-		})
-		emitter.Parent = temp
-
-		-- Fade in.
-		tween(h, 0.35, {OutlineTransparency=0.02, FillTransparency=0.72}, Enum.EasingStyle.Quint, Enum.EasingDirection.Out):Play()
-		task.wait(0.45)
-
-		-- Hold the powered-up look briefly.
-		if h.Parent then
-			tween(h, 0.18, {OutlineTransparency=0.0, FillTransparency=0.62}, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut):Play()
-		end
-		task.wait(0.55)
-
-		-- Fade out the intro; normal WhiteAura can remain afterward.
-		if h.Parent then
-			tween(h, 0.45, {OutlineTransparency=1, FillTransparency=1}, Enum.EasingStyle.Quint, Enum.EasingDirection.In):Play()
-		end
-		task.wait(0.5)
-
-		if h.Parent then h:Destroy() end
-		if temp.Parent then temp:Destroy() end
-		uiIntroRunning = false
-	end)
-end
-
 local function refreshBodyAura()
 	local shouldShow = Settings.Enabled and Settings.Ability == "Ultra Instinct" and Settings.WhiteAura
 	if shouldShow then
 		buildBodyAura()
 		if auraPulseConnection then auraPulseConnection:Disconnect() end
-		local auraAccumulator = 0
-		auraPulseConnection = RunService.Heartbeat:Connect(function(dt)
-			auraAccumulator += dt
-		if auraAccumulator < (Settings.Optimization and Settings.EffectUpdateRate or 0.016) then return end
-		 auraAccumulator = 0
+		auraPulseConnection = RunService.RenderStepped:Connect(function()
 			if not uiHighlight or not uiHighlight.Parent or not Settings.WhiteAura or Settings.Ability ~= "Ultra Instinct" then return end
 			local pulse = (math.sin(os.clock() * 5.5) + 1) * 0.5
 			uiHighlight.OutlineTransparency = 0.04 + pulse * 0.28
@@ -2184,22 +2239,15 @@ end
 -- CAMERA FOLLOW
 --==================================================
 
-local uiUpdateAccumulator = 0
-RunService.RenderStepped:Connect(function(dt)
+RunService.RenderStepped:Connect(function()
 	if cameraLocked and humanoid and humanoid.MoveDirection.Magnitude > 0.12 then
 		cancelCameraLock()
 	end
+	updateRing()
+	updatePlayerInfo()
 
-	uiUpdateAccumulator += dt
-	local uiInterval = Settings.Optimization and Settings.UIUpdateRate or 0.016
-	if uiUpdateAccumulator >= uiInterval then
-		uiUpdateAccumulator = 0
-		updateRing()
-		updatePlayerInfo()
-
-		if character ~= visualCharacter then
-			refreshBodyAura()
-		end
+	if character ~= visualCharacter then
+		refreshBodyAura()
 	end
 
 	if cameraLocked and (cameraTarget or followTarget) then
@@ -2544,13 +2592,6 @@ end
 main.DescendantAdded:Connect(addClickAnimation)
 
 --==================================================
--- PERFORMANCE OPTIMIZATION
---==================================================
--- Optimization is enabled by default. It throttles non-critical UI, aura,
--- movement-state and loading-screen updates while keeping camera/input responsive.
--- Set Settings.Optimization = false if you need maximum update frequency.
-
---==================================================
 -- INITIALIZE
 --==================================================
 
@@ -2566,49 +2607,49 @@ security.Visible = false
 main.Visible = false
 minimized.Visible = false
 
--- Start directly on the Security UI (loading screen removed).
+-- Startup order is intentionally: Security -> Password -> Loading -> Ability Menu.
+-- Show Security immediately so character/movement loading can never hide the UI.
+loading.Visible = false
+loading.Active = false
 security.Visible = true
-security.Active = true
-security.Selectable = false
 security.ZIndex = 200
-secScale.Scale = 0.72
-tween(secScale, 0.42, {Scale = 1}, Enum.EasingStyle.Back, Enum.EasingDirection.Out):Play()
+main.Visible = false
+minimized.Visible = false
+secScale.Scale = 1
 
-player.CharacterAdded:Connect(function()
-	task.wait(0.25)
-	refreshCharacter()
-	hookDamage()
-end)
-
-passBox.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		task.defer(function()
-			if security.Visible then
-				passBox:CaptureFocus()
-			end
-		end)
-	end
-end)
-
-passBox.FocusLost:Connect(function(enterPressed)
-	if enterPressed then
-		unlock:Activate()
-	end
+player.CharacterAdded:Connect(function(char)
+	character = char
+	task.spawn(function()
+		humanoid = char:WaitForChild("Humanoid", 10)
+		root = char:WaitForChild("HumanoidRootPart", 10)
+		if humanoid then lastHealth = humanoid.Health end
+		if humanoid and root then hookDamage() end
+	end)
 end)
 
 unlock.MouseButton1Click:Connect(function()
 	play(clickSound)
 
 	if passBox.Text == PASSWORD then
-		securityStatus.Text = "ACCESS GRANTED • ABILITY MENU READY"
+		securityStatus.Text = "ACCESS GRANTED • LOADING..."
 		securityStatus.TextColor3 = Color3.fromRGB(175,255,195)
 		play(openSound)
 
-		tween(secScale,0.25,{Scale=0.7},Enum.EasingStyle.Back,Enum.EasingDirection.In):Play()
-		task.wait(0.2)
-
 		security.Visible = false
-		openMenu()
+		loading.Visible = true
+		loading.Active = true
+		loadBar.Size = UDim2.new(0, 0, 1, 0)
+		loadPercent.Text = "0%"
+		loadStatus.Text = loadingStatuses[1]
+
+		task.spawn(function()
+			local ok, err = pcall(runLoadingScreen)
+			if not ok then
+				warn("[JAYVEE UI] Loading error:", err)
+				loading.Visible = false
+				openMenu()
+			end
+		end)
 	else
 		securityStatus.Text = "ACCESS DENIED • INVALID KEY"
 		securityStatus.TextColor3 = Color3.fromRGB(255,120,130)
