@@ -166,7 +166,6 @@ local function playRandomDodgeSound()
 end
 
 local uiSoundsEnabled = true
-local savedSettings = nil
 local function play(sound)
 	if not uiSoundsEnabled then return end
 	pcall(function()
@@ -415,10 +414,6 @@ local function runLoadingScreen()
 
     loading.Visible = false
     loading.Active = false
-    security.Visible = true
-    security.ZIndex = 200
-    secScale.Scale = 0.72
-    tween(secScale, 0.42, {Scale = 1}, Enum.EasingStyle.Back, Enum.EasingDirection.Out):Play()
 end
 
 --==================================================
@@ -651,9 +646,10 @@ local function arczisSetup(character)
 	-- has a usable custom movement animation. This prevents double playback.
 	arczisAnimateScript = character:FindFirstChild("Animate")
 	if arczisAnimateScript and arczisAnimateScript:IsA("LocalScript") then
-		local hasCustom = false
-		for _, id in pairs(ArczisMovement.AnimationIds) do
-			if id and id ~= "" then hasCustom = true break end
+		local hasCustom = true
+		for _, stateName in ipairs({"Idle","Walk","Run","Jump","Fall"}) do
+			local id = ArczisMovement.AnimationIds[stateName]
+			if not id or id == "" then hasCustom = false break end
 		end
 		if hasCustom then
 			arczisAnimateScript.Enabled = false
@@ -796,6 +792,7 @@ local function newPage(name)
 end
 
 local homePage = newPage("Home")
+homePage.Size = UDim2.new(1, -8, 0, 560)
 local powerPage = newPage("Power")
 local playerPage = newPage("Player")
 
@@ -851,147 +848,11 @@ label(homeHint,
 	UDim2.fromOffset(18, 12), UDim2.new(1,-36,1,-24), 10
 )
 
-local menuSettings = card(homePage, UDim2.fromOffset(0, 314), UDim2.new(1, 0, 0, 430))
-label(menuSettings, "MENU SETTINGS", UDim2.fromOffset(18, 10), UDim2.new(1,-36,0,20), 11)
-
-local menuSizeText = label(menuSettings, "MENU SIZE  " .. math.floor(Settings.MenuScale * 100) .. "%", UDim2.fromOffset(18, 42), UDim2.new(0,170,0,34), 12)
-local menuSizeMinus = Instance.new("TextButton")
-menuSizeMinus.Size = UDim2.fromOffset(78,36)
-menuSizeMinus.Position = UDim2.new(1,-168,0,40)
-menuSizeMinus.Text = "−"
-menuSizeMinus.Font = Enum.Font.GothamBlack
-menuSizeMinus.TextSize = 16
-menuSizeMinus.TextColor3 = Color3.new(1,1,1)
-menuSizeMinus.BackgroundColor3 = Color3.fromRGB(47,42,59)
-menuSizeMinus.AutoButtonColor = false
-menuSizeMinus.Parent = menuSettings
-corner(menuSizeMinus,10)
-local menuSizePlus = Instance.new("TextButton")
-menuSizePlus.Size = UDim2.fromOffset(78,36)
-menuSizePlus.Position = UDim2.new(1,-82,0,40)
-menuSizePlus.Text = "+"
-menuSizePlus.Font = Enum.Font.GothamBlack
-menuSizePlus.TextSize = 16
-menuSizePlus.TextColor3 = Color3.new(1,1,1)
-menuSizePlus.BackgroundColor3 = Color3.fromRGB(104,72,158)
-menuSizePlus.AutoButtonColor = false
-menuSizePlus.Parent = menuSettings
-corner(menuSizePlus,10)
-
-local uiScaleButton = Instance.new("TextButton")
-uiScaleButton.Size = UDim2.new(1,-36,0,34)
-uiScaleButton.Position = UDim2.fromOffset(18,84)
-uiScaleButton.Text = "UI SCALE • 100%"
-uiScaleButton.Font = Enum.Font.GothamBold
-uiScaleButton.TextSize = 10
-uiScaleButton.TextColor3 = Color3.new(1,1,1)
-uiScaleButton.BackgroundColor3 = Color3.fromRGB(65,55,88)
-uiScaleButton.AutoButtonColor = false
-uiScaleButton.Parent = menuSettings
-corner(uiScaleButton,10)
-
-local uiTransparencyButton = Instance.new("TextButton")
-uiTransparencyButton.Size = UDim2.new(0.48,-10,0,34)
-uiTransparencyButton.Position = UDim2.fromOffset(18,126)
-uiTransparencyButton.Text = "UI TRANSPARENCY • 4%"
-uiTransparencyButton.Font = Enum.Font.GothamBold
-uiTransparencyButton.TextSize = 10
-uiTransparencyButton.TextColor3 = Color3.new(1,1,1)
-uiTransparencyButton.BackgroundColor3 = Color3.fromRGB(65,55,88)
-uiTransparencyButton.AutoButtonColor = false
-uiTransparencyButton.Parent = menuSettings
-corner(uiTransparencyButton,10)
-
-local uiAnimButton = Instance.new("TextButton")
-uiAnimButton.Size = UDim2.new(0.48,-10,0,34)
-uiAnimButton.Position = UDim2.new(0.52,0,0,126)
-uiAnimButton.Text = "ANIMATION SPEED • 45%"
-uiAnimButton.Font = Enum.Font.GothamBold
-uiAnimButton.TextSize = 10
-uiAnimButton.TextColor3 = Color3.new(1,1,1)
-uiAnimButton.BackgroundColor3 = Color3.fromRGB(65,55,88)
-uiAnimButton.AutoButtonColor = false
-uiAnimButton.Parent = menuSettings
-corner(uiAnimButton,10)
-
-local introButton = Instance.new("TextButton")
-introButton.Size = UDim2.new(0.48,-10,0,34)
-introButton.Position = UDim2.fromOffset(18,168)
-introButton.Text = "INTRO ANIMATION • BACK"
-introButton.Font = Enum.Font.GothamBold
-introButton.TextSize = 10
-introButton.TextColor3 = Color3.new(1,1,1)
-introButton.BackgroundColor3 = Color3.fromRGB(65,55,88)
-introButton.AutoButtonColor = false
-introButton.Parent = menuSettings
-corner(introButton,10)
-
-local openCloseButton = Instance.new("TextButton")
-openCloseButton.Size = UDim2.new(0.48,-10,0,34)
-openCloseButton.Position = UDim2.new(0.52,0,0,168)
-openCloseButton.Text = "OPEN/CLOSE • SMOOTH"
-openCloseButton.Font = Enum.Font.GothamBold
-openCloseButton.TextSize = 10
-openCloseButton.TextColor3 = Color3.new(1,1,1)
-openCloseButton.BackgroundColor3 = Color3.fromRGB(65,55,88)
-openCloseButton.AutoButtonColor = false
-openCloseButton.Parent = menuSettings
-corner(openCloseButton,10)
-
-local uiSoundButton = Instance.new("TextButton")
-uiSoundButton.Size = UDim2.new(0.48,-10,0,34)
-uiSoundButton.Position = UDim2.fromOffset(18,210)
-uiSoundButton.Text = "UI SOUNDS • ON"
-uiSoundButton.Font = Enum.Font.GothamBold
-uiSoundButton.TextSize = 10
-uiSoundButton.TextColor3 = Color3.new(1,1,1)
-uiSoundButton.BackgroundColor3 = Color3.fromRGB(65,55,88)
-uiSoundButton.AutoButtonColor = false
-uiSoundButton.Parent = menuSettings
-corner(uiSoundButton,10)
-
-local uiVolumeButton = Instance.new("TextButton")
-uiVolumeButton.Size = UDim2.new(0.48,-10,0,34)
-uiVolumeButton.Position = UDim2.new(0.52,0,0,210)
-uiVolumeButton.Text = "SOUND VOLUME • 45%"
-uiVolumeButton.Font = Enum.Font.GothamBold
-uiVolumeButton.TextSize = 10
-uiVolumeButton.TextColor3 = Color3.new(1,1,1)
-uiVolumeButton.BackgroundColor3 = Color3.fromRGB(65,55,88)
-uiVolumeButton.AutoButtonColor = false
-uiVolumeButton.Parent = menuSettings
-corner(uiVolumeButton,10)
-
-local resetSettings = Instance.new("TextButton")
-resetSettings.Size = UDim2.new(0.48,-10,0,34)
-resetSettings.Position = UDim2.fromOffset(18,252)
-resetSettings.Text = "RESET SETTINGS"
-resetSettings.Font = Enum.Font.GothamBold
-resetSettings.TextSize = 10
-resetSettings.TextColor3 = Color3.new(1,1,1)
-resetSettings.BackgroundColor3 = Color3.fromRGB(65,55,88)
-resetSettings.AutoButtonColor = false
-resetSettings.Parent = menuSettings
-corner(resetSettings,10)
-
-local saveSettings = Instance.new("TextButton")
-saveSettings.Size = UDim2.new(0.48,-10,0,34)
-saveSettings.Position = UDim2.new(0.52,0,0,252)
-saveSettings.Text = "SAVE SETTINGS"
-saveSettings.Font = Enum.Font.GothamBold
-saveSettings.TextSize = 10
-saveSettings.TextColor3 = Color3.new(1,1,1)
-saveSettings.BackgroundColor3 = Color3.fromRGB(104,72,158)
-saveSettings.AutoButtonColor = false
-saveSettings.Parent = menuSettings
-corner(saveSettings,10)
-
-local settingsStatus = label(menuSettings, "Session settings • Save stores your current setup", UDim2.fromOffset(18, 298), UDim2.new(1,-36,0,45), 9)
 
 -- CONFIGURATION
 --==================================================
 
-local configCard = card(homePage, UDim2.fromOffset(0, 759), UDim2.new(1, 0, 0, 225))
+local configCard = card(homePage, UDim2.fromOffset(0, 314), UDim2.new(1, 0, 0, 225))
 label(configCard, "CONFIGURATION", UDim2.fromOffset(18, 10), UDim2.new(1,-36,0,22), 12)
 label(configCard, "Player radius and detection settings", UDim2.fromOffset(18, 32), UDim2.new(1,-36,0,18), 9)
 
@@ -1514,64 +1375,11 @@ end
 --==================================================
 
 local function refreshMenuSize()
-	menuSizeText.Text = "MENU SIZE  " .. math.floor(Settings.MenuScale*100) .. "%"
-	uiScaleButton.Text = "UI SCALE • " .. math.floor(Settings.UIScale*100) .. "%"
-	uiTransparencyButton.Text = "UI TRANSPARENCY • " .. math.floor(Settings.UITransparency*100) .. "%"
-	uiAnimButton.Text = "ANIMATION SPEED • " .. math.floor(Settings.AnimationSpeed*100) .. "%"
-	introButton.Text = "INTRO ANIMATION • " .. string.upper(Settings.IntroAnimation)
-	openCloseButton.Text = "OPEN/CLOSE • " .. string.upper(Settings.OpenCloseAnimation)
-	uiSoundButton.Text = uiSoundsEnabled and "UI SOUNDS • ON" or "UI SOUNDS • OFF"
-	uiVolumeButton.Text = "SOUND VOLUME • " .. math.floor(Settings.UIVolume*100) .. "%"
 	mainScale.Scale = math.clamp(Settings.MenuScale*Settings.UIScale,0.65,1.35)
 	main.BackgroundTransparency = Settings.UITransparency
 	clickSound.Volume = Settings.UIVolume
 	openSound.Volume = Settings.UIVolume
 end
-
-menuSizeMinus.MouseButton1Click:Connect(function()
-	play(clickSound)
-	Settings.MenuScale=math.max(0.85,Settings.MenuScale-0.05)
-	refreshMenuSize()
-end)
-menuSizePlus.MouseButton1Click:Connect(function()
-	play(clickSound)
-	Settings.MenuScale=math.min(1.15,Settings.MenuScale+0.05)
-	refreshMenuSize()
-end)
-uiScaleButton.MouseButton1Click:Connect(function()
-	play(clickSound)
-	Settings.UIScale=Settings.UIScale>=1.20 and 0.80 or Settings.UIScale+0.10
-	refreshMenuSize()
-end)
-uiTransparencyButton.MouseButton1Click:Connect(function()
-	play(clickSound)
-	Settings.UITransparency=Settings.UITransparency>=0.24 and 0 or Settings.UITransparency+0.05
-	refreshMenuSize()
-end)
-uiAnimButton.MouseButton1Click:Connect(function()
-	play(clickSound)
-	Settings.AnimationSpeed=Settings.AnimationSpeed>=0.85 and 0.20 or Settings.AnimationSpeed+0.10
-	refreshMenuSize()
-end)
-introButton.MouseButton1Click:Connect(function()
-	play(clickSound)
-	local modes={"Back","Quint","Elastic","Linear"}; local i=table.find(modes,Settings.IntroAnimation) or 1
-	Settings.IntroAnimation=modes[(i%#modes)+1]; refreshMenuSize()
-end)
-openCloseButton.MouseButton1Click:Connect(function()
-	play(clickSound)
-	local modes={"Smooth","Back","Quick"}; local i=table.find(modes,Settings.OpenCloseAnimation) or 1
-	Settings.OpenCloseAnimation=modes[(i%#modes)+1]; refreshMenuSize()
-end)
-uiSoundButton.MouseButton1Click:Connect(function() uiSoundsEnabled=not uiSoundsEnabled; refreshMenuSize() end)
-uiVolumeButton.MouseButton1Click:Connect(function() Settings.UIVolume=Settings.UIVolume>=0.9 and 0 or Settings.UIVolume+0.15; refreshMenuSize() end)
-local function copySettings() local t={} for k,v in pairs(Settings) do t[k]=v end return t end
-saveSettings.MouseButton1Click:Connect(function() savedSettings=copySettings(); settingsStatus.Text="SETTINGS SAVED • Current setup stored for this session"; play(clickSound) end)
-resetSettings.MouseButton1Click:Connect(function()
-	local d={MenuScale=1,UIScale=1,UITransparency=0.04,AnimationSpeed=0.45,IntroAnimation="Back",OpenCloseAnimation="Smooth",UIVolume=0.45}
-	for k,v in pairs(d) do Settings[k]=v end
-	uiSoundsEnabled=true; settingsStatus.Text="SETTINGS RESET • Default UI settings restored"; refreshMenuSize(); play(clickSound)
-end)
 
 followDurationMinus.MouseButton1Click:Connect(function()
 	play(clickSound)
@@ -1820,6 +1628,8 @@ end)
 --==================================================
 
 local uiHighlight = nil
+local auraPulseConnection = nil
+local auraEmitters = {}
 local auraObjects = {}
 local visualCharacter = nil
 
@@ -1830,6 +1640,7 @@ local function clearBodyAura()
 		end
 	end
 	auraObjects = {}
+	auraEmitters = {}
 end
 
 local function buildBodyAura()
@@ -1865,6 +1676,7 @@ local function buildBodyAura()
 			})
 			e.Parent = a
 			table.insert(auraObjects,a)
+			table.insert(auraEmitters,e)
 		end
 	end
 
@@ -1911,7 +1723,6 @@ local function hideBodyAura(fadeOut)
 	visualCharacter = nil
 end
 
-local auraPulseConnection
 local function refreshBodyAura()
 	local shouldShow = Settings.Enabled and Settings.Ability == "Ultra Instinct" and Settings.WhiteAura
 	if shouldShow then
@@ -1922,15 +1733,8 @@ local function refreshBodyAura()
 			local pulse = (math.sin(os.clock() * 5.5) + 1) * 0.5
 			uiHighlight.OutlineTransparency = 0.04 + pulse * 0.28
 			uiHighlight.FillTransparency = 0.90 - pulse * 0.07
-			for _, obj in ipairs(auraObjects) do
-				if obj:IsA("ParticleEmitter") then
-					obj.Rate = 5 + pulse * 9
-					obj.Size = NumberSequence.new({
-						NumberSequenceKeypoint.new(0, 0.22 + pulse * 0.14),
-						NumberSequenceKeypoint.new(0.55, 0.12 + pulse * 0.08),
-						NumberSequenceKeypoint.new(1, 0)
-					})
-				end
+			for _, em in ipairs(auraEmitters) do
+				if em.Parent then em.Rate = 5 + pulse * 9 end
 			end
 		end)
 	else
@@ -2005,7 +1809,7 @@ local function createAfterimage()
 	if not Settings.Afterimage or not character then return end
 	local clone = character:Clone()
 	for _, obj in ipairs(clone:GetDescendants()) do
-		if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ModuleScript") or obj:IsA("Tool") then
+		if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ModuleScript") or obj:IsA("Tool") or obj:IsA("Humanoid") then
 			obj:Destroy()
 		elseif obj:IsA("BasePart") then
 			obj.Anchored = true
@@ -2081,6 +1885,7 @@ end
 -- ULTRA INSTINCT DODGE
 --==================================================
 
+local cameraLockToken = 0
 local function lockCameraToTarget(target)
 	if not Settings.CameraLock or not target then return end
 	local hum = getHum(target)
@@ -2089,6 +1894,15 @@ local function lockCameraToTarget(target)
 	cameraTarget = target
 	cameraLocked = true
 	cameraManualLock = true
+	cameraLockToken += 1
+	local myToken = cameraLockToken
+	task.delay(Settings.FollowDuration + 1, function()
+		if myToken == cameraLockToken and cameraTarget == target then
+			cameraLocked = false
+			cameraTarget = nil
+			cameraManualLock = false
+		end
+	end)
 end
 
 local function cancelCameraLock()
@@ -2159,7 +1973,7 @@ end
 -- DODGE CORE
 -- Executes the dodge animation, effects, camera and follow logic.
 -- ================================================================
-local function dodge()
+local function runDodge()
 	if dodging then return end
 	if not Settings.Enabled or not Settings.AutoDodge then return end
 	if not humanoid or humanoid.Health <= 0 or not root then return end
@@ -2176,6 +1990,7 @@ local function dodge()
 	flash()
 	createAfterimage()
 	Settings.DodgeCount += 1
+	refreshUltraConfig()
 	showDodgeIndicator()
 
 	if targetRoot then
@@ -2194,11 +2009,8 @@ local function dodge()
 	end
 
 	if not direction then
-		direction = Vector3.new(
-			-root.CFrame.LookVector.X,
-			0,
-			-root.CFrame.LookVector.Z
-		).Unit
+		local back = Vector3.new(-root.CFrame.LookVector.X, 0, -root.CFrame.LookVector.Z)
+		direction = back.Magnitude > 0.05 and back.Unit or Vector3.new(0, 0, 1)
 	end
 
 	local startCF = root.CFrame
@@ -2235,6 +2047,14 @@ local function dodge()
 	end)
 end
 
+local function dodge()
+	local ok, err = pcall(runDodge)
+	if not ok then
+		warn("[JAYVEE UI] Dodge error:", err)
+		dodging = false
+	end
+end
+
 --==================================================
 -- CAMERA FOLLOW
 --==================================================
@@ -2246,22 +2066,25 @@ RunService.RenderStepped:Connect(function()
 	updateRing()
 	updatePlayerInfo()
 
-	if character ~= visualCharacter then
+	if character and character ~= visualCharacter
+		and Settings.Enabled and Settings.Ability == "Ultra Instinct" and Settings.WhiteAura then
 		refreshBodyAura()
 	end
 
-	if cameraLocked and (cameraTarget or followTarget) then
-		local target = cameraTarget or followTarget
-		local targetRoot = getRoot(target)
-		local targetHum = getHum(target)
+end)
 
-		if not targetRoot or not targetHum or targetHum.Health <= 0 then
-			cancelCameraLock()
-		else
-			local point = targetRoot.Position + Vector3.new(0,2,0)
-			local desired = CFrame.lookAt(camera.CFrame.Position,point)
-			camera.CFrame = camera.CFrame:Lerp(desired,0.16)
-		end
+RunService:BindToRenderStep("JAYVEE_CameraLock", Enum.RenderPriority.Camera.Value + 1, function()
+	if not (cameraLocked and (cameraTarget or followTarget)) then return end
+	local cam = workspace.CurrentCamera
+	if not cam then return end
+	local target = cameraTarget or followTarget
+	local targetRoot = getRoot(target)
+	local targetHum = getHum(target)
+	if not targetRoot or not targetHum or targetHum.Health <= 0 then
+		cancelCameraLock()
+	else
+		local point = targetRoot.Position + Vector3.new(0,2,0)
+		cam.CFrame = cam.CFrame:Lerp(CFrame.lookAt(cam.CFrame.Position, point), 0.16)
 	end
 end)
 
@@ -2270,11 +2093,11 @@ end)
 --==================================================
 
 local senseCooldown = 0
-local trackedTargetHealth = {}
-local trackedTargetStamp = {}
+local trackedTargetHealth = setmetatable({}, {__mode = "k"})
+local trackedTargetStamp = setmetatable({}, {__mode = "k"})
 local lastSenseTarget = nil
-local lastTargetPositions = {}
-local lastAttackStamp = {}
+local lastTargetPositions = setmetatable({}, {__mode = "k"})
+local lastAttackStamp = setmetatable({}, {__mode = "k"})
 
 local function isValidTarget(model)
 	if not model or model == character then return false end
@@ -2444,8 +2267,12 @@ local function hookTool(tool)
 	end)
 end
 
-for _,obj in ipairs(character:GetChildren()) do hookTool(obj) end
-character.ChildAdded:Connect(hookTool)
+local function hookCharacterTools(char)
+	if not char then return end
+	for _,obj in ipairs(char:GetChildren()) do hookTool(obj) end
+	char.ChildAdded:Connect(hookTool)
+end
+hookCharacterTools(character)
 
 --==================================================
 -- DAMAGE DETECTION
@@ -2619,6 +2446,13 @@ secScale.Scale = 1
 
 player.CharacterAdded:Connect(function(char)
 	character = char
+	-- reset combat state so nothing stays stuck after respawn
+	dodging = false
+	following = false
+	followToken += 1
+	cameraLocked = false
+	cameraTarget = nil
+	hookCharacterTools(char)
 	task.spawn(function()
 		humanoid = char:WaitForChild("Humanoid", 10)
 		root = char:WaitForChild("HumanoidRootPart", 10)
@@ -2647,8 +2481,8 @@ unlock.MouseButton1Click:Connect(function()
 			if not ok then
 				warn("[JAYVEE UI] Loading error:", err)
 				loading.Visible = false
-				openMenu()
 			end
+			openMenu()
 		end)
 	else
 		securityStatus.Text = "ACCESS DENIED • INVALID KEY"
