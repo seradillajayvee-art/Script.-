@@ -1506,10 +1506,11 @@ local ignoreCache = setmetatable({}, {__mode = "k"})  -- part -> bool (never a t
 local rangedCd = setmetatable({}, {__mode = "k"})     -- model -> next time we may react
 local pendingThreat = nil
 local nextScan = 0
+local nextRanged = 0
 
 local overlap = OverlapParams.new()
 overlap.FilterType = Enum.RaycastFilterType.Exclude
-overlap.MaxParts = 400
+overlap.MaxParts = 800
 
 -- parts that can never be a threat (our effects, character limbs, terrain)
 local function ignorePart(p)
@@ -1601,9 +1602,12 @@ local function scanThreats(now)
 			local biggest = math.max(size.X, size.Y, size.Z)
 			local halfDiag = size.Magnitude / 2
 			local speed = vel.Magnitude
+			local fresh = bornAt[p] and (now - bornAt[p]) < 0.5
+			-- big part under your feet (floor, elevator, moving platform) is never a threat
+			local isFloor = (not fresh) and biggest >= 6 and (pos.Y + size.Y / 2) <= rp.Y - 2
 
 			-- 1) fast part flying / sliding toward you (projectile, beam, tweened ability)
-			if speed >= 14 and speed < 700 then
+			if not isFloor and speed >= 14 and speed < 700 then
 				local vv = vel:Dot(vel)
 				local tca = rel:Dot(vel) / vv
 				if tca > 0 and tca <= 0.6 then
@@ -1625,7 +1629,8 @@ local function scanThreats(now)
 				local par = p.Parent
 				local isTool = par and par:IsA("Tool")
 				local gap = math.max(dist - halfDiag, 0)
-				if not isTool and biggest >= 1.5 and gap <= math.min(Settings.Radius, 14) then
+				if not isTool and biggest >= 1.5 and gap <= math.min(Settings.Radius, 14)
+					and (not p.CanCollide or speed >= 4) then
 					local closing = (dist > 0.05) and vel:Dot(rel / dist) or 0
 					if closing > -6 and gap < bestFreshGap then
 						bestFreshGap = gap
@@ -1710,7 +1715,8 @@ local function senseStep()
 
 	-- ranged attackers outside the radius
 	local ranged
-	if not (hitTarget or contact or attack or threat) then
+	if not (hitTarget or contact or attack or threat) and now >= nextRanged then
+		nextRanged = now + 0.1
 		ranged = scanRanged(now)
 	end
 
@@ -1727,7 +1733,8 @@ end
 -- TOOL + DAMAGE HOOKS
 --==================================================
 local function hookTool(tool)
-	if not tool:IsA("Tool") then return end
+	if not tool:IsA("Tool") or tool:GetAttribute("JV_Hooked") then return end
+	tool:SetAttribute("JV_Hooked", true)
 	tool.Activated:Connect(function()
 		lastOwnAction = os.clock()
 		local target = getEnemyInsideRadius()
