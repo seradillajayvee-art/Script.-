@@ -1,5 +1,5 @@
 --==================================================================
--- ABILITY MENU - JAYVEE  (v4.8)
+-- ABILITY MENU - JAYVEE  (v4.9)
 -- Own-game LocalScript
 -- Place in: StarterPlayer > StarterPlayerScripts
 --
@@ -10,15 +10,12 @@
 --   PLAYER   : player info, dodge counter (+reset), Player ESP
 --   SETTINGS : theme, scale, sounds, animations, keybind, reset/unload
 --
--- v4.8 CHANGES
---   * FIXED FOREVER LOADING: audio PreloadAsync ran inline at startup and could never
---     return for a missing local/Delta asset. It now runs in the background.
---   * Re-executing now really replaces the old copy (shared-state fallback via getgenv/_G).
---   * Ultra intro/outro overlay can no longer get stuck on screen when toggled fast.
---   * Tools stay hooked after re-execute; no connection leak per respawn.
---   * Half-HP auto Ultra no longer fires before the menu is unlocked.
---   * Afterimage no longer copies aura lights; search no longer matches 'Frame';
---     Reset UI stops the custom walk animation; unload cleans every hook.
+-- v4.9 CHANGES
+--   * Adaptive defensive/aggressive dodging based on remaining HP.
+--   * Removed startup ContentProvider:PreloadAsync calls that could hang on Delta/mobile clients.
+--   * Added a 15-second PlayerGui startup timeout instead of an indefinite wait.
+--   * Audio now loads lazily when played; UI initialization no longer depends on audio assets.
+--   * Kept the security/UI startup path independent from optional executor/audio APIs.
 
 -- v4.6 CHANGES
 --   * Fixed startup failure on clients where the executor does not expose `shared`.
@@ -28,8 +25,7 @@
 --   * Hardened audio/chat compatibility for mobile clients.
 --   * Fixed re-execution audio cleanup bookkeeping.
 --   * Version/password metadata now consistently reports v4.7.
---   * Studio Lite compatibility: UI initializes even when optional client/world APIs are unavailable.
---   * Optional audio/preload/executor features are skipped safely in Studio.
+--   * Removed Studio Lite-specific branching; target is normal Roblox/Delta execution.
 
 -- v4.3 CHANGES
 --   * Ultra Instinct intro sound support (local asset / Roblox asset ID).
@@ -61,7 +57,7 @@
 --   * Damage fallback dodges even when no enemy is inside the radius.
 --==================================================================
 
-print("[JAYVEE] Ability Menu v4.8 loading...")
+print("[JAYVEE] Ability Menu v4.7 loading...")
 
 -- On-screen status banner: shows "loading", "loaded" or the exact ERROR on your screen.
 local function JV_Banner(text, isError)
@@ -106,31 +102,21 @@ local JV_ok, JV_err = xpcall(function()
 local Players = game:GetService("Players")
 
 -- Some clients expose `shared`, others do not. Never let that stop UI startup.
-local JV_SHARED
-do
-	if type(shared) == "table" then JV_SHARED = shared end
-	if not JV_SHARED and type(getgenv) == "function" then
-		local okG, g = pcall(getgenv)
-		if okG and type(g) == "table" then JV_SHARED = g end
-	end
-	if not JV_SHARED and type(_G) == "table" then JV_SHARED = _G end
-	JV_SHARED = JV_SHARED or {}
-end
+local JV_SHARED = (type(shared) == "table") and shared or {}
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
 local SoundService = game:GetService("SoundService")
 local Debris = game:GetService("Debris")
-local IS_STUDIO = false
-pcall(function() IS_STUDIO = RunService:IsStudio() end)
 
 
 local U = {} -- helper functions live here (Luau allows only 200 locals per scope)
 local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui", 30)
-assert(playerGui, "PlayerGui not found")
+if not player then error("LocalPlayer is not available yet") end
+local playerGui = player:WaitForChild("PlayerGui", 15)
+if not playerGui then error("PlayerGui did not become available within 15 seconds") end
 
-local SCRIPT_VERSION = "v4.8"
+local SCRIPT_VERSION = "v4.9"
 local VERSION_MAJOR = SCRIPT_VERSION:match("%d+") or "4"
 local PASSWORD_PREFIX = "ULTRAINSTINCTBYJAYVEE"
 local PASSWORD = PASSWORD_PREFIX .. "V" .. VERSION_MAJOR
@@ -198,6 +184,7 @@ local Settings = {
 	DodgeAnimation = "Side Burst", -- "Side Burst" / "Backstep" / "Blink"
 	PerfectDodgeWindow = 0.30,     -- reaction window (re-trigger delay)
 	DodgeActivity = "High",        -- Low / Normal / High / Max
+	AdaptiveDodge = true,            -- gets faster/more defensive as HP falls
 	WhiteAura = true,
 	Afterimage = true,
 	AuraIntensity = 1,            -- Gear 5 aura power (0.5 - 2)
@@ -271,7 +258,6 @@ local function new(class, props, parent)
 	if o:IsA("BasePart") then o:SetAttribute("JV_FX", true) end
 	if props then
 		for k, v in pairs(props) do
-			-- Studio Lite / reduced clients may not expose every optional UI property.
 			-- Never let one unsupported property abort the entire menu.
 			pcall(function() o[k] = v end)
 		end
@@ -390,8 +376,7 @@ if Settings.DeltaClientSupport then
 end
 
 local function resolveLocalAsset(fileName)
-	if IS_STUDIO then return nil end
-	if not Settings.DeltaClientSupport or not fileName or fileName == "" then return nil end
+		if not Settings.DeltaClientSupport or not fileName or fileName == "" then return nil end
 
 	local candidates = {
 		function() return type(getcustomasset) == "function" and getcustomasset(fileName) or nil end,
@@ -431,13 +416,10 @@ local function makeUltraAudio(name, enabled, fileName, assetId, volume)
 	s.Parent = SoundService
 	table.insert(sounds, s)
 
-	-- Preload in the background. PreloadAsync can yield forever on a missing/unsupported
-	-- local asset; running it inline froze the script on the "loading" banner.
-	task.spawn(function()
-		pcall(function()
-			game:GetService("ContentProvider"):PreloadAsync({s})
-		end)
-	end)
+	-- Do not call ContentProvider:PreloadAsync here. Some mobile/executor
+	-- clients can wait indefinitely on custom/local assets, which used to
+	-- leave the whole JAYVEE startup screen stuck on "loading". Roblox
+	-- will stream the Sound when Play() is called.
 	return s
 end
 
@@ -540,23 +522,9 @@ local function pixelBlip(speed)
 	Debris:AddItem(s, 1.5)
 end
 
--- Probe the sources once and keep the first one that loads
-task.spawn(function()
-	if IS_STUDIO then return end
-	local CP = game:GetService("ContentProvider")
-	for _, src in ipairs(PIXEL_SRC_LIST) do
-		local probe = Instance.new("Sound")
-		probe.SoundId = src
-		local ok = false
-		pcall(function()
-			CP:PreloadAsync({probe}, function(_, status)
-				if status == Enum.AssetFetchStatus.Success then ok = true end
-			end)
-		end)
-		probe:Destroy()
-		if ok then PIXEL_SRC = src; break end
-	end
-end)
+-- Audio probing is intentionally not done during startup.
+-- PreloadAsync can hang on some mobile/executor clients. The built-in
+-- source remains the default; UI sound failures are handled by pcall.
 
 function U.play(key)
 	if not Settings.UISounds then return end
@@ -1296,7 +1264,7 @@ function U.createAfterimage(fade)
 			or obj:IsA("Humanoid") or obj:IsA("Decal") or obj:IsA("Shirt") or obj:IsA("Pants")
 			or obj:IsA("ShirtGraphic") or obj:IsA("BodyColors") or obj:IsA("ParticleEmitter")
 			or obj:IsA("Highlight") or obj:IsA("Trail") or obj:IsA("Beam") or obj:IsA("BillboardGui")
-			or obj:IsA("Sound") or obj:IsA("Light") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+			or obj:IsA("Sound") then
 			obj:Destroy()
 		end
 	end
@@ -1586,9 +1554,8 @@ local function ultraCinematic(enabled)
 		Name = enabled and "UltraInstinctIntro" or "UltraInstinctOutro",
 		Size = UDim2.fromScale(1, 1), Position = UDim2.fromScale(0.5, 0.5),
 		AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-		BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 500,
+		BackgroundTransparency = enabled and 1 or 1, BorderSizePixel = 0, ZIndex = 500,
 	}, gui)
-	Debris:AddItem(overlay, 2) -- safety net so the overlay can never get stuck
 
 	local flash = new("Frame", {
 		Size = UDim2.fromScale(0, 0), Position = UDim2.fromScale(0.5, 0.5),
@@ -1627,7 +1594,7 @@ local function ultraCinematic(enabled)
 		U.tw(title, 0.35, {TextTransparency = 0, TextStrokeTransparency = 0.25, Position = UDim2.fromScale(0.5, 0.47)}, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 		U.tw(sub, 0.3, {TextTransparency = 0, Position = UDim2.fromScale(0.5, 0.58)}, Enum.EasingStyle.Quad)
 		task.delay(0.95, function()
-			if my ~= ultraFxToken or not overlay.Parent then pcall(function() overlay:Destroy() end) return end
+			if my ~= ultraFxToken or not overlay.Parent then return end
 			U.tw(title, 0.3, {TextTransparency = 1, TextStrokeTransparency = 1}, Enum.EasingStyle.Quad)
 			U.tw(sub, 0.25, {TextTransparency = 1}, Enum.EasingStyle.Quad)
 			U.tw(overlay, 0.35, {BackgroundTransparency = 1}, Enum.EasingStyle.Quad)
@@ -1639,7 +1606,7 @@ local function ultraCinematic(enabled)
 		U.tw(ringStroke, 0.45, {Transparency = 1}, Enum.EasingStyle.Quad)
 		U.tw(title, 0.25, {TextTransparency = 0, TextStrokeTransparency = 0.35}, Enum.EasingStyle.Quad)
 		task.delay(0.32, function()
-			if my ~= ultraFxToken or not overlay.Parent then pcall(function() overlay:Destroy() end) return end
+			if my ~= ultraFxToken or not overlay.Parent then return end
 			U.tw(title, 0.35, {TextTransparency = 1, TextStrokeTransparency = 1}, Enum.EasingStyle.Quad)
 			U.tw(overlay, 0.4, {BackgroundTransparency = 1}, Enum.EasingStyle.Quad)
 			Debris:AddItem(overlay, 0.45)
@@ -1747,7 +1714,7 @@ local ACTIVITY = {
 -- threat = {dir = Vector3, dist = number, away = bool}
 --   away = false : sidestep perpendicular to dir (projectiles / beams)
 --   away = true  : move along dir (explosions / hitboxes around you)
-function U.dodgeDestination(targetRoot, threat)
+function U.dodgeDestination(targetRoot, threat, adaptive)
 	local origin = root.Position
 
 	local ignore = {character, ringFolder}
@@ -1804,18 +1771,48 @@ function U.dodgeDestination(targetRoot, threat)
 		if mode == "Backstep" then
 			local away = Vector3.new(origin.X - tp.X, 0, origin.Z - tp.Z)
 			away = away.Magnitude > 0.05 and away.Unit or -look
-			dest = origin + away * 8
+			dest = origin + away * (8 * ((adaptive and adaptive.backstep) or 1))
 		elseif mode == "Blink" then
-			dest = tp - look * dist
+			dest = tp - look * dist * ((adaptive and adaptive.sideDistance) or 1)
 		else
 			local side = ((origin - tp):Dot(right) >= 0) and -1 or 1
-			dest = tp + right * side * dist - look * (dist * 0.4)
+		local mult = (adaptive and adaptive.sideDistance) or 1
+		dest = tp + right * side * dist * mult - look * (dist * 0.4 * mult)
 		end
 	else
 		local side = math.random(1, 2) == 1 and 1 or -1
-		dest = origin + root.CFrame.RightVector * side * 8
+		dest = origin + root.CFrame.RightVector * side * (8 * ((adaptive and adaptive.sideDistance) or 1))
 	end
 	return clip(dest)
+end
+
+-- Adaptive dodge: as HP falls, shorten reaction/lock time and favor safer evasive movement.
+-- HP tiers: >75% calm, 50-75% alert, 25-50% aggressive, <=25% emergency.
+local function getAdaptiveDodge()
+	local base = ACTIVITY[Settings.DodgeActivity] or ACTIVITY.High
+	if not Settings.AdaptiveDodge or not humanoid or humanoid.MaxHealth <= 0 then
+		return {dur = base.dur, lock = base.lock, sideDistance = 1, backstep = 1}
+	end
+	local hp = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
+	local tier = 1
+	if hp <= 0.25 then
+		tier = 4
+	elseif hp <= 0.50 then
+		tier = 3
+	elseif hp <= 0.75 then
+		tier = 2
+	end
+	local speedMul = ({1.00, 0.88, 0.76, 0.64})[tier]
+	local lockMul = ({1.00, 0.82, 0.64, 0.45})[tier]
+	local distanceMul = ({1.00, 1.08, 1.18, 1.30})[tier]
+	return {
+		dur = math.max(0.045, base.dur * speedMul),
+		lock = math.max(0.008, base.lock * lockMul),
+		sideDistance = distanceMul,
+		backstep = distanceMul,
+		tier = tier,
+		hp = hp,
+	}
 end
 
 local function runDodge(target, threat)
@@ -1841,9 +1838,9 @@ local function runDodge(target, threat)
 	maybeDodgeChat()
 	if targetRoot then U.lockCameraToTarget(target) end
 
-	local act = ACTIVITY[Settings.DodgeActivity] or ACTIVITY.High
+	local act = getAdaptiveDodge()
 	local startPos = root.Position
-	local destination = U.dodgeDestination(targetRoot, threat)
+	local destination = U.dodgeDestination(targetRoot, threat, act)
 	local startCF = root.CFrame
 	local endCF
 	if targetRoot then
@@ -2207,7 +2204,9 @@ local function senseStep()
 
 	local chosen = hitTarget or attacker or ranged or U.getEnemyInsideRadius() or nearby[1]
 	local w = Settings.PerfectDodgeWindow
-	senseCooldown = now + w * (threat and 0.4 or attack and 0.5 or contact and 0.75 or ranged and 0.8 or 1.2)
+	local hpRatio = (humanoid and humanoid.MaxHealth > 0) and math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1) or 1
+	local adaptiveCdMul = Settings.AdaptiveDodge and (hpRatio <= 0.25 and 0.45 or hpRatio <= 0.50 and 0.62 or hpRatio <= 0.75 and 0.82 or 1) or 1
+	senseCooldown = now + w * adaptiveCdMul * (threat and 0.4 or attack and 0.5 or contact and 0.75 or ranged and 0.8 or 1.2)
 	if chosen then U.lockCameraToTarget(chosen) end
 	dodge(chosen, (not hitTarget and not attack and not contact) and threat or nil)
 end
@@ -2215,11 +2214,10 @@ end
 --==================================================
 -- TOOL + DAMAGE HOOKS
 --==================================================
-local hookedTools = setmetatable({}, {__mode = "k"}) -- tool -> connection
-local charConns = {}
 local function hookTool(tool)
-	if not tool:IsA("Tool") or hookedTools[tool] then return end
-	hookedTools[tool] = tool.Activated:Connect(function()
+	if not tool:IsA("Tool") or tool:GetAttribute("JV_Hooked") then return end
+	tool:SetAttribute("JV_Hooked", true)
+	bind(tool.Activated, function()
 		lastOwnAction = os.clock()
 		local target = U.getEnemyInsideRadius()
 		if target then U.lockCameraToTarget(target) end
@@ -2227,10 +2225,8 @@ local function hookTool(tool)
 end
 
 function U.hookCharacterTools(char)
-	for _, c in ipairs(charConns) do pcall(function() c:Disconnect() end) end
-	charConns = {}
 	for _, obj in ipairs(char:GetChildren()) do hookTool(obj) end
-	table.insert(charConns, char.ChildAdded:Connect(hookTool))
+	bind(char.ChildAdded, hookTool)
 end
 
 function U.hookDamage()
@@ -2240,7 +2236,7 @@ function U.hookDamage()
 	damageConnection = humanoid.HealthChanged:Connect(function(newHealth)
 		-- Alternate Ultra Instinct trigger: crossing from above 50% HP to 50% or below.
 		-- It deliberately checks UltraActive == false, so it cannot retrigger while Ultra is ON.
-		if unlocked and Settings.UltraHalfHPTrigger and Settings.Enabled and not Settings.UltraActive
+		if Settings.UltraHalfHPTrigger and Settings.Enabled and not Settings.UltraActive
 			and not halfHPTriggered and humanoid.MaxHealth > 0
 			and lastHealth and lastHealth > humanoid.MaxHealth * 0.5
 			and newHealth <= humanoid.MaxHealth * 0.5 and newHealth > 0 then
@@ -2356,6 +2352,8 @@ local function setupCharacter(char)
 	U.hookCharacterTools(char)
 	U.hookDamage()
 	task.spawn(Arczis.Setup, char)
+	if Settings.UltraActive then
+	end
 	U.refreshBodyAura()
 	U.refreshStats()
 end
@@ -2903,7 +2901,7 @@ local function smartSearchScore(query, hay)
 end
 
 local function searchHaystack(pageName, child, aliasText)
-	local parts = {pageName}
+	local parts = {pageName, child.Name}
 	for _, d in ipairs(child:GetDescendants()) do
 		if d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox") then
 			-- strip RichText tags so a query like "color" does not match every stepper row
@@ -3399,7 +3397,6 @@ do
 	local c6 = U.makeCard(p, "DATA", "Reset or unload")
 	U.actionRow(c6, "RESET UI SETTINGS", function()
 		for _, k in ipairs(UI_KEYS) do Settings[k] = Defaults[k] end
-		Arczis.Stop()
 		applyScale()
 		U.refreshAll()
 	end)
@@ -3483,10 +3480,6 @@ unloadFn = function()
 	followToken += 1
 	for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
 	conns = {}
-	for _, c in ipairs(charConns) do pcall(function() c:Disconnect() end) end
-	charConns = {}
-	for _, c in pairs(hookedTools) do pcall(function() c:Disconnect() end) end
-	hookedTools = {}
 	if auraPulseConnection then auraPulseConnection:Disconnect(); auraPulseConnection = nil end
 	if damageConnection then damageConnection:Disconnect(); damageConnection = nil end
 	pcall(function() RunService:UnbindFromRenderStep("JAYVEE_CameraLock") end)
