@@ -19,6 +19,44 @@
 
 print("[JAYVEE] Ability Menu v3.4 loading...")
 
+-- On-screen status banner: shows "loading", "loaded" or the exact ERROR on your screen.
+local function JV_Banner(text, isError)
+	pcall(function()
+		local pg = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui", 10)
+		if not pg then return end
+		local g = pg:FindFirstChild("JAYVEE_Status")
+		if not g then
+			g = Instance.new("ScreenGui")
+			g.Name = "JAYVEE_Status"
+			g.ResetOnSpawn = false
+			g.IgnoreGuiInset = true
+			g.DisplayOrder = 2147483000
+			g.Parent = pg
+		end
+		local l = g:FindFirstChild("L")
+		if not l then
+			l = Instance.new("TextLabel")
+			l.Name = "L"
+			l.Position = UDim2.new(0, 8, 0, 8)
+			l.Size = UDim2.new(1, -16, 0, 0)
+			l.AutomaticSize = Enum.AutomaticSize.Y
+			l.BackgroundColor3 = Color3.fromRGB(10, 10, 14)
+			l.BackgroundTransparency = 0.15
+			l.TextWrapped = true
+			l.TextXAlignment = Enum.TextXAlignment.Left
+			l.TextYAlignment = Enum.TextYAlignment.Top
+			l.Font = Enum.Font.Code
+			l.TextSize = 14
+			l.Parent = g
+		end
+		l.Text = text
+		l.TextColor3 = isError and Color3.fromRGB(255, 110, 110) or Color3.fromRGB(190, 255, 200)
+	end)
+end
+JV_Banner("[JAYVEE] Script is running... loading", false)
+
+local JV_ok, JV_err = xpcall(function()
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
@@ -2723,3 +2761,18 @@ main.Visible = false
 minimized.Visible = false
 
 print("[JAYVEE] Ability Menu v3.4 loaded - Security screen should be visible.")
+
+end, function(e) return tostring(e) .. "\n" .. debug.traceback() end)
+
+if JV_ok then
+	JV_Banner("[JAYVEE] Loaded OK - security screen should be visible", false)
+	task.delay(4, function()
+		pcall(function()
+			local g = game:GetService("Players").LocalPlayer.PlayerGui:FindFirstChild("JAYVEE_Status")
+			if g then g:Destroy() end
+		end)
+	end)
+else
+	warn("[JAYVEE] ERROR:", JV_err)
+	JV_Banner("[JAYVEE] ERROR - send this to Claude:\n" .. tostring(JV_err), true)
+end
