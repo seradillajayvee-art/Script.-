@@ -1,5 +1,5 @@
 -- ABILITY MENU • JAYVEE
--- LocalScript
+-- Own-game LocalScript
 -- Place in StarterPlayer > StarterPlayerScripts
 --
 -- Style inspired by the user's reference image:
@@ -16,6 +16,30 @@
 -- • Auto-dodge / camera / follow controls
 -- • Mobile-friendly dragging
 -- • UI sounds and animations
+--
+-- ================================================================
+-- QUICK EDIT GUIDE
+-- ================================================================
+-- Most user-editable values are inside the Settings table below.
+-- Change numbers/true/false there first instead of searching the
+-- whole script. The comments beside each setting explain its job.
+--
+-- FollowDuration = follow time after a dodge (seconds).
+-- FollowDistance = distance kept from the target.
+-- FollowSpeed = smooth follow response speed.
+-- FollowMode = "Behind" or "Side".
+-- Radius = large purple detection circle size.
+-- ContactTriggerDistance = close/contact dodge distance.
+-- DodgeChance = dodge chance from 1 to 100.
+-- PerfectDodgeWindow = attack timing window in seconds.
+-- WhiteAura / Afterimage = visual effects ON/OFF.
+-- UIScale / MenuScale = UI size.
+-- IntroAnimation / OpenCloseAnimation = UI animation style.
+--
+-- IMPORTANT: being inside Radius alone does NOT cause a dodge.
+-- An attack, real damage, or configured close-contact condition
+-- must be detected first.
+-- ================================================================
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -23,6 +47,7 @@ local TweenService = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
 local SoundService = game:GetService("SoundService")
 local Debris = game:GetService("Debris")
+local TextChatService = game:GetService("TextChatService")
 
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
@@ -30,34 +55,50 @@ local camera = workspace.CurrentCamera
 local PASSWORD = "ULTRAINSTINCTBYJAYVEEV2"
 
 local Settings = {
-	Enabled = true,
-	AutoDodge = true,
-	CameraLock = true,
-	FollowAfterDodge = true,
-	FollowDuration = 5,
-	FollowDistance = 3,
-	FollowSpeed = 0.14,
-	FollowMode = "Behind",
-	StopEffect = true,
-	MenuScale = 1.0,
-	UIScale = 1.0,
-	IntroAnimation = "Back",
-	OpenCloseAnimation = "Smooth",
-	Radius = 12,
-	MinRadius = 3,
-	MaxRadius = 50,
-	RadiusStep = 1,
-	ContactTriggerDistance = 3.2,
-	Ability = "Ultra Instinct",
-	DodgeChance = 100,
-	DodgeAnimation = "Side Burst",
-	PerfectDodgeWindow = 0.30,
-	WhiteAura = true,
-	Afterimage = true,
+	-- Master switches
+	Enabled = false,                -- Master ON/OFF. Starts OFF when the menu opens.
+	AutoDodge = true,               -- Automatic dodge detection.
+	CameraLock = true,              -- Camera reaction during combat.
+
+	-- Follow system
+	FollowAfterDodge = true,        -- Follow target after dodge.
+	FollowDuration = 5,             -- Seconds of follow time.
+	FollowDistance = 3,             -- Distance from target.
+	FollowSpeed = 0.14,             -- Follow smoothing/response.
+	FollowMode = "Behind",          -- "Behind" or "Side".
+	StopEffect = true,              -- Stop follow/effects when finished.
+
+	-- UI appearance
+	MenuScale = 1.0,                -- Main menu size multiplier.
+	UIScale = 1.0,                  -- Global UI scale.
+	IntroAnimation = "Back",        -- Intro/entrance style.
+	OpenCloseAnimation = "Smooth", -- Open/close style.
+
+	-- Detection radius
+	Radius = 12,                    -- Purple detection radius.
+	MinRadius = 3,                  -- Minimum radius.
+	MaxRadius = 50,                 -- Maximum radius.
+	RadiusStep = 1,                 -- Amount changed by +/- buttons.
+	ContactTriggerDistance = 3.2,   -- Close/contact trigger distance.
+
+	-- Ability / dodge
+	Ability = "Ultra Instinct",     -- Current ability name.
+	DodgeChance = 100,               -- Chance from 1 to 100.
+	DodgeAnimation = "Side Burst",  -- Dodge animation preset.
+	PerfectDodgeWindow = 0.30,       -- Attack timing window.
+
+	-- Visual effects
+	WhiteAura = true,               -- White aura ON/OFF.
+	Afterimage = true,              -- Afterimage ON/OFF.
 	DodgeCount = 0,
 	UIVolume = 0.45,
 	UITransparency = 0.04,
 	AnimationSpeed = 0.45,
+
+	-- Performance optimization
+	Optimization = true,            -- Reduces unnecessary UI/effect update work.
+	UIUpdateRate = 0.10,            -- Seconds between non-critical UI refreshes.
+	EffectUpdateRate = 0.08,        -- Seconds between aura/movement effect updates.
 }
 
 local character
@@ -206,6 +247,9 @@ local gui = Instance.new("ScreenGui")
 gui.Name = "AbilityMenu_JAYVEE"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
+gui.DisplayOrder = 10000
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+gui.Enabled = true
 gui.Parent = player:WaitForChild("PlayerGui")
 
 local security
@@ -221,7 +265,9 @@ local loading = Instance.new("Frame")
 loading.Name = "UltraInstinctLoading"
 loading.Size = UDim2.fromScale(1, 1)
 loading.BackgroundColor3 = Color3.fromRGB(5, 5, 9)
-loading.ZIndex = 1000
+loading.ZIndex = 100000
+loading.Visible = true
+loading.Active = true
 loading.Parent = gui
 
 local loadGlow = Instance.new("Frame")
@@ -321,19 +367,26 @@ local loadingStatuses = {
     "ABILITY CORE READY."
 }
 
+-- ================================================================
+-- LOADING SCREEN
+-- Startup loading animation shown before the Security UI.
+-- ================================================================
 local function runLoadingScreen()
-    security.Visible = false
+    -- Startup order: Loading Screen -> Security -> Main UI.
+    gui.Enabled = true
     loading.Visible = true
+    loading.ZIndex = 100000
+    security.Visible = false
     main.Visible = false
     minimized.Visible = false
 
     task.spawn(function()
         while loading.Parent and loading.Visible do
-            loadRing.Rotation += 1.2
+            loadRing.Rotation += 2.2
             local pulse = 270 + math.sin(os.clock() * 3) * 10
             loadGlow.Size = UDim2.fromOffset(pulse, pulse)
             loadGlow.Position = UDim2.new(0.5, -pulse/2, 0.42, -pulse/2)
-            task.wait()
+            task.wait(Settings.Optimization and 0.03 or 0.016)
         end
     end)
 
@@ -358,7 +411,9 @@ local function runLoadingScreen()
     task.wait(0.58)
 
     loading.Visible = false
+    loading.Active = false
     security.Visible = true
+    security.ZIndex = 200
     secScale.Scale = 0.72
     tween(secScale, 0.42, {Scale = 1}, Enum.EasingStyle.Back, Enum.EasingDirection.Out):Play()
 end
@@ -373,6 +428,8 @@ security.Position = UDim2.new(0.5, -205, 0.5, -138)
 security.BackgroundColor3 = Color3.fromRGB(12, 11, 17)
 security.BackgroundTransparency = 0.04
 security.Parent = gui
+security.Visible = false
+security.ZIndex = 100
 corner(security, 22)
 addStroke(security, 0.1)
 draggable(security)
@@ -490,6 +547,10 @@ local function arczisStopAll(exceptName)
 	end
 end
 
+-- ================================================================
+-- ARCZIS MOVEMENT ADAPTER
+-- Movement/animation state integration from the RBXM system.
+-- ================================================================
 local function arczisLoad(name)
 	if not arczisAnimator then return nil end
 	local id = ArczisMovement.AnimationIds[name]
@@ -603,7 +664,12 @@ local function arczisSetup(character)
 	arczisConnections[#arczisConnections+1] = arczisHumanoid.StateChanged:Connect(function()
 		arczisState()
 	end)
-	arczisConnections[#arczisConnections+1] = RunService.RenderStepped:Connect(function()
+	local arczisAccumulator = 0
+	arczisConnections[#arczisConnections+1] = RunService.Heartbeat:Connect(function(dt)
+		arczisAccumulator += dt
+		local interval = Settings.Optimization and Settings.EffectUpdateRate or 0.016
+		if arczisAccumulator < interval then return end
+		arczisAccumulator = 0
 		if arczisHumanoid and arczisHumanoid.Parent then
 			arczisState()
 		end
@@ -635,6 +701,7 @@ main.BackgroundColor3 = Color3.fromRGB(11, 10, 16)
 main.BackgroundTransparency = 0.04
 main.Visible = false
 main.Parent = gui
+main.Visible = false
 corner(main, 24)
 addStroke(main, 0.12)
 draggable(main)
@@ -715,6 +782,10 @@ content.Parent = main
 
 local pages = {}
 
+-- ================================================================
+-- UI BUILDERS
+-- Page/card/label/toggle/tab helper functions.
+-- ================================================================
 local function newPage(name)
 	local page = Instance.new("Frame")
 	page.Name = name
@@ -1111,6 +1182,10 @@ local dodgeToggle = makeToggle(settingsCard, "AUTO DODGE • ON", UDim2.fromOffs
 local cameraToggle = makeToggle(settingsCard, "CAMERA LOCK • ON", UDim2.fromOffset(14, 82))
 local followToggle = makeToggle(settingsCard, "5S FOLLOW • ON", UDim2.fromOffset(269, 82))
 
+-- ================================================================
+-- UI REFRESH FUNCTIONS
+-- Updates visible settings after the user changes them.
+-- ================================================================
 local function refreshPower()
 	systemToggle.Text = Settings.Enabled and "SYSTEM • ON" or "SYSTEM • OFF"
 	dodgeToggle.Text = Settings.AutoDodge and "AUTO DODGE • ON" or "AUTO DODGE • OFF"
@@ -1409,6 +1484,10 @@ for i = 1, RING_SEGMENTS do
 	ringParts[i] = p
 end
 
+-- ================================================================
+-- RADIUS VISUAL
+-- Updates the purple detection circle around the player.
+-- ================================================================
 local function updateRing()
 	if not root or not root.Parent then
 		for _, p in ipairs(ringParts) do
@@ -1606,10 +1685,14 @@ end)
 
 systemToggle.MouseButton1Click:Connect(function()
 	play(clickSound)
+	local wasEnabled = Settings.Enabled
 	Settings.Enabled = not Settings.Enabled
 	refreshPower()
 	refreshRadius()
 	refreshBodyAura()
+	if not wasEnabled and Settings.Enabled and Settings.Ability == "Ultra Instinct" then
+		playUltraInstinctIntro()
+	end
 end)
 
 dodgeToggle.MouseButton1Click:Connect(function()
@@ -1663,6 +1746,10 @@ local function getRoot(model)
 	return model and model:FindFirstChild("HumanoidRootPart")
 end
 
+-- ================================================================
+-- TARGET / ATTACK DETECTION
+-- Radius alone is NOT a dodge trigger. Attack/contact/damage is.
+-- ================================================================
 local function getEnemyInsideRadius()
 	if not root then return nil, math.huge end
 
@@ -1831,12 +1918,105 @@ local function hideBodyAura(fadeOut)
 end
 
 local auraPulseConnection
+local uiIntroRunning = false
+
+--==================================================
+-- ULTRA INSTINCT ACTIVATION INTRO
+--==================================================
+-- Runs only when the user turns the Ultra Instinct system ON.
+-- It sends "ULTRA INSTINCT!!!" to the current Roblox chat system,
+-- fades in a white Super-Saiyan-style outline/aura, then fades it out.
+-- The permanent UI aura remains controlled by WhiteAura afterwards.
+local function sendUltraInstinctChat()
+	local sent = false
+	pcall(function()
+		local channels = TextChatService:FindFirstChild("TextChannels")
+		local general = channels and channels:FindFirstChild("RBXGeneral")
+		if general then
+			general:SendAsync("ULTRA INSTINCT!!!")
+			sent = true
+		end
+	end)
+	if not sent then
+		pcall(function()
+			local events = game:GetService("ReplicatedStorage"):FindFirstChild("DefaultChatSystemChatEvents")
+			local say = events and events:FindFirstChild("SayMessageRequest")
+			if say then
+				say:FireServer("ULTRA INSTINCT!!!", "All")
+			end
+		end)
+	end
+end
+
+local function playUltraInstinctIntro()
+	if uiIntroRunning or not character then return end
+	uiIntroRunning = true
+
+	task.spawn(function()
+		sendUltraInstinctChat()
+
+		-- Temporary white power-up highlight.
+		local h = Instance.new("Highlight")
+		h.Name = "UI_SuperSaiyanIntro"
+		h.Adornee = character
+		h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+		h.FillColor = Color3.new(1,1,1)
+		h.OutlineColor = Color3.new(1,1,1)
+		h.FillTransparency = 1
+		h.OutlineTransparency = 1
+		h.Parent = character
+
+		-- Temporary aura burst.
+		local temp = Instance.new("Attachment")
+		temp.Name = "UI_SuperSaiyanIntroAura"
+		temp.Parent = root or character:FindFirstChild("HumanoidRootPart") or character
+		local emitter = Instance.new("ParticleEmitter")
+		emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		emitter.Color = ColorSequence.new(Color3.new(1,1,1))
+		emitter.LightEmission = 1
+		emitter.Rate = 55
+		emitter.Lifetime = NumberRange.new(0.25,0.6)
+		emitter.Speed = NumberRange.new(2,7)
+		emitter.SpreadAngle = Vector2.new(360,360)
+		emitter.Size = NumberSequence.new({
+			NumberSequenceKeypoint.new(0,0.45),
+			NumberSequenceKeypoint.new(0.5,0.22),
+			NumberSequenceKeypoint.new(1,0)
+		})
+		emitter.Parent = temp
+
+		-- Fade in.
+		tween(h, 0.35, {OutlineTransparency=0.02, FillTransparency=0.72}, Enum.EasingStyle.Quint, Enum.EasingDirection.Out):Play()
+		task.wait(0.45)
+
+		-- Hold the powered-up look briefly.
+		if h.Parent then
+			tween(h, 0.18, {OutlineTransparency=0.0, FillTransparency=0.62}, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut):Play()
+		end
+		task.wait(0.55)
+
+		-- Fade out the intro; normal WhiteAura can remain afterward.
+		if h.Parent then
+			tween(h, 0.45, {OutlineTransparency=1, FillTransparency=1}, Enum.EasingStyle.Quint, Enum.EasingDirection.In):Play()
+		end
+		task.wait(0.5)
+
+		if h.Parent then h:Destroy() end
+		if temp.Parent then temp:Destroy() end
+		uiIntroRunning = false
+	end)
+end
+
 local function refreshBodyAura()
 	local shouldShow = Settings.Enabled and Settings.Ability == "Ultra Instinct" and Settings.WhiteAura
 	if shouldShow then
 		buildBodyAura()
 		if auraPulseConnection then auraPulseConnection:Disconnect() end
-		auraPulseConnection = RunService.RenderStepped:Connect(function()
+		local auraAccumulator = 0
+		auraPulseConnection = RunService.Heartbeat:Connect(function(dt)
+			auraAccumulator += dt
+		if auraAccumulator < (Settings.Optimization and Settings.EffectUpdateRate or 0.016) then return end
+		 auraAccumulator = 0
 			if not uiHighlight or not uiHighlight.Parent or not Settings.WhiteAura or Settings.Ability ~= "Ultra Instinct" then return end
 			local pulse = (math.sin(os.clock() * 5.5) + 1) * 0.5
 			uiHighlight.OutlineTransparency = 0.04 + pulse * 0.28
@@ -2074,6 +2254,10 @@ local function followForFiveSeconds(target)
 	end)
 end
 
+-- ================================================================
+-- DODGE CORE
+-- Executes the dodge animation, effects, camera and follow logic.
+-- ================================================================
 local function dodge()
 	if dodging then return end
 	if not Settings.Enabled or not Settings.AutoDodge then return end
@@ -2154,15 +2338,22 @@ end
 -- CAMERA FOLLOW
 --==================================================
 
-RunService.RenderStepped:Connect(function()
+local uiUpdateAccumulator = 0
+RunService.RenderStepped:Connect(function(dt)
 	if cameraLocked and humanoid and humanoid.MoveDirection.Magnitude > 0.12 then
 		cancelCameraLock()
 	end
-	updateRing()
-	updatePlayerInfo()
 
-	if character ~= visualCharacter then
-		refreshBodyAura()
+	uiUpdateAccumulator += dt
+	local uiInterval = Settings.Optimization and Settings.UIUpdateRate or 0.016
+	if uiUpdateAccumulator >= uiInterval then
+		uiUpdateAccumulator = 0
+		updateRing()
+		updatePlayerInfo()
+
+		if character ~= visualCharacter then
+			refreshBodyAura()
+		end
 	end
 
 	if cameraLocked and (cameraTarget or followTarget) then
@@ -2366,6 +2557,10 @@ character.ChildAdded:Connect(hookTool)
 -- DAMAGE DETECTION
 --==================================================
 
+-- ================================================================
+-- DAMAGE DETECTION
+-- Fallback for real damage received by the local character.
+-- ================================================================
 local function hookDamage()
 	if damageConnection then
 		damageConnection:Disconnect()
@@ -2404,10 +2599,15 @@ minimized.TextColor3 = Color3.new(1,1,1)
 minimized.BackgroundColor3 = Color3.fromRGB(104,72,158)
 minimized.Visible = false
 minimized.Parent = gui
+minimized.Visible = false
 corner(minimized,20)
 addStroke(minimized,0.15)
 draggable(minimized)
 
+-- ================================================================
+-- MAIN MENU ANIMATIONS
+-- Menu entrance and UI interaction animation logic.
+-- ================================================================
 local function runIntroAnimations()
 	local targetPosition=UDim2.new(0.5,-285,0.5,-195)
 	local startPosition=UDim2.new(0.5,-285,0.4,-120)
@@ -2466,6 +2666,7 @@ minimized.MouseButton1Click:Connect(openMenu)
 -- MAIN UI CLICK ANIMATIONS
 --==================================================
 
+-- Button click feedback: pulse/tween used when a UI setting changes.
 local function addClickAnimation(button)
     if not button:IsA("TextButton") then return end
     if button:GetAttribute("JAYVEE_ClickFX") then return end
@@ -2497,6 +2698,13 @@ end
 main.DescendantAdded:Connect(addClickAnimation)
 
 --==================================================
+-- PERFORMANCE OPTIMIZATION
+--==================================================
+-- Optimization is enabled by default. It throttles non-critical UI, aura,
+-- movement-state and loading-screen updates while keeping camera/input responsive.
+-- Set Settings.Optimization = false if you need maximum update frequency.
+
+--==================================================
 -- INITIALIZE
 --==================================================
 
@@ -2511,7 +2719,16 @@ hookDamage()
 security.Visible = false
 main.Visible = false
 minimized.Visible = false
-task.spawn(runLoadingScreen)
+
+-- Start the real loading screen before Security UI.
+task.spawn(function()
+    local ok, err = pcall(runLoadingScreen)
+    if not ok then
+        warn("[JAYVEE UI] Loading screen error:", err)
+        loading.Visible = false
+        security.Visible = true
+    end
+end)
 
 player.CharacterAdded:Connect(function()
 	task.wait(0.25)
