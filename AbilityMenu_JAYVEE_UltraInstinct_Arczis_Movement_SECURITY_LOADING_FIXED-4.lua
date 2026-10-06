@@ -1,5 +1,5 @@
 --==================================================================
--- ABILITY MENU - JAYVEE  (v3.2)
+-- ABILITY MENU - JAYVEE  (v3.3)
 -- Own-game LocalScript
 -- Place in: StarterPlayer > StarterPlayerScripts
 --
@@ -83,6 +83,10 @@ local Settings = {
 	DodgeActivity = "High",        -- Low / Normal / High / Max
 	WhiteAura = true,
 	Afterimage = true,
+	AuraIntensity = 1,            -- Gear 5 aura power (0.5 - 2)
+	AuraTintIndex = 1,            -- 1 Gear 5 / 2 Sun God / 3 Storm
+	AuraLightning = true,         -- white lightning crackling around you
+	AuraBurst = true,             -- shockwave + cloud explosion when Ultra turns ON
 	DodgeCount = 0,
 
 	-- ESP
@@ -448,9 +452,24 @@ end
 --==================================================
 -- ULTRA INSTINCT BODY SENSE (white aura + outline)
 --==================================================
+local AURA_TINTS = {
+	{name = "Gear 5",  main = Color3.fromRGB(255, 255, 255), edge = Color3.fromRGB(190, 225, 255)},
+	{name = "Sun God", main = Color3.fromRGB(255, 252, 238), edge = Color3.fromRGB(255, 214, 110)},
+	{name = "Storm",   main = Color3.fromRGB(240, 246, 255), edge = Color3.fromRGB(110, 170, 255)},
+}
+local function auraTint() return AURA_TINTS[Settings.AuraTintIndex] or AURA_TINTS[1] end
+
+local TEX_SPARK = "rbxasset://textures/particles/sparkles_main.dds"
+local TEX_SMOKE = "rbxasset://textures/particles/smoke_main.dds"
+local TEX_FIRE = "rbxasset://textures/particles/fire_main.dds"
+local function kp(t, v) return NumberSequenceKeypoint.new(t, v) end
+
 local uiHighlight, auraPulseConnection = nil, nil
 local auraEmitters, auraObjects = {}, {}
+local auraLight, auraRings = nil, {}
 local visualCharacter = nil
+local nextBolt = 0
+local fovBusy = false
 
 local auraAlpha = Instance.new("NumberValue")
 auraAlpha.Value = 0
@@ -464,41 +483,234 @@ local function clearBodyAura()
 	for _, obj in ipairs(auraObjects) do
 		if obj and obj.Parent then obj:Destroy() end
 	end
-	auraObjects, auraEmitters = {}, {}
+	auraObjects, auraEmitters, auraRings, auraLight = {}, {}, {}, nil
+end
+
+-- Jagged white lightning bolt crackling around the player
+local function lightningBolt(inten)
+	if not root or not root.Parent then return end
+	inten = inten or 1
+	local tint = auraTint()
+	local origin = root.Position + Vector3.new(math.random(-15, 15) / 10, math.random(-20, 25) / 10, math.random(-15, 15) / 10)
+	local dir = Vector3.new(math.random(-100, 100), math.random(-30, 100), math.random(-100, 100))
+	if dir.Magnitude < 1 then dir = Vector3.new(1, 0.4, 0) end
+	dir = dir.Unit
+	local finish = origin + dir * (math.random(40, 90) / 10) * inten
+	local perp1 = dir:Cross(Vector3.yAxis)
+	if perp1.Magnitude < 0.1 then perp1 = dir:Cross(Vector3.xAxis) end
+	perp1 = perp1.Unit
+	local perp2 = dir:Cross(perp1)
+
+	local N = 7
+	local pts = {origin}
+	for i = 1, N - 1 do
+		local base = origin:Lerp(finish, i / N)
+		pts[#pts + 1] = base + perp1 * ((math.random() - 0.5) * 1.4) + perp2 * ((math.random() - 0.5) * 1.4)
+	end
+	pts[#pts + 1] = finish
+
+	for i = 1, #pts - 1 do
+		local p0, p1 = pts[i], pts[i + 1]
+		local len = (p1 - p0).Magnitude
+		if len > 0.05 then
+			local seg = new("Part", {
+				Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false,
+				Material = Enum.Material.Neon, Color = (i % 2 == 0) and tint.main or tint.edge,
+				Transparency = 0.05, Size = Vector3.new(0.14, 0.14, len),
+				CFrame = CFrame.lookAt((p0 + p1) / 2, p1),
+			}, workspace)
+			tw(seg, 0.2, {Transparency = 1, Size = Vector3.new(0.02, 0.02, len)})
+			Debris:AddItem(seg, 0.25)
+		end
+	end
+end
+
+-- GEAR 5 power-up: shockwave rings, light pillar, cloud explosion, flash, FOV punch
+local function auraBurst()
+	if not Settings.AuraBurst or not Settings.WhiteAura or not Settings.Enabled then return end
+	if not root or not root.Parent then return end
+	local tint = auraTint()
+	local inten = Settings.AuraIntensity
+	local pos = root.Position
+	local floorPos = pos - Vector3.new(0, 2.85, 0)
+
+	-- expanding ground shockwaves
+	for i = 0, 2 do
+		task.delay(i * 0.12, function()
+			local ring = new("Part", {
+				Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false,
+				Material = Enum.Material.Neon, Shape = Enum.PartType.Cylinder,
+				Color = (i == 1) and tint.edge or tint.main, Transparency = 0.15,
+				Size = Vector3.new(0.3, 3, 3),
+				CFrame = CFrame.new(floorPos) * CFrame.Angles(0, 0, math.pi / 2),
+			}, workspace)
+			local d = 45 * inten
+			tw(ring, 0.7, {Size = Vector3.new(0.05, d, d), Transparency = 1}, Enum.EasingStyle.Quad)
+			Debris:AddItem(ring, 0.8)
+		end)
+	end
+
+	-- sky pillar of light
+	local pillar = new("Part", {
+		Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false,
+		Material = Enum.Material.Neon, Shape = Enum.PartType.Cylinder, Color = tint.main, Transparency = 0.25,
+		Size = Vector3.new(36, 4.5, 4.5),
+		CFrame = CFrame.new(floorPos + Vector3.new(0, 18, 0)) * CFrame.Angles(0, 0, math.pi / 2),
+	}, workspace)
+	tw(pillar, 0.7, {Size = Vector3.new(40, 0.4, 0.4), Transparency = 1}, Enum.EasingStyle.Quad)
+	Debris:AddItem(pillar, 0.8)
+
+	-- cloud + spark explosion
+	local bp = new("Part", {
+		Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false,
+		Transparency = 1, Size = Vector3.one, Position = pos,
+	}, workspace)
+	local smoke = new("ParticleEmitter", {
+		Texture = TEX_SMOKE, Color = ColorSequence.new(tint.main, tint.edge), LightEmission = 0.65, Rate = 0,
+		Lifetime = NumberRange.new(0.9, 1.6), Speed = NumberRange.new(14, 30),
+		SpreadAngle = Vector2.new(360, 360), Drag = 3,
+		Size = NumberSequence.new({kp(0, 3), kp(0.4, 7), kp(1, 11)}),
+		Transparency = NumberSequence.new({kp(0, 0.35), kp(0.6, 0.6), kp(1, 1)}),
+		Rotation = NumberRange.new(0, 360), RotSpeed = NumberRange.new(-60, 60),
+	}, bp)
+	smoke:Emit(math.floor(60 * inten))
+	local spark = new("ParticleEmitter", {
+		Texture = TEX_SPARK, Color = ColorSequence.new(tint.main), LightEmission = 1, Rate = 0,
+		Lifetime = NumberRange.new(0.5, 1.1), Speed = NumberRange.new(20, 45),
+		SpreadAngle = Vector2.new(360, 360), Drag = 2,
+		Size = NumberSequence.new({kp(0, 1.2), kp(1, 0)}),
+		Transparency = NumberSequence.new({kp(0, 0), kp(1, 1)}),
+	}, bp)
+	spark:Emit(math.floor(50 * inten))
+	Debris:AddItem(bp, 2.5)
+
+	-- white screen flash
+	local fl = new("Frame", {
+		Size = UDim2.fromScale(1, 1), BackgroundColor3 = tint.main, BackgroundTransparency = 0.5,
+		BorderSizePixel = 0, ZIndex = 150,
+	}, gui)
+	tw(fl, 0.5, {BackgroundTransparency = 1})
+	Debris:AddItem(fl, 0.6)
+
+	-- FOV punch
+	local cam = workspace.CurrentCamera
+	if cam and not fovBusy then
+		fovBusy = true
+		local old = cam.FieldOfView
+		tw(cam, 0.1, {FieldOfView = old + 16})
+		task.delay(0.12, function()
+			tw(cam, 0.55, {FieldOfView = old})
+			task.delay(0.6, function() fovBusy = false end)
+		end)
+	end
+
+	-- extra lightning on activation
+	if Settings.AuraLightning then
+		for _ = 1, 5 do lightningBolt(inten * 1.4) end
+	end
+end
+
+local function addEmitter(parent, props, base, pulse)
+	props.Rate = 0
+	local e = new("ParticleEmitter", props, parent)
+	table.insert(auraEmitters, {e = e, base = base, pulse = pulse or 0})
+	return e
 end
 
 local function buildBodyAura()
 	clearBodyAura()
 	if not character then return end
-	for _, part in ipairs(character:GetDescendants()) do
+	local tint = auraTint()
+	local cloudColor = ColorSequence.new(tint.main, tint.edge)
+	local hrp = character:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+
+	-- per-limb: sparkles + rising cloud wisps
+	for _, part in ipairs(character:GetChildren()) do
 		if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
 			local a = new("Attachment", {Name = "UI_AuraAttachment"}, part)
-			local e = new("ParticleEmitter", {
-				Name = "UI_WhiteAura",
-				Texture = "rbxasset://textures/particles/sparkles_main.dds",
-				Color = ColorSequence.new(Color3.new(1, 1, 1)),
-				LightEmission = 1, Rate = 0,
-				Lifetime = NumberRange.new(0.22, 0.5),
-				Speed = NumberRange.new(0.15, 1.3),
-				SpreadAngle = Vector2.new(360, 360),
-				Size = NumberSequence.new({
-					NumberSequenceKeypoint.new(0, 0.32),
-					NumberSequenceKeypoint.new(0.55, 0.16),
-					NumberSequenceKeypoint.new(1, 0)}),
-				Transparency = NumberSequence.new({
-					NumberSequenceKeypoint.new(0, 0.18),
-					NumberSequenceKeypoint.new(0.7, 0.45),
-					NumberSequenceKeypoint.new(1, 1)}),
-			}, a)
 			table.insert(auraObjects, a)
-			table.insert(auraEmitters, e)
+			addEmitter(a, {
+				Name = "UI_WhiteAura", Texture = TEX_SPARK, Color = cloudColor, LightEmission = 1,
+				Lifetime = NumberRange.new(0.22, 0.5), Speed = NumberRange.new(0.15, 1.3),
+				SpreadAngle = Vector2.new(360, 360),
+				Size = NumberSequence.new({kp(0, 0.32), kp(0.55, 0.16), kp(1, 0)}),
+				Transparency = NumberSequence.new({kp(0, 0.18), kp(0.7, 0.45), kp(1, 1)}),
+			}, 5, 1.8)
+			addEmitter(a, {
+				Name = "UI_CloudWisp", Texture = TEX_SMOKE, Color = cloudColor, LightEmission = 0.7,
+				Lifetime = NumberRange.new(0.7, 1.3), Speed = NumberRange.new(0.5, 2),
+				SpreadAngle = Vector2.new(360, 360), Acceleration = Vector3.new(0, 5, 0), Drag = 1,
+				Rotation = NumberRange.new(0, 360), RotSpeed = NumberRange.new(-40, 40),
+				Size = NumberSequence.new({kp(0, 0.8), kp(0.5, 1.8), kp(1, 2.6)}),
+				Transparency = NumberSequence.new({kp(0, 0.6), kp(0.4, 0.7), kp(1, 1)}),
+			}, 3, 0.6)
 		end
 	end
+
+	-- big billowing cloud mantle around the torso
+	local mantle = new("Attachment", {Name = "UI_AuraMantle", Position = Vector3.new(0, 0.5, 0)}, hrp)
+	table.insert(auraObjects, mantle)
+	addEmitter(mantle, {
+		Name = "UI_Mantle", Texture = TEX_SMOKE, Color = cloudColor, LightEmission = 0.55,
+		Lifetime = NumberRange.new(1.2, 2), Speed = NumberRange.new(2, 5),
+		SpreadAngle = Vector2.new(60, 60), EmissionDirection = Enum.NormalId.Top,
+		Acceleration = Vector3.new(0, 6, 0), Drag = 1.5,
+		Rotation = NumberRange.new(0, 360), RotSpeed = NumberRange.new(-30, 30),
+		Size = NumberSequence.new({kp(0, 2.5), kp(0.5, 4.5), kp(1, 6.5)}),
+		Transparency = NumberSequence.new({kp(0, 0.55), kp(0.5, 0.7), kp(1, 1)}),
+	}, 8, 0.5)
+
+	-- ground clouds at the feet
+	local feet = new("Attachment", {Name = "UI_AuraFeet", Position = Vector3.new(0, -2.6, 0)}, hrp)
+	table.insert(auraObjects, feet)
+	addEmitter(feet, {
+		Name = "UI_FeetCloud", Texture = TEX_SMOKE, Color = cloudColor, LightEmission = 0.5,
+		Lifetime = NumberRange.new(0.9, 1.5), Speed = NumberRange.new(3, 7),
+		SpreadAngle = Vector2.new(360, 360), Acceleration = Vector3.new(0, 1.5, 0), Drag = 2,
+		Rotation = NumberRange.new(0, 360), RotSpeed = NumberRange.new(-25, 25),
+		Size = NumberSequence.new({kp(0, 3), kp(0.5, 5), kp(1, 7)}),
+		Transparency = NumberSequence.new({kp(0, 0.5), kp(0.5, 0.75), kp(1, 1)}),
+	}, 6, 0.4)
+
+	-- white flame hair plume (Gear 5 flames)
+	local head = character:FindFirstChild("Head")
+	if head then
+		local plume = new("Attachment", {Name = "UI_AuraPlume", Position = Vector3.new(0, 0.5, 0)}, head)
+		table.insert(auraObjects, plume)
+		addEmitter(plume, {
+			Name = "UI_FlameHair", Texture = TEX_FIRE, Color = cloudColor, LightEmission = 1,
+			Lifetime = NumberRange.new(0.45, 0.85), Speed = NumberRange.new(3, 6),
+			SpreadAngle = Vector2.new(25, 25), EmissionDirection = Enum.NormalId.Top,
+			Acceleration = Vector3.new(0, 8, 0),
+			Rotation = NumberRange.new(-20, 20), RotSpeed = NumberRange.new(-30, 30),
+			Size = NumberSequence.new({kp(0, 1.4), kp(0.4, 1.8), kp(1, 0)}),
+			Transparency = NumberSequence.new({kp(0, 0.2), kp(0.7, 0.5), kp(1, 1)}),
+		}, 18, 1.2)
+	end
+
+	-- pulsing glow
+	auraLight = new("PointLight", {Color = tint.main, Brightness = 0, Range = 0, Shadows = false}, hrp)
+	table.insert(auraObjects, auraLight)
+
+	-- glowing halo rings on the ground
+	for i = 1, 2 do
+		local ring = new("Part", {
+			Name = "UI_AuraHalo", Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false,
+			CastShadow = false, Material = Enum.Material.Neon, Shape = Enum.PartType.Cylinder,
+			Color = (i == 1) and tint.main or tint.edge, Transparency = 1,
+			Size = Vector3.new(0.12, 7, 7),
+		}, workspace)
+		table.insert(auraObjects, ring)
+		table.insert(auraRings, ring)
+	end
+
+	-- outline
 	if uiHighlight then uiHighlight:Destroy() end
 	uiHighlight = new("Highlight", {
 		Name = "UI_WhiteOutline", Adornee = character,
 		DepthMode = Enum.HighlightDepthMode.Occluded,
-		FillColor = Color3.new(1, 1, 1), OutlineColor = Color3.new(1, 1, 1),
+		FillColor = tint.main, OutlineColor = tint.edge,
 		FillTransparency = 1, OutlineTransparency = 1,
 	}, character)
 	visualCharacter = character
@@ -514,11 +726,42 @@ local function refreshBodyAura()
 			auraPulseConnection = RunService.RenderStepped:Connect(function()
 				if not uiHighlight or not uiHighlight.Parent then return end
 				local a = auraAlpha.Value
-				local pulse = (math.sin(os.clock() * 5.5) + 1) * 0.5
-				uiHighlight.OutlineTransparency = 1 - a * (1 - (0.04 + pulse * 0.28))
-				uiHighlight.FillTransparency = 1 - a * (1 - (0.90 - pulse * 0.07))
+				local now = os.clock()
+				local pulse = (math.sin(now * 5.5) + 1) * 0.5
+				local inten = Settings.AuraIntensity
+				local tint = auraTint()
+
+				uiHighlight.FillColor = tint.main
+				uiHighlight.OutlineColor = tint.main:Lerp(tint.edge, pulse)
+				uiHighlight.OutlineTransparency = 1 - a * (1 - (0.02 + pulse * 0.2))
+				uiHighlight.FillTransparency = 1 - a * (1 - (0.86 - pulse * 0.1))
+
 				for _, em in ipairs(auraEmitters) do
-					if em.Parent then em.Rate = a * (5 + pulse * 9) end
+					if em.e.Parent then em.e.Rate = a * em.base * inten * (1 + pulse * em.pulse) end
+				end
+
+				if auraLight and auraLight.Parent then
+					auraLight.Color = tint.main
+					auraLight.Brightness = a * (2 + pulse * 2) * inten
+					auraLight.Range = math.min(a * (14 + pulse * 8) * inten, 60)
+				end
+
+				if root and root.Parent then
+					local floorPos = root.Position - Vector3.new(0, 2.85, 0)
+					for i, ring in ipairs(auraRings) do
+						if ring.Parent then
+							local d = (i == 1 and 7 or 11) + pulse * (i == 1 and 1.2 or 2.2)
+							ring.Size = Vector3.new(0.12, d, d)
+							ring.CFrame = CFrame.new(floorPos) * CFrame.Angles(0, 0, math.pi / 2)
+							ring.Transparency = 1 - a * (i == 1 and 0.7 or 0.4) * (0.6 + 0.4 * pulse)
+						end
+					end
+				end
+
+				if Settings.AuraLightning and a > 0.6 and now >= nextBolt then
+					nextBolt = now + (math.random(12, 40) / 100) / inten
+					lightningBolt(inten)
+					if math.random() < 0.4 then lightningBolt(inten) end
 				end
 			end)
 		end
@@ -735,6 +978,10 @@ local function flash()
 			NumberSequenceKeypoint.new(1, 1)}),
 	}, attachment)
 	emitter:Emit(24)
+	if Settings.AuraLightning then
+		lightningBolt(Settings.AuraIntensity)
+		lightningBolt(Settings.AuraIntensity)
+	end
 
 	local hl = new("Highlight", {
 		Name = "UI_WhiteFlash", Adornee = character,
@@ -954,6 +1201,7 @@ local function setUltra(on)
 	Settings.UltraActive = on
 	if on then
 		if Settings.ChatIntro then ultraChatIntro() end
+		auraBurst()
 	else
 		following = false
 		followToken += 1
@@ -1588,7 +1836,7 @@ local titleLabel = new("TextLabel", {
 local titleGradient = new("UIGradient", {}, titleLabel)
 local subLabel = new("TextLabel", {
 	BackgroundTransparency = 1, Size = UDim2.new(1, -290, 0, 18), Position = UDim2.fromOffset(26, 46),
-	Text = "JAYVEE  -  POWER SYSTEM  -  v3.2", Font = Enum.Font.GothamBold, TextSize = 10,
+	Text = "JAYVEE  -  POWER SYSTEM  -  v3.3", Font = Enum.Font.GothamBold, TextSize = 10,
 	TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = COL.sub,
 }, header)
 
@@ -1925,6 +2173,15 @@ do
 		refreshBodyAura()
 	end)
 	toggleRow(c3, "WHITE AFTERIMAGE", function() return Settings.Afterimage end, function(v) Settings.Afterimage = v end)
+	choiceRow(c3, "AURA STYLE", function() return auraTint().name end, function()
+		Settings.AuraTintIndex = (Settings.AuraTintIndex % #AURA_TINTS) + 1
+		visualCharacter = nil -- force rebuild with the new colors
+		refreshBodyAura()
+	end)
+	stepperRow(c3, "AURA POWER", function() return string.format("%d%%", math.floor(Settings.AuraIntensity * 100 + 0.5)) end,
+		adjust("AuraIntensity", 0.25, 0.5, 2))
+	toggleRow(c3, "AURA LIGHTNING", function() return Settings.AuraLightning end, function(v) Settings.AuraLightning = v end)
+	toggleRow(c3, "POWER-UP BURST", function() return Settings.AuraBurst end, function(v) Settings.AuraBurst = v end)
 
 	local c4 = makeCard(p, "FOLLOW SYSTEM", "What happens after a successful dodge")
 	toggleRow(c4, "FOLLOW AFTER DODGE", function() return Settings.FollowAfterDodge end, function(v)
