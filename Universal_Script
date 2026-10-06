@@ -1,5 +1,5 @@
 --==================================================================
--- ABILITY MENU - JAYVEE  (v4.5)
+-- ABILITY MENU - JAYVEE  (v4.7)
 -- Own-game LocalScript
 -- Place in: StarterPlayer > StarterPlayerScripts
 --
@@ -17,7 +17,9 @@
 --   * Fixed duplicate Ultra intro audio declaration.
 --   * Hardened audio/chat compatibility for mobile clients.
 --   * Fixed re-execution audio cleanup bookkeeping.
---   * Version/password metadata now consistently reports v4.5.
+--   * Version/password metadata now consistently reports v4.7.
+--   * Studio Lite compatibility: UI initializes even when optional client/world APIs are unavailable.
+--   * Optional audio/preload/executor features are skipped safely in Studio.
 
 -- v4.3 CHANGES
 --   * Ultra Instinct intro sound support (local asset / Roblox asset ID).
@@ -49,7 +51,7 @@
 --   * Damage fallback dodges even when no enemy is inside the radius.
 --==================================================================
 
-print("[JAYVEE] Ability Menu v4.5 loading...")
+print("[JAYVEE] Ability Menu v4.7 loading...")
 
 -- On-screen status banner: shows "loading", "loaded" or the exact ERROR on your screen.
 local function JV_Banner(text, isError)
@@ -100,12 +102,15 @@ local TweenService = game:GetService("TweenService")
 local UIS = game:GetService("UserInputService")
 local SoundService = game:GetService("SoundService")
 local Debris = game:GetService("Debris")
+local IS_STUDIO = false
+pcall(function() IS_STUDIO = RunService:IsStudio() end)
+
 
 local U = {} -- helper functions live here (Luau allows only 200 locals per scope)
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local SCRIPT_VERSION = "v4.6"
+local SCRIPT_VERSION = "v4.7"
 local VERSION_MAJOR = SCRIPT_VERSION:match("%d+") or "4"
 local PASSWORD_PREFIX = "ULTRAINSTINCTBYJAYVEE"
 local PASSWORD = PASSWORD_PREFIX .. "V" .. VERSION_MAJOR
@@ -245,20 +250,26 @@ local function new(class, props, parent)
 	-- tag our own effect parts so the threat sense never reacts to them
 	if o:IsA("BasePart") then o:SetAttribute("JV_FX", true) end
 	if props then
-		for k, v in pairs(props) do o[k] = v end
+		for k, v in pairs(props) do
+			-- Studio Lite / reduced clients may not expose every optional UI property.
+			-- Never let one unsupported property abort the entire menu.
+			pcall(function() o[k] = v end)
+		end
 	end
 	-- PIXEL FONT on every text element (menu, security screen, ESP)
 	if o:IsA("TextLabel") or o:IsA("TextButton") or o:IsA("TextBox") then
-		o.Font = PIXEL_FONT
-		o.TextSize = math.floor(o.TextSize * PIXEL_TEXT_BOOST + 0.5)
+		pcall(function() o.Font = PIXEL_FONT end)
+		pcall(function() o.TextSize = math.floor(o.TextSize * PIXEL_TEXT_BOOST + 0.5) end)
 	end
 	if parent then
 		if o:IsA("GuiObject") and not (props and props.LayoutOrder) then
-			local n = (parent:GetAttribute("_n") or 0) + 1
-			parent:SetAttribute("_n", n)
-			o.LayoutOrder = n
+			pcall(function()
+				local n = (parent:GetAttribute("_n") or 0) + 1
+				parent:SetAttribute("_n", n)
+				o.LayoutOrder = n
+			end)
 		end
-		o.Parent = parent
+		pcall(function() o.Parent = parent end)
 	end
 	return o
 end
@@ -359,6 +370,7 @@ if Settings.DeltaClientSupport then
 end
 
 local function resolveLocalAsset(fileName)
+	if IS_STUDIO then return nil end
 	if not Settings.DeltaClientSupport or not fileName or fileName == "" then return nil end
 
 	local candidates = {
@@ -506,6 +518,7 @@ end
 
 -- Probe the sources once and keep the first one that loads
 task.spawn(function()
+	if IS_STUDIO then return end
 	local CP = game:GetService("ContentProvider")
 	for _, src in ipairs(PIXEL_SRC_LIST) do
 		local probe = Instance.new("Sound")
@@ -1376,7 +1389,7 @@ function U.cancelCameraLock()
 	cameraTarget = nil
 end
 
-RunService:BindToRenderStep("JAYVEE_CameraLock", Enum.RenderPriority.Camera.Value + 1, function()
+pcall(function() RunService:BindToRenderStep("JAYVEE_CameraLock", Enum.RenderPriority.Camera.Value + 1, function()
 	local target = cameraTarget or followTarget
 	if not (cameraLocked and target) then
 		if bodyLocked then
@@ -1412,7 +1425,7 @@ RunService:BindToRenderStep("JAYVEE_CameraLock", Enum.RenderPriority.Camera.Valu
 			root.CFrame = CFrame.lookAt(root.Position, flat)
 		end
 	end
-end)
+end) end)
 
 --==================================================
 -- ULTRA ON/OFF + CHAT INTRO (intro only, no outro)
