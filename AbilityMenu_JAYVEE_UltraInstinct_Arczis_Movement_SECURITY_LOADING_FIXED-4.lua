@@ -96,9 +96,9 @@ local Settings = {
 	AnimationSpeed = 0.45,
 
 	-- Performance optimization
-	Optimization = true,            -- Reduces unnecessary UI/effect update work.
-	UIUpdateRate = 0.10,            -- Seconds between non-critical UI refreshes.
-	EffectUpdateRate = 0.08,        -- Seconds between aura/movement effect updates.
+	Optimization = false,           -- Disabled so UI input/visuals stay fully responsive.
+	UIUpdateRate = 0.016,           -- Full-rate UI refresh.
+	EffectUpdateRate = 0.016,       -- Full-rate effect refresh.
 }
 
 local character
@@ -265,10 +265,10 @@ security = Instance.new("Frame")
 security.Size = UDim2.fromOffset(410, 275)
 security.Position = UDim2.new(0.5, -205, 0.5, -138)
 security.BackgroundColor3 = Color3.fromRGB(12, 11, 17)
-security.BackgroundTransparency = 0.04
+security.BackgroundTransparency = 0
 security.Parent = gui
 security.Visible = false
-security.ZIndex = 100
+security.ZIndex = 200
 corner(security, 22)
 addStroke(security, 0.1)
 draggable(security)
@@ -285,6 +285,7 @@ secTitle.Text = "ABILITY MENU"
 secTitle.Font = Enum.Font.GothamBlack
 secTitle.TextSize = 28
 secTitle.TextColor3 = Color3.new(1, 1, 1)
+secTitle.ZIndex = 201
 secTitle.Parent = security
 
 local secSub = Instance.new("TextLabel")
@@ -295,6 +296,7 @@ secSub.Text = "SECURITY ACCESS  •  JAYVEE"
 secSub.Font = Enum.Font.GothamBold
 secSub.TextSize = 11
 secSub.TextColor3 = Color3.fromRGB(155, 150, 175)
+secSub.ZIndex = 201
 secSub.Parent = security
 
 local passBox = Instance.new("TextBox")
@@ -308,6 +310,9 @@ passBox.TextSize = 13
 passBox.TextColor3 = Color3.new(1, 1, 1)
 passBox.PlaceholderColor3 = Color3.fromRGB(120, 115, 135)
 passBox.BackgroundColor3 = Color3.fromRGB(25, 23, 34)
+passBox.ZIndex = 205
+passBox.Active = true
+passBox.Selectable = true
 passBox.Parent = security
 corner(passBox, 13)
 
@@ -320,6 +325,7 @@ unlock.TextSize = 13
 unlock.TextColor3 = Color3.new(1, 1, 1)
 unlock.BackgroundColor3 = Color3.fromRGB(104, 72, 158)
 unlock.AutoButtonColor = false
+unlock.ZIndex = 205
 unlock.Parent = security
 corner(unlock, 13)
 
@@ -331,6 +337,7 @@ securityStatus.Text = "SECURE • WAITING FOR ACCESS"
 securityStatus.Font = Enum.Font.GothamBold
 securityStatus.TextSize = 10
 securityStatus.TextColor3 = Color3.fromRGB(145, 140, 165)
+securityStatus.ZIndex = 201
 securityStatus.Parent = security
 
 --==================================================
@@ -2562,6 +2569,7 @@ minimized.Visible = false
 -- Start directly on the Security UI (loading screen removed).
 security.Visible = true
 security.Active = true
+security.Selectable = false
 security.ZIndex = 200
 secScale.Scale = 0.72
 tween(secScale, 0.42, {Scale = 1}, Enum.EasingStyle.Back, Enum.EasingDirection.Out):Play()
@@ -2570,6 +2578,22 @@ player.CharacterAdded:Connect(function()
 	task.wait(0.25)
 	refreshCharacter()
 	hookDamage()
+end)
+
+passBox.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		task.defer(function()
+			if security.Visible then
+				passBox:CaptureFocus()
+			end
+		end)
+	end
+end)
+
+passBox.FocusLost:Connect(function(enterPressed)
+	if enterPressed then
+		unlock:Activate()
+	end
 end)
 
 unlock.MouseButton1Click:Connect(function()
