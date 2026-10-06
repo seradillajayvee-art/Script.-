@@ -1,5 +1,5 @@
 --==================================================================
--- ABILITY MENU - JAYVEE  (v3.4)
+-- ABILITY MENU - JAYVEE  (v3.6)
 -- Own-game LocalScript
 -- Place in: StarterPlayer > StarterPlayerScripts
 --
@@ -365,6 +365,7 @@ function U.draggable(frame, handle)
 	local st = {moved = false}
 	local dragging, dragStart, startPos = false, nil, nil
 	handle.InputBegan:Connect(function(input)
+		if handle:GetAttribute("DragEnabled") == false then return end
 		if input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = true
@@ -408,6 +409,7 @@ local cameraLocked, cameraTarget, bodyLocked = false, nil, false
 local senseCooldown = 0
 local unlocked = false
 local lastOwnAction = 0 -- last time YOU used a tool / pressed an ability key
+local applyScale
 
 function U.getHum(m) return m and m:FindFirstChildOfClass("Humanoid") end
 function U.getRoot(m) return m and m:FindFirstChild("HumanoidRootPart") end
@@ -1159,7 +1161,6 @@ end
 --==================================================
 function U.lockCameraToTarget(target)
 	if not Settings.CameraLock or not Settings.UltraActive or not target then return end
-	if humanoid and humanoid.MoveDirection.Magnitude > 0.12 then return end
 	local hum, tr = U.getHum(target), U.getRoot(target)
 	if not hum or not tr or hum.Health <= 0 then return end
 	cameraTarget = target
@@ -1193,6 +1194,13 @@ RunService:BindToRenderStep("JAYVEE_CameraLock", Enum.RenderPriority.Camera.Valu
 	local point = targetRoot.Position + Vector3.new(0, 2, 0)
 	cam.CFrame = cam.CFrame:Lerp(CFrame.lookAt(cam.CFrame.Position, point), 0.4)
 	if root and humanoid and humanoid.Health > 0 then
+		local moving = humanoid.MoveDirection.Magnitude > 0.12
+		if moving then
+			-- Keep the camera locked, but let the mobile joystick control the character.
+			bodyLocked = false
+			humanoid.AutoRotate = true
+			return
+		end
 		bodyLocked = true
 		humanoid.AutoRotate = false
 		local flat = Vector3.new(targetRoot.Position.X, root.Position.Y, targetRoot.Position.Z)
@@ -1512,7 +1520,10 @@ function U.enemyLooksLikeAttacking(model, animOnly)
 			if U.hasWord(n, ATTACK_WORDS) and not (isMove and not U.hasWord(n, {"attack", "punch", "kick", "slash", "skill", "ultimate", "ability"})) then
 				return true
 			end
-			if not track.Looped and track.Priority.Value >= Enum.AnimationPriority.Action.Value
+			if not track.Looped and (track.Priority == Enum.AnimationPriority.Action
+				or track.Priority == Enum.AnimationPriority.Action2
+				or track.Priority == Enum.AnimationPriority.Action3
+				or track.Priority == Enum.AnimationPriority.Action4)
 				and not isMove then
 				return true
 			end
@@ -1774,7 +1785,7 @@ end
 local function hookTool(tool)
 	if not tool:IsA("Tool") or tool:GetAttribute("JV_Hooked") then return end
 	tool:SetAttribute("JV_Hooked", true)
-	tool.Activated:Connect(function()
+	bind(tool.Activated, function()
 		lastOwnAction = os.clock()
 		local target = U.getEnemyInsideRadius()
 		if target then U.lockCameraToTarget(target) end
@@ -1783,7 +1794,7 @@ end
 
 function U.hookCharacterTools(char)
 	for _, obj in ipairs(char:GetChildren()) do hookTool(obj) end
-	char.ChildAdded:Connect(hookTool)
+	bind(char.ChildAdded, hookTool)
 end
 
 function U.hookDamage()
@@ -1965,7 +1976,7 @@ function U.toggleRow(parent, labelText, get, set)
 		Size = UDim2.fromOffset(16, 16), BackgroundColor3 = Color3.new(1, 1, 1),
 	}, sw)
 	U.corner(knob, 8)
-	row.MouseButton1Click:Connect(function()
+	row.Activated:Connect(function()
 		set(not get())
 		U.play(get() and "toggleOn" or "toggleOff")
 		U.refreshAll()
@@ -2001,8 +2012,8 @@ function U.stepperRow(parent, labelText, getText, onStep, minusText, plusText)
 	end
 	local minus = mk(-80, minusText or "-")
 	local plus = mk(-10, plusText or "+")
-	minus.MouseButton1Click:Connect(function() U.play(clickSound); onStep(-1); U.refreshAll() end)
-	plus.MouseButton1Click:Connect(function() U.play(clickSound); onStep(1); U.refreshAll() end)
+	minus.Activated:Connect(function() U.play(clickSound); onStep(-1); U.refreshAll() end)
+	plus.Activated:Connect(function() U.play(clickSound); onStep(1); U.refreshAll() end)
 	U.reg(function()
 		lbl.Text = U.richValue(labelText, getText())
 		plus.BackgroundColor3 = theme().b
@@ -2025,7 +2036,7 @@ function U.choiceRow(parent, labelText, getText, onClick)
 		Size = UDim2.new(0.5, -12, 1, 0), Font = Enum.Font.GothamBlack, TextSize = 11,
 		TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = theme().a, Text = "",
 	}, row)
-	row.MouseButton1Click:Connect(function() U.play(clickSound); onClick(); U.refreshAll() end)
+	row.Activated:Connect(function() U.play(clickSound); onClick(); U.refreshAll() end)
 	U.reg(function()
 		val.Text = string.upper(getText()) .. "  >"
 		val.TextColor3 = theme().a
@@ -2040,7 +2051,7 @@ function U.actionRow(parent, text, onClick, danger)
 		AutoButtonColor = false,
 	}, parent)
 	U.corner(b, 10)
-	b.MouseButton1Click:Connect(function() U.play(clickSound); onClick(b) end)
+	b.Activated:Connect(function() U.play(clickSound); onClick(b) end)
 	if not danger then U.reg(function() b.BackgroundColor3 = theme().b end) end
 	return b
 end
@@ -2071,10 +2082,13 @@ local security = new("Frame", {
 	BackgroundTransparency = 0.02, Visible = true, ZIndex = 200,
 }, gui)
 U.corner(security, 22)
+local secDragHandle = new("Frame", {
+	Size = UDim2.new(1, 0, 0, 72), BackgroundTransparency = 1, Active = true, ZIndex = 202,
+}, security)
 local secStroke = stroke(security, 2, 0)
 local secGradient = new("UIGradient", {}, secStroke)
 local secScale = new("UIScale", {Scale = U.fitScale(420, 310)}, security)
-U.draggable(security)
+U.draggable(security, secDragHandle)
 
 local passBox, unlockBtn, secStatus, loadBar
 do
@@ -2092,6 +2106,7 @@ do
 		Size = UDim2.new(1, -40, 0, 48), Position = UDim2.fromOffset(20, 96),
 		PlaceholderText = "ENTER ACCESS KEY", Text = "", ClearTextOnFocus = false,
 		Font = Enum.Font.GothamBold, TextSize = 13, TextColor3 = Color3.new(1, 1, 1),
+		TextEditable = true, Active = true, Selectable = true,
 		PlaceholderColor3 = Color3.fromRGB(120, 115, 135), BackgroundColor3 = Color3.fromRGB(25, 23, 34),
 		ZIndex = 201,
 	}, security)
@@ -2147,7 +2162,7 @@ local titleLabel = new("TextLabel", {
 local titleGradient = new("UIGradient", {}, titleLabel)
 local subLabel = new("TextLabel", {
 	BackgroundTransparency = 1, Size = UDim2.new(1, -290, 0, 18), Position = UDim2.fromOffset(26, 46),
-	Text = "JAYVEE  -  POWER SYSTEM  -  v3.4", Font = Enum.Font.GothamBold, TextSize = 10,
+	Text = "JAYVEE  -  POWER SYSTEM  -  v3.6", Font = Enum.Font.GothamBold, TextSize = 10,
 	TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = COL.sub,
 }, header)
 
@@ -2176,8 +2191,59 @@ local glowLine = new("Frame", {
 U.corner(glowLine, 1)
 local glowGradient = new("UIGradient", {}, glowLine)
 
+--==================================================
+-- MAIN MENU TOOLS: SEARCH / SIZE / MOVE
+--==================================================
+local toolBar = new("Frame", {
+	Name = "MenuTools",
+	Position = UDim2.fromOffset(18, 82),
+	Size = UDim2.new(1, -36, 0, 34),
+	BackgroundTransparency = 1,
+}, main)
+
+local searchBox = new("TextBox", {
+	Name = "SearchBar",
+	Position = UDim2.fromOffset(0, 0),
+	Size = UDim2.new(1, -166, 1, 0),
+	BackgroundColor3 = Color3.fromRGB(18, 16, 25),
+	BackgroundTransparency = 0.08,
+	BorderSizePixel = 0,
+	ClearTextOnFocus = false,
+	PlaceholderText = "Search menu...",
+	PlaceholderColor3 = COL.sub,
+	Text = "",
+	TextColor3 = Color3.new(1, 1, 1),
+	Font = Enum.Font.GothamMedium,
+	TextSize = 11,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	Active = true,
+	Selectable = true,
+}, toolBar)
+U.corner(searchBox, 10)
+local searchPad = new("UIPadding", {PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 10)}, searchBox)
+
+local function toolButton(parent, x, width, label)
+	local b = new("TextButton", {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, x, 0, 0),
+		Size = UDim2.fromOffset(width, 34),
+		BackgroundColor3 = Color3.fromRGB(28, 25, 38),
+		TextColor3 = Color3.new(1, 1, 1),
+		Text = label,
+		Font = Enum.Font.GothamBlack,
+		TextSize = 10,
+		AutoButtonColor = false,
+	}, parent)
+	U.corner(b, 10)
+	return b
+end
+
+local sizeBtn = toolButton(toolBar, -116, 72, "SIZE 100%")
+local moveBtn = toolButton(toolBar, -38, 72, "MOVE OFF")
+
 local content = new("ScrollingFrame", {
-	Position = UDim2.fromOffset(18, 84), Size = UDim2.new(1, -36, 1, -156),
+	Position = UDim2.fromOffset(18, 122), Size = UDim2.new(1, -36, 1, -194),
 	BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3,
 	ScrollBarImageTransparency = 0.3, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
 	ScrollingDirection = Enum.ScrollingDirection.Y, ElasticBehavior = Enum.ElasticBehavior.Always,
@@ -2232,14 +2298,55 @@ for i, name in ipairs(PAGE_NAMES) do
 		TextSize = 12, TextColor3 = COL.sub, AutoButtonColor = false, ZIndex = 3,
 	}, nav)
 	tabButtons[name] = b
-	b.MouseButton1Click:Connect(function()
+	b.Activated:Connect(function()
 		if currentPage == name then return end
 		U.play(clickSound)
 		U.showPage(name)
 	end)
 end
 
+header:SetAttribute("DragEnabled", false)
 U.draggable(main, header)
+local moveMode = false
+moveBtn.Activated:Connect(function()
+	moveMode = not moveMode
+	header:SetAttribute("DragEnabled", moveMode)
+	moveBtn.Text = moveMode and "MOVE ON" or "MOVE OFF"
+	moveBtn.BackgroundColor3 = moveMode and THEMES[1].b or Color3.fromRGB(28, 25, 38)
+	U.play("click")
+end)
+
+-- Search only the cards of the currently visible page.
+local function applyMenuSearch()
+	local q = string.lower(searchBox.Text or "")
+	local page = pages[currentPage]
+	if not page then return end
+	for _, child in ipairs(page:GetChildren()) do
+		if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then
+			if q == "" then
+				child.Visible = true
+			else
+				local hay = child.Name .. " "
+				for _, d in ipairs(child:GetDescendants()) do
+					if d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox") then
+						hay ..= " " .. (d.Text or "")
+					end
+				end
+				child.Visible = string.find(string.lower(hay), q, 1, true) ~= nil
+			end
+		end
+	end
+	content.CanvasPosition = Vector2.new(0, 0)
+end
+
+searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+	applyMenuSearch()
+end)
+for _, b in pairs(tabButtons) do
+	b.Activated:Connect(function()
+		task.defer(applyMenuSearch)
+	end)
+end
 
 --==================================================
 -- MINIMIZED BUTTON + OPEN/CLOSE
@@ -2253,6 +2360,27 @@ U.corner(minimized, 20)
 local minStroke = stroke(minimized, 2, 0)
 local minGradient = new("UIGradient", {}, minStroke)
 local minDrag = U.draggable(minimized)
+
+local SIZE_STEPS = {0.80, 0.90, 1.00, 1.10, 1.20, 1.30}
+local function refreshSizeButton()
+	sizeBtn.Text = string.format("SIZE %d%%", math.floor(Settings.MenuScale * 100 + 0.5))
+end
+sizeBtn.Activated:Connect(function()
+	local current = Settings.MenuScale
+	local nextValue = SIZE_STEPS[1]
+	for i, v in ipairs(SIZE_STEPS) do
+		if math.abs(v - current) < 0.026 then
+			nextValue = SIZE_STEPS[(i % #SIZE_STEPS) + 1]
+			break
+		end
+	end
+	Settings.MenuScale = nextValue
+	refreshSizeButton()
+	applyScale()
+	U.refreshAll()
+	U.play("click")
+end)
+refreshSizeButton()
 
 local menuOpen, animating = false, false
 local STYLES = {
@@ -2294,9 +2422,9 @@ local function closeMenu()
 	end)
 end
 
-minimizeBtn.MouseButton1Click:Connect(closeMenu)
-closeBtn.MouseButton1Click:Connect(closeMenu)
-minimized.MouseButton1Click:Connect(function()
+minimizeBtn.Activated:Connect(closeMenu)
+closeBtn.Activated:Connect(closeMenu)
+minimized.Activated:Connect(function()
 	if minDrag.moved then return end
 	U.openMenu()
 end)
@@ -2308,7 +2436,7 @@ bind(UIS.InputBegan, function(input, processed)
 	end
 end)
 
-local function applyScale()
+applyScale = function()
 	if not animating then
 		if menuOpen then mainScale.Scale = U.targetScale() end
 	end
@@ -2438,7 +2566,7 @@ do
 
 	local credits = U.makeCard(p, "CREDITS", nil)
 	U.infoText(credits, function()
-		return "Creator: JAYVEE\nStatus: ONLINE - Ability System Ready\nVersion: 3.4"
+		return "Creator: JAYVEE\nStatus: ONLINE - Ability System Ready\nVersion: 3.5"
 	end)
 end
 
@@ -2646,6 +2774,8 @@ U.reg(function()
 	for n, b in pairs(tabButtons) do
 		b.TextColor3 = (n == currentPage) and Color3.new(1, 1, 1) or COL.sub
 	end
+	sizeBtn.Text = string.format("SIZE %d%%", math.floor(Settings.MenuScale * 100 + 0.5))
+	moveBtn.BackgroundColor3 = moveMode and theme().b or Color3.fromRGB(28, 25, 38)
 end)
 
 --==================================================
@@ -2662,7 +2792,6 @@ do
 
 		-- joystick / keyboard movement releases lock + follow
 		if humanoid and humanoid.MoveDirection.Magnitude > 0.12 then
-			if cameraLocked then U.cancelCameraLock() end
 			if following then
 				following = false
 				followToken += 1
@@ -2713,6 +2842,10 @@ unloadFn = function()
 	ringFolder:Destroy()
 	for _, s in ipairs(sounds) do s:Destroy() end
 	gui:Destroy()
+	pcall(function()
+		local statusGui = playerGui:FindFirstChild("JAYVEE_Status")
+		if statusGui then statusGui:Destroy() end
+	end)
 	if shared.JAYVEE_AbilityMenu_Destroy == unloadFn then shared.JAYVEE_AbilityMenu_Destroy = nil end
 end
 shared.JAYVEE_AbilityMenu_Destroy = unloadFn
@@ -2721,7 +2854,7 @@ shared.JAYVEE_AbilityMenu_Destroy = unloadFn
 -- UNLOCK FLOW:  Security -> Password -> Loading -> Menu
 --==================================================
 local unlocking = false
-unlockBtn.MouseButton1Click:Connect(function()
+unlockBtn.Activated:Connect(function()
 	if unlocking then return end
 	U.play(clickSound)
 
@@ -2760,7 +2893,7 @@ security.Visible = true
 main.Visible = false
 minimized.Visible = false
 
-print("[JAYVEE] Ability Menu v3.4 loaded - Security screen should be visible.")
+print("[JAYVEE] Ability Menu v3.5 loaded - Security screen should be visible.")
 
 end, function(e) return tostring(e) .. "\n" .. debug.traceback() end)
 
