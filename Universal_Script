@@ -1,5 +1,5 @@
 --==================================================================
--- ABILITY MENU - JAYVEE  (v4.2)
+-- ABILITY MENU - JAYVEE  (v4.3)
 -- Own-game LocalScript
 -- Place in: StarterPlayer > StarterPlayerScripts
 --
@@ -10,6 +10,11 @@
 --   PLAYER   : player info, dodge counter (+reset), Player ESP
 --   SETTINGS : theme, scale, sounds, animations, keybind, reset/unload
 --
+-- v4.3 CHANGES
+--   * Ultra Instinct intro sound support (local asset / Roblox asset ID).
+--   * Dodge chat reactions every 5 dodges with randomized, non-repeating lines.
+--   * Ultra Instinct can auto-trigger once when HP crosses 50% while Ultra is OFF.
+
 -- v4.2 CHANGES
 --   BUG FIXES
 --   * Ultra Instinct ON crashed (ultraFxToken was never declared) - fixed.
@@ -35,7 +40,7 @@
 --   * Damage fallback dodges even when no enemy is inside the radius.
 --==================================================================
 
-print("[JAYVEE] Ability Menu v4.2 loading...")
+print("[JAYVEE] Ability Menu v4.3 loading...")
 
 -- On-screen status banner: shows "loading", "loaded" or the exact ERROR on your screen.
 local function JV_Banner(text, isError)
@@ -86,7 +91,7 @@ local U = {} -- helper functions live here (Luau allows only 200 locals per scop
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local SCRIPT_VERSION = "v4.2"
+local SCRIPT_VERSION = "v4.3"
 local VERSION_MAJOR = SCRIPT_VERSION:match("%d+") or "4"
 local PASSWORD_PREFIX = "ULTRAINSTINCTBYJAYVEE"
 local PASSWORD = PASSWORD_PREFIX .. "V" .. VERSION_MAJOR
@@ -161,6 +166,21 @@ local Settings = {
 	AuraLightning = true,         -- white lightning crackling around you
 	AuraBurst = true,             -- shockwave + cloud explosion when Ultra turns ON
 	DodgeCount = 0,
+
+	-- Ultra Instinct extra triggers / feedback
+	UltraHalfHPTrigger = true,
+	UltraIntroSound = true,
+	UltraIntroSoundVolume = 0.85,
+	UltraIntroSoundFile = "Intro.mp3",
+	UltraIntroSoundId = "", -- Optional Roblox audio asset ID for Studio/normal Roblox.
+	UltraOutroSound = true,
+	UltraOutroSoundVolume = 0.85,
+	UltraOutroSoundFile = "Outro.mp3",
+	UltraOutroSoundId = "", -- Optional Roblox audio asset ID for Studio/normal Roblox.
+	DeltaClientSupport = true, -- Safe compatibility layer for Delta/mobile executor environments.
+	DodgeChatEnabled = true,
+	DodgeChatEvery = 5,
+	DodgeChatCooldown = 2.5,
 
 	-- ESP
 	ESPEnabled = false,
@@ -300,6 +320,7 @@ end
 
 -- Sounds
 local sounds = {}
+local ultraIntroSound
 function U.makeSound(id, volume)
 	local s = Instance.new("Sound")
 	s.SoundId = "rbxassetid://" .. tostring(id)
@@ -308,6 +329,115 @@ function U.makeSound(id, volume)
 	table.insert(sounds, s)
 	return s
 end
+
+--==================================================
+-- DELTA / EXECUTOR COMPATIBILITY + ULTRA AUDIO
+--==================================================
+-- Delta and other mobile clients can expose different local-asset helpers.
+-- We probe them safely so a missing helper never breaks the whole script.
+local ExecutorName = "Unknown"
+if Settings.DeltaClientSupport then
+	pcall(function()
+		if type(identifyexecutor) == "function" then
+			local a, b = identifyexecutor()
+			ExecutorName = tostring(a or b or "Unknown")
+		end
+	end)
+end
+
+local function resolveLocalAsset(fileName)
+	if not Settings.DeltaClientSupport or not fileName or fileName == "" then return nil end
+
+	local candidates = {
+		function() return type(getcustomasset) == "function" and getcustomasset(fileName) or nil end,
+		function() return type(getsynasset) == "function" and getsynasset(fileName) or nil end,
+	}
+	for _, getter in ipairs(candidates) do
+		local ok, id = pcall(getter)
+		if ok and type(id) == "string" and id ~= "" then
+			return id
+		end
+	end
+	return nil
+end
+
+local function resolveAudioId(enabled, fileName, assetId)
+	if not enabled then return nil end
+
+	local localId = resolveLocalAsset(fileName)
+	if localId then return localId end
+
+	assetId = tostring(assetId or "")
+	if assetId ~= "" then
+		if assetId:match("^rbxassetid://") then return assetId end
+		return "rbxassetid://" .. assetId
+	end
+	return nil
+end
+
+local function makeUltraAudio(name, enabled, fileName, assetId, volume)
+	local id = resolveAudioId(enabled, fileName, assetId)
+	if not id then return nil end
+
+	local s = Instance.new("Sound")
+	s.Name = name
+	s.SoundId = id
+	s.Volume = math.clamp(tonumber(volume) or 0.85, 0, 10)
+	s.Parent = SoundService
+	table.insert(sounds, s)
+
+	pcall(function()
+		game:GetService("ContentProvider"):PreloadAsync({s})
+	end)
+	return s
+end
+
+local ultraIntroSound
+local ultraOutroSound
+
+local function setupUltraAudio()
+	if ultraIntroSound then pcall(function() ultraIntroSound:Destroy() end) end
+	if ultraOutroSound then pcall(function() ultraOutroSound:Destroy() end) end
+	ultraIntroSound = makeUltraAudio(
+		"JAYVEE_UltraInstinctIntro",
+		Settings.UltraIntroSound,
+		Settings.UltraIntroSoundFile,
+		Settings.UltraIntroSoundId,
+		Settings.UltraIntroSoundVolume
+	)
+	ultraOutroSound = makeUltraAudio(
+		"JAYVEE_UltraInstinctOutro",
+		Settings.UltraOutroSound,
+		Settings.UltraOutroSoundFile,
+		Settings.UltraOutroSoundId,
+		Settings.UltraOutroSoundVolume
+	)
+end
+
+local function playUltraIntroSound()
+	if not Settings.UltraIntroSound or not ultraIntroSound then return end
+	pcall(function()
+		if ultraOutroSound then ultraOutroSound:Stop() end
+		ultraIntroSound:Stop()
+		ultraIntroSound.TimePosition = 0
+		ultraIntroSound.Volume = math.clamp(tonumber(Settings.UltraIntroSoundVolume) or 0.85, 0, 10)
+		ultraIntroSound:Play()
+	end)
+end
+
+local function playUltraOutroSound()
+	if not Settings.UltraOutroSound or not ultraOutroSound then return end
+	pcall(function()
+		if ultraIntroSound then ultraIntroSound:Stop() end
+		ultraOutroSound:Stop()
+		ultraOutroSound.TimePosition = 0
+		ultraOutroSound.Volume = math.clamp(tonumber(Settings.UltraOutroSoundVolume) or 0.85, 0, 10)
+		ultraOutroSound:Play()
+	end)
+end
+
+setupUltraAudio()
+
 -- Sound keys used by play(): click, toggleOn, toggleOff, open, close, stop, error, success, type
 local clickSound, openSound, stopSound = "click", "open", "stop"
 
@@ -449,6 +579,9 @@ local gui = new("ScreenGui", {
 -- CORE STATE
 --==================================================
 local character, humanoid, root, lastHealth, damageConnection
+local halfHPTriggered = false
+local dodgeChatLastAt = 0
+local dodgeChatRecent = {}
 local dodging, following, followTarget, followToken = false, false, nil, 0
 local dodgeToken = 0
 local cameraLocked, cameraTarget, bodyLocked = false, nil, false
@@ -1305,6 +1438,83 @@ function U.ultraChatIntro()
 	Debris:AddItem(bb, 3)
 end
 
+-- Dodge reactions: one message every N successful dodges, with a no-repeat bag
+-- so the same line is not spammed over and over.
+local DODGE_CHAT_LINES = {
+	"Heh... too slow ðŸ˜ðŸ’¨",
+	"Did you really think that would hit me? ðŸ‘€âœ¨",
+	"My body moved before I even thought about it... ðŸ¥¶âš¡",
+	"Keep swinging. I can do this all day ðŸ˜ŽðŸ”¥",
+	"You missed again! ðŸ˜‚ðŸ’«",
+	"Reflexes on autopilot. ðŸ§˜â€â™‚ï¸âš¡",
+	"Almost... but not quite. ðŸ˜ˆðŸ’¨",
+	"That was close! Too bad I already moved ðŸ˜âœ¨",
+	"Bro is fighting the air now ðŸ’€ðŸ˜‚",
+	"You cannot touch what you cannot catch ðŸª½âš¡",
+	"Another dodge? Easy. ðŸ˜ŒðŸ’¨",
+	"Ultra reflexes kicking in! ðŸ‘ï¸âš¡",
+	"I saw that coming from a mile away ðŸ˜ŽðŸ‘€",
+	"Try again... maybe next century ðŸ˜‚ðŸ”¥",
+	"Instinct > reaction time. ðŸ§˜â€â™‚ï¸âœ¨",
+}
+
+local function dodgeChatAlreadyUsed(index)
+	for _, used in ipairs(dodgeChatRecent) do
+		if used == index then return true end
+	end
+	return false
+end
+
+local function pickDodgeChatLine()
+	local available = {}
+	for i = 1, #DODGE_CHAT_LINES do
+		if not dodgeChatAlreadyUsed(i) then table.insert(available, i) end
+	end
+	if #available == 0 then
+		dodgeChatRecent = {}
+		for i = 1, #DODGE_CHAT_LINES do table.insert(available, i) end
+	end
+	local index = available[math.random(1, #available)]
+	table.insert(dodgeChatRecent, index)
+	if #dodgeChatRecent > math.min(5, #DODGE_CHAT_LINES - 1) then
+		table.remove(dodgeChatRecent, 1)
+	end
+	return DODGE_CHAT_LINES[index]
+end
+
+local function sendChatLine(text)
+	local sent = false
+	pcall(function()
+		local TCS = game:GetService("TextChatService")
+		if TCS.ChatVersion == Enum.ChatVersion.TextChatService then
+			local channels = TCS:FindFirstChild("TextChannels")
+			local ch = channels and (channels:FindFirstChild("RBXGeneral") or channels:FindFirstChildWhichIsA("TextChannel"))
+			if ch then ch:SendAsync(text); sent = true end
+		end
+	end)
+	if sent then return true end
+
+	pcall(function()
+		local RS = game:GetService("ReplicatedStorage")
+		local events = RS:FindFirstChild("DefaultChatSystemChatEvents")
+		local say = events and events:FindFirstChild("SayMessageRequest")
+		if say then say:FireServer(text, "All"); sent = true end
+	end)
+	return sent
+end
+
+local function maybeDodgeChat()
+	if not Settings.DodgeChatEnabled then return end
+	local every = math.max(5, math.floor(tonumber(Settings.DodgeChatEvery) or 5))
+	if Settings.DodgeCount < every or Settings.DodgeCount % every ~= 0 then return end
+	local now = os.clock()
+	if now - dodgeChatLastAt < math.max(0, tonumber(Settings.DodgeChatCooldown) or 2.5) then return end
+	local text = pickDodgeChatLine()
+	if sendChatLine(text) then
+		dodgeChatLastAt = now
+	end
+end
+
 --==================================================
 -- ULTRA INSTINCT CINEMATIC INTRO / OUTRO
 --==================================================
@@ -1396,10 +1606,12 @@ local function setUltra(on)
 	Settings.UltraActive = on
 	if on then
 		ultraCinematic(true)
+		playUltraIntroSound()
 		U.play("toggleOn")
 		if Settings.ChatIntro then U.ultraChatIntro() end
 		U.auraBurst()
 	else
+		playUltraOutroSound()
 		-- HARD OFF: invalidate any running dodge/follow task immediately.
 		dodgeToken += 1
 		dodging = false
@@ -1564,6 +1776,7 @@ local function runDodge(target, threat)
 	Settings.DodgeCount += 1
 	U.refreshStats()
 	U.showDodgeIndicator()
+	maybeDodgeChat()
 	if targetRoot then U.lockCameraToTarget(target) end
 
 	local act = ACTIVITY[Settings.DodgeActivity] or ACTIVITY.High
@@ -1960,6 +2173,20 @@ function U.hookDamage()
 	if not humanoid then return end
 	lastHealth = humanoid.Health
 	damageConnection = humanoid.HealthChanged:Connect(function(newHealth)
+		-- Alternate Ultra Instinct trigger: crossing from above 50% HP to 50% or below.
+		-- It deliberately checks UltraActive == false, so it cannot retrigger while Ultra is ON.
+		if Settings.UltraHalfHPTrigger and Settings.Enabled and not Settings.UltraActive
+			and not halfHPTriggered and humanoid.MaxHealth > 0
+			and lastHealth and lastHealth > humanoid.MaxHealth * 0.5
+			and newHealth <= humanoid.MaxHealth * 0.5 and newHealth > 0 then
+			halfHPTriggered = true
+			task.defer(function()
+				if Settings.Enabled and not Settings.UltraActive and humanoid and humanoid.Health > 0 then
+					setUltra(true)
+				end
+			end)
+		end
+
 		if lastHealth and newHealth < lastHealth - 0.5
 			and Settings.Enabled and Settings.AutoDodge and Settings.UltraActive then
 			local st = humanoid:GetState()
@@ -2057,6 +2284,7 @@ local function setupCharacter(char)
 	local hrp = char:WaitForChild("HumanoidRootPart", 10)
 	if not hum or not hrp then return end
 	character, humanoid, root = char, hum, hrp
+	halfHPTriggered = false
 	dodging, following, followTarget = false, false, nil
 	followToken += 1
 	U.cancelCameraLock()
