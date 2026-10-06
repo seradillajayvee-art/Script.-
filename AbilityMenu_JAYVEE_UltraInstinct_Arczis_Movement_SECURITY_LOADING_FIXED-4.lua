@@ -1,19 +1,23 @@
 --==================================================================
--- ABILITY MENU - JAYVEE  (v3.3)
+-- ABILITY MENU - JAYVEE  (v3.4)
 -- Own-game LocalScript
 -- Place in: StarterPlayer > StarterPlayerScripts
 --
 -- Tabs:  HOME - ABILITY - PLAYER - SETTINGS
 --   HOME     : creator info, script description, live status
---   ABILITY  : Ultra Instinct (ON/OFF), radius + circle, dodge, follow
+--   ABILITY  : Ultra Instinct (ON/OFF), radius + circle, dodge, follow,
+--              THREAT SENSE (dodge projectiles / abilities / explosions / ranged)
 --   PLAYER   : player info, dodge counter (+reset), Player ESP
 --   SETTINGS : theme, scale, sounds, animations, keybind, reset/unload
 --
--- IMPORTANT: being inside Radius alone does NOT cause a dodge.
--- An attack, real damage, or close contact must happen first.
+-- v3.4 CHANGES
+--   * Dodges EVERYTHING: melee, projectiles, beams, hitboxes, explosions,
+--     moving ability parts, and ranged attack animations.
+--   * Dodge raycast now ignores non-collidable parts (no more short dodges).
+--   * Damage fallback dodges even when no enemy is inside the radius.
 --==================================================================
 
-print("[JAYVEE] Ability Menu v3 loading...")
+print("[JAYVEE] Ability Menu v3.4 loading...")
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -75,6 +79,12 @@ local Settings = {
 	RadiusCircle = true,
 	ContactTriggerDistance = 3.2,
 
+	-- Threat sense (dodge everything)
+	DodgeProjectiles = true,      -- moving parts, beams, hitboxes, abilities
+	DodgeExplosions = true,       -- Explosion instances
+	DodgeRanged = true,           -- enemies attacking from outside the radius
+	ThreatRange = 40,             -- how far away threats are detected
+
 	-- Ability / dodge
 	Ability = "Ultra Instinct",
 	DodgeChance = 100,
@@ -135,6 +145,8 @@ end
 
 local function new(class, props, parent)
 	local o = Instance.new(class)
+	-- tag our own effect parts so the threat sense never reacts to them
+	if o:IsA("BasePart") then o:SetAttribute("JV_FX", true) end
 	if props then
 		for k, v in pairs(props) do o[k] = v end
 	end
@@ -247,8 +259,6 @@ local function playRandomDodgeSound()
 end
 
 -- PIXEL / 8-BIT UI SOUNDS
--- Built from a short built-in ping, pitched into chiptune-style blips + arpeggios.
--- Want your own? Change PIXEL_SRC to any rbxassetid:// 8-bit blip.
 local PIXEL_SRC_LIST = {
 	"rbxasset://sounds/electronicpingshort.wav",
 	"rbxasset://sounds/button.wav",
@@ -358,6 +368,7 @@ local dodging, following, followTarget, followToken = false, false, nil, 0
 local cameraLocked, cameraTarget, bodyLocked = false, nil, false
 local senseCooldown = 0
 local unlocked = false
+local lastOwnAction = 0 -- last time YOU used a tool / pressed an ability key
 
 local function getHum(m) return m and m:FindFirstChildOfClass("Humanoid") end
 local function getRoot(m) return m and m:FindFirstChild("HumanoidRootPart") end
@@ -1016,6 +1027,7 @@ local function createAfterimage(fade)
 			obj.CastShadow = false
 			obj.Material = Enum.Material.Neon
 			obj.Color = Color3.new(1, 1, 1)
+			obj:SetAttribute("JV_FX", true)
 			if obj:IsA("MeshPart") then obj.TextureID = "" end
 			obj.Transparency = (obj.Transparency >= 0.95) and 1 or 0.08
 		elseif obj:IsA("SpecialMesh") then
@@ -1085,7 +1097,7 @@ local function showDodgeIndicator()
 		if my ~= popupToken or not counterGui.Parent then return end
 		tw(counterGui, 0.25, {TextTransparency = 1, TextStrokeTransparency = 1})
 		task.delay(0.26, function()
-			if my == popupToken then counterGui.Visible = false end
+			if my == popupToken and counterGui.Parent then counterGui.Visible = false end
 		end)
 	end)
 end
@@ -1135,7 +1147,7 @@ RunService:BindToRenderStep("JAYVEE_CameraLock", Enum.RenderPriority.Camera.Valu
 		cancelCameraLock()
 		return
 	end
-	if root and (targetRoot.Position - root.Position).Magnitude > Settings.Radius * 2.5 then
+	if root and (targetRoot.Position - root.Position).Magnitude > math.max(Settings.Radius, Settings.ThreatRange) * 2.5 then
 		cancelCameraLock()
 		return
 	end
@@ -1262,8 +1274,55 @@ local ACTIVITY = {
 	Max = {dur = 0.08, lock = 0.02},
 }
 
-local function dodgeDestination(targetRoot)
+-- threat = {dir = Vector3, dist = number, away = bool}
+--   away = false : sidestep perpendicular to dir (projectiles / beams)
+--   away = true  : move along dir (explosions / hitboxes around you)
+local function dodgeDestination(targetRoot, threat)
 	local origin = root.Position
+
+	local ignore = {character, ringFolder}
+	if targetRoot and targetRoot.Parent then table.insert(ignore, targetRoot.Parent) end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = ignore
+	params.RespectCanCollide = true -- ignore effect parts / hitboxes / invisible triggers
+
+	-- shortens a destination so we never go through walls
+	local function clip(dest)
+		dest = Vector3.new(dest.X, origin.Y, dest.Z)
+		local dir = dest - origin
+		if dir.Magnitude > 0.1 then
+			local hit = workspace:Raycast(origin, dir, params)
+			if hit then
+				local back = hit.Position - dir.Unit * 2
+				if (back - origin):Dot(dir) < 0 then return origin end
+				return Vector3.new(back.X, origin.Y, back.Z)
+			end
+		end
+		return dest
+	end
+
+	if threat then
+		local d = Vector3.new(threat.dir.X, 0, threat.dir.Z)
+		if d.Magnitude <= 0.05 then
+			d = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
+		end
+		if d.Magnitude <= 0.05 then d = Vector3.new(0, 0, -1) end
+		d = d.Unit
+		local dist = threat.dist or 8
+		if threat.away then
+			return clip(origin + d * dist)
+		end
+		local perp = Vector3.new(-d.Z, 0, d.X)
+		local a = clip(origin + perp * dist)
+		local b = clip(origin - perp * dist)
+		local la, lb = (a - origin).Magnitude, (b - origin).Magnitude
+		if la >= dist - 0.2 and lb >= dist - 0.2 then
+			return (math.random(1, 2) == 1) and a or b
+		end
+		return (la >= lb) and a or b
+	end
+
 	local dest
 	if targetRoot then
 		local tp = targetRoot.Position
@@ -1286,22 +1345,10 @@ local function dodgeDestination(targetRoot)
 		local side = math.random(1, 2) == 1 and 1 or -1
 		dest = origin + root.CFrame.RightVector * side * 8
 	end
-	dest = Vector3.new(dest.X, origin.Y, dest.Z)
-
-	local ignore = {character}
-	if targetRoot and targetRoot.Parent then table.insert(ignore, targetRoot.Parent) end
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = ignore
-	local dir = dest - origin
-	if dir.Magnitude > 0.1 then
-		local hit = workspace:Raycast(origin, dir, params)
-		if hit then dest = hit.Position - dir.Unit * 2 end
-	end
-	return dest
+	return clip(dest)
 end
 
-local function runDodge(target)
+local function runDodge(target, threat)
 	if dodging then return end
 	if not Settings.Enabled or not Settings.AutoDodge or not Settings.UltraActive then return end
 	if not humanoid or humanoid.Health <= 0 or not root or not root.Parent then return end
@@ -1323,7 +1370,7 @@ local function runDodge(target)
 
 	local act = ACTIVITY[Settings.DodgeActivity] or ACTIVITY.High
 	local startPos = root.Position
-	local destination = dodgeDestination(targetRoot)
+	local destination = dodgeDestination(targetRoot, threat)
 	local startCF = root.CFrame
 	local endCF
 	if targetRoot then
@@ -1362,8 +1409,8 @@ local function runDodge(target)
 	task.delay(act.lock, function() dodging = false end)
 end
 
-local function dodge(target)
-	local ok, err = pcall(runDodge, target)
+local function dodge(target, threat)
+	local ok, err = pcall(runDodge, target, threat)
 	if not ok then
 		warn("[JAYVEE] Dodge error:", err)
 		dodging = false
@@ -1398,8 +1445,8 @@ local function detectAnyEnemyHit(nearby)
 	return found
 end
 
-local ATTACK_WORDS = {"attack", "punch", "kick", "swing", "slash", "hit", "strike", "stab", "bite", "claw", "smash", "combo", "melee", "skill", "slam", "shoot", "fire"}
-local MOVE_WORDS = {"idle", "walk", "run", "jump", "fall", "climb", "swim", "sit", "emote", "dance", "wave", "point", "cheer", "laugh"}
+local ATTACK_WORDS = {"attack", "punch", "kick", "swing", "slash", "hit", "strike", "stab", "bite", "claw", "smash", "combo", "melee", "skill", "slam", "shoot", "fire", "cast", "beam", "blast", "ultimate", "ability", "move", "spell", "throw", "charge", "special", "dash", "m1", "m2"}
+local MOVE_WORDS = {"idle", "walk", "run", "jump", "fall", "climb", "swim", "sit", "emote", "dance", "wave", "point", "cheer", "laugh", "movement"}
 
 local function hasWord(str, list)
 	for _, w in ipairs(list) do
@@ -1408,7 +1455,8 @@ local function hasWord(str, list)
 	return false
 end
 
-local function enemyLooksLikeAttacking(model)
+-- animOnly = true -> only look at animations (used for ranged attackers)
+local function enemyLooksLikeAttacking(model, animOnly)
 	local hum = getHum(model)
 	if not hum then return false end
 
@@ -1421,13 +1469,17 @@ local function enemyLooksLikeAttacking(model)
 		for _, track in ipairs(tracks) do
 			local a = track.Animation
 			local n = string.lower(track.Name .. " " .. (a and a.Name or ""))
-			if hasWord(n, ATTACK_WORDS) then return true end
+			local isMove = hasWord(n, MOVE_WORDS)
+			if hasWord(n, ATTACK_WORDS) and not (isMove and not hasWord(n, {"attack", "punch", "kick", "slash", "skill", "ultimate", "ability"})) then
+				return true
+			end
 			if not track.Looped and track.Priority.Value >= Enum.AnimationPriority.Action.Value
-				and not hasWord(n, MOVE_WORDS) then
+				and not isMove then
 				return true
 			end
 		end
 	end
+	if animOnly then return false end
 
 	local tr = getRoot(model)
 	if tr and root then
@@ -1445,17 +1497,200 @@ local function enemyLooksLikeAttacking(model)
 	return false
 end
 
+--==================================================
+-- THREAT SENSE: projectiles, beams, hitboxes, explosions, ranged attacks
+--==================================================
+local bornAt = setmetatable({}, {__mode = "k"})       -- part -> time it appeared
+local partTrack = setmetatable({}, {__mode = "k"})    -- part -> {pos, t, vel}
+local ignoreCache = setmetatable({}, {__mode = "k"})  -- part -> bool (never a threat)
+local rangedCd = setmetatable({}, {__mode = "k"})     -- model -> next time we may react
+local pendingThreat = nil
+local nextScan = 0
+
+local overlap = OverlapParams.new()
+overlap.FilterType = Enum.RaycastFilterType.Exclude
+overlap.MaxParts = 400
+
+-- parts that can never be a threat (our effects, character limbs, terrain)
+local function ignorePart(p)
+	local c = ignoreCache[p]
+	if c ~= nil then return c end
+	local r = false
+	if p:GetAttribute("JV_FX") or p:IsA("Terrain") then
+		r = true
+	elseif p:FindFirstAncestor("UI_Afterimage") then
+		r = true
+	else
+		local par = p.Parent
+		if par then
+			if par:IsA("Model") and getHum(par) then
+				r = true -- limb of a character (melee is handled by animation / contact)
+			elseif par:IsA("Accoutrement") then
+				r = true
+			end
+		end
+	end
+	ignoreCache[p] = r
+	return r
+end
+
+local function onExplosion(ex)
+	if not Settings.DodgeExplosions or not Settings.UltraActive then return end
+	if not root or not root.Parent or not ex.Parent then return end
+	local away = root.Position - ex.Position
+	local d = away.Magnitude
+	local radius = ex.BlastRadius
+	if d <= radius + 6 then
+		if d < 0.1 then away = root.CFrame.RightVector end
+		pendingThreat = {
+			away = true,
+			dir = Vector3.new(away.X, 0, away.Z),
+			dist = math.clamp(radius - d + 7, 7, 45),
+			time = os.clock(),
+		}
+	end
+end
+
+bind(workspace.DescendantAdded, function(d)
+	if d:IsA("BasePart") then
+		bornAt[d] = os.clock()
+	elseif d:IsA("Explosion") then
+		task.defer(onExplosion, d)
+	end
+end)
+
+-- Looks at every part around you and predicts whether it will hit you
+local function scanThreats(now)
+	if not Settings.DodgeProjectiles or not root or not root.Parent then return nil end
+	local list = {ringFolder}
+	if character then table.insert(list, character) end
+	overlap.FilterDescendantsInstances = list
+
+	local rp = root.Position
+	local ok, parts = pcall(function()
+		return workspace:GetPartBoundsInRadius(rp, Settings.ThreatRange, overlap)
+	end)
+	if not ok or not parts then return nil end
+
+	local ownBusy = (now - lastOwnAction) < 0.6
+	local bestMoving, bestT = nil, math.huge
+	local bestFresh, bestFreshGap = nil, math.huge
+
+	for _, p in ipairs(parts) do
+		if not ignorePart(p) then
+			local pos = p.Position
+			local tr = partTrack[p]
+			local vel = Vector3.zero
+			if tr then
+				local dt = now - tr.t
+				if dt > 0.02 then
+					local delta = pos - tr.pos
+					tr.vel = (delta.Magnitude > 60) and Vector3.zero or (delta / dt)
+					tr.pos, tr.t = pos, now
+				end
+				vel = tr.vel or Vector3.zero
+			else
+				partTrack[p] = {pos = pos, t = now, vel = Vector3.zero}
+			end
+			local av = p.AssemblyLinearVelocity
+			if av.Magnitude > vel.Magnitude then vel = av end
+
+			local rel = rp - pos
+			local dist = rel.Magnitude
+			local size = p.Size
+			local biggest = math.max(size.X, size.Y, size.Z)
+			local halfDiag = size.Magnitude / 2
+			local speed = vel.Magnitude
+
+			-- 1) fast part flying / sliding toward you (projectile, beam, tweened ability)
+			if speed >= 14 and speed < 700 then
+				local vv = vel:Dot(vel)
+				local tca = rel:Dot(vel) / vv
+				if tca > 0 and tca <= 0.6 then
+					local closest = (pos + vel * tca - rp).Magnitude
+					if closest <= biggest / 2 + 4.5 and tca < bestT then
+						bestT = tca
+						bestMoving = {
+							away = false,
+							dir = vel,
+							dist = math.clamp(biggest / 2 + 6, 8, 28),
+						}
+					end
+				end
+			end
+
+			-- 2) brand-new part right next to you (melee hitbox / aura / ground slam)
+			local born = bornAt[p]
+			if born and not ownBusy and (now - born) < 0.5 and not p:IsA("Terrain") then
+				local par = p.Parent
+				local isTool = par and par:IsA("Tool")
+				local gap = math.max(dist - halfDiag, 0)
+				if not isTool and biggest >= 1.5 and gap <= math.min(Settings.Radius, 14) then
+					local closing = (dist > 0.05) and vel:Dot(rel / dist) or 0
+					if closing > -6 and gap < bestFreshGap then
+						bestFreshGap = gap
+						local away = Vector3.new(rel.X, 0, rel.Z)
+						bestFresh = {
+							away = true,
+							dir = away,
+							dist = math.clamp(halfDiag + 6, 8, 25),
+						}
+					end
+				end
+			end
+		end
+	end
+
+	return bestMoving or bestFresh
+end
+
+local function scanRanged(now)
+	if not Settings.DodgeRanged or not root then return nil end
+	local range = math.max(Settings.ThreatRange, Settings.Radius)
+	local found, bd = nil, math.huge
+	eachTarget(function(m)
+		if not isValidTarget(m) then return end
+		if (rangedCd[m] or 0) > now then return end
+		local tr = getRoot(m)
+		local toMe = root.Position - tr.Position
+		local d = toMe.Magnitude
+		if d <= Settings.Radius or d > range or d < 0.1 then return end
+		if tr.CFrame.LookVector:Dot(toMe.Unit) < 0.3 then return end -- not facing you
+		if enemyLooksLikeAttacking(m, true) and d < bd then
+			bd, found = d, m
+		end
+	end)
+	if found then rangedCd[found] = now + 1.2 end
+	return found
+end
+
+--==================================================
+-- SENSE STEP
+--==================================================
 local function senseStep()
-	if not Settings.Enabled or not Settings.AutoDodge or not Settings.UltraActive then return end
+	if not Settings.Enabled or not Settings.AutoDodge or not Settings.UltraActive then
+		pendingThreat = nil
+		return
+	end
 	if dodging or not root or not root.Parent then return end
 	if not humanoid or humanoid.Health <= 0 then return end
 	local now = os.clock()
 	if now < senseCooldown then return end
 
-	local nearby = getAllNearbyTargets()
-	if #nearby == 0 then return end
+	-- projectiles / abilities / hitboxes / explosions
+	local threat
+	if pendingThreat then
+		if now - pendingThreat.time < 0.5 then threat = pendingThreat end
+		pendingThreat = nil
+	end
+	if not threat and now >= nextScan then
+		nextScan = now + 0.03
+		threat = scanThreats(now)
+	end
 
-	local hitTarget = detectAnyEnemyHit(nearby)
+	-- melee / damage / contact
+	local nearby = getAllNearbyTargets()
+	local hitTarget = (#nearby > 0) and detectAnyEnemyHit(nearby) or nil
 	local contact, attack, attacker = false, false, nil
 	for _, model in ipairs(nearby) do
 		local tr = getRoot(model)
@@ -1473,13 +1708,19 @@ local function senseStep()
 		end
 	end
 
-	if not (hitTarget or contact or attack) then return end
+	-- ranged attackers outside the radius
+	local ranged
+	if not (hitTarget or contact or attack or threat) then
+		ranged = scanRanged(now)
+	end
 
-	local chosen = hitTarget or attacker or getEnemyInsideRadius() or nearby[1]
+	if not (hitTarget or contact or attack or threat or ranged) then return end
+
+	local chosen = hitTarget or attacker or ranged or getEnemyInsideRadius() or nearby[1]
 	local w = Settings.PerfectDodgeWindow
-	senseCooldown = now + w * (attack and 0.5 or contact and 0.75 or 1.2)
-	lockCameraToTarget(chosen)
-	dodge(chosen)
+	senseCooldown = now + w * (threat and 0.4 or attack and 0.5 or contact and 0.75 or ranged and 0.8 or 1.2)
+	if chosen then lockCameraToTarget(chosen) end
+	dodge(chosen, (not hitTarget and not attack and not contact) and threat or nil)
 end
 
 --==================================================
@@ -1488,6 +1729,7 @@ end
 local function hookTool(tool)
 	if not tool:IsA("Tool") then return end
 	tool.Activated:Connect(function()
+		lastOwnAction = os.clock()
 		local target = getEnemyInsideRadius()
 		if target then lockCameraToTarget(target) end
 	end)
@@ -1503,17 +1745,38 @@ local function hookDamage()
 	if not humanoid then return end
 	lastHealth = humanoid.Health
 	damageConnection = humanoid.HealthChanged:Connect(function(newHealth)
-		if lastHealth and newHealth < lastHealth
+		if lastHealth and newHealth < lastHealth - 0.5
 			and Settings.Enabled and Settings.AutoDodge and Settings.UltraActive then
-			local enemyInside = getEnemyInsideRadius()
-			if enemyInside then
-				lockCameraToTarget(enemyInside)
+			local st = humanoid:GetState()
+			local fallDamage = (st == Enum.HumanoidStateType.Freefall or st == Enum.HumanoidStateType.Landed)
+			if not fallDamage then
+				-- damage from anything (even unseen sources): dodge again right away
+				local enemyInside = getEnemyInsideRadius()
+				if enemyInside then lockCameraToTarget(enemyInside) end
+				senseCooldown = 0
 				task.defer(dodge, enemyInside)
 			end
 		end
 		lastHealth = newHealth
 	end)
 end
+
+-- remember when YOU used an ability (so our own hitboxes don't trigger a dodge)
+local MOVE_KEYS = {
+	[Enum.KeyCode.W] = true, [Enum.KeyCode.A] = true, [Enum.KeyCode.S] = true, [Enum.KeyCode.D] = true,
+	[Enum.KeyCode.Space] = true, [Enum.KeyCode.Up] = true, [Enum.KeyCode.Down] = true,
+	[Enum.KeyCode.Left] = true, [Enum.KeyCode.Right] = true, [Enum.KeyCode.Thumbstick1] = true,
+	[Enum.KeyCode.LeftShift] = true, [Enum.KeyCode.RightShift] = true,
+}
+bind(UIS.InputBegan, function(input, processed)
+	if processed then return end
+	local t = input.UserInputType
+	if t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.MouseButton2 then
+		lastOwnAction = os.clock()
+	elseif t == Enum.UserInputType.Keyboard and not MOVE_KEYS[input.KeyCode] then
+		lastOwnAction = os.clock()
+	end
+end)
 
 --==================================================
 -- CUSTOM MOVEMENT (Arczis walk/run animation adapter)
@@ -1836,7 +2099,7 @@ local titleLabel = new("TextLabel", {
 local titleGradient = new("UIGradient", {}, titleLabel)
 local subLabel = new("TextLabel", {
 	BackgroundTransparency = 1, Size = UDim2.new(1, -290, 0, 18), Position = UDim2.fromOffset(26, 46),
-	Text = "JAYVEE  -  POWER SYSTEM  -  v3.3", Font = Enum.Font.GothamBold, TextSize = 10,
+	Text = "JAYVEE  -  POWER SYSTEM  -  v3.4", Font = Enum.Font.GothamBold, TextSize = 10,
 	TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = COL.sub,
 }, header)
 
@@ -2097,7 +2360,7 @@ do
 	local about = makeCard(p, "ABOUT THE SCRIPT", "What it does")
 	infoText(about, function()
 		return "- Ultra Instinct with manual ON/OFF and a chat intro when activated.\n"
-			.. "- Smart auto-dodge: reacts to enemy attacks, real damage or close contact.\n"
+			.. "- Dodges EVERYTHING: melee, projectiles, beams, hitboxes, explosions, ranged abilities.\n"
 			.. "- Purple detection circle with live radius control; enemies inside turn red.\n"
 			.. "- Follow system that keeps you glued to the enemy after each dodge.\n"
 			.. "- Dodge counter with reset, plus Player ESP (names, health, distance, boxes).\n"
@@ -2107,7 +2370,7 @@ do
 	local how = makeCard(p, "HOW TO USE", "Quick start")
 	infoText(how, function()
 		return "1. Open ABILITY and switch ULTRA INSTINCT on.\n"
-			.. "2. Tune radius, dodge chance and follow to your taste.\n"
+			.. "2. Tune radius, dodge chance, threat sense and follow to your taste.\n"
 			.. "3. Use PLAYER for ESP and your dodge counter.\n"
 			.. "4. Use SETTINGS to change theme, size and sounds.\n"
 			.. "Tip: press RightShift (or tap the UI bubble) to hide / show the menu."
@@ -2116,16 +2379,16 @@ do
 	local status = makeCard(p, "LIVE STATUS", "Updates in real time")
 	infoText(status, function()
 		return string.format(
-			"System: %s\nUltra Instinct: %s\nRadius: %s studs\nDodges: %d\nESP: %s\nTheme: %s",
+			"System: %s\nUltra Instinct: %s\nRadius: %s studs\nThreat range: %s studs\nDodges: %d\nESP: %s\nTheme: %s",
 			Settings.Enabled and "READY" or "OFF",
 			Settings.UltraActive and "ON" or "OFF",
-			fmt(Settings.Radius), Settings.DodgeCount,
+			fmt(Settings.Radius), fmt(Settings.ThreatRange), Settings.DodgeCount,
 			Settings.ESPEnabled and "ON" or "OFF", theme().name)
 	end, true, 12)
 
 	local credits = makeCard(p, "CREDITS", nil)
 	infoText(credits, function()
-		return "Creator: JAYVEE\nStatus: ONLINE - Ability System Ready\nVersion: 3.0"
+		return "Creator: JAYVEE\nStatus: ONLINE - Ability System Ready\nVersion: 3.4"
 	end)
 end
 
@@ -2154,7 +2417,17 @@ do
 	stepperRow(c2, "CONTACT DISTANCE", function() return fmt(Settings.ContactTriggerDistance) end,
 		adjust("ContactTriggerDistance", 0.5, 1, 10))
 	infoText(c2, function()
-		return "Being inside the radius alone does NOT trigger a dodge. An attack, real damage or close contact must happen first."
+		return "Being inside the radius alone does NOT trigger a dodge. An attack, real damage, close contact or an incoming ability must happen first."
+	end, false, 10)
+
+	local c5 = makeCard(p, "THREAT SENSE", "Dodge everything - not just melee")
+	toggleRow(c5, "PROJECTILES / ABILITIES", function() return Settings.DodgeProjectiles end, function(v) Settings.DodgeProjectiles = v end)
+	toggleRow(c5, "EXPLOSIONS", function() return Settings.DodgeExplosions end, function(v) Settings.DodgeExplosions = v end)
+	toggleRow(c5, "RANGED ATTACKS", function() return Settings.DodgeRanged end, function(v) Settings.DodgeRanged = v end)
+	stepperRow(c5, "THREAT RANGE", function() return fmt(Settings.ThreatRange) end,
+		adjust("ThreatRange", 5, 10, 80))
+	infoText(c5, function()
+		return "Detects fast parts flying at you, beams, new hitboxes, explosions and enemies casting from far away. Dodges sideways or away from the danger."
 	end, false, 10)
 
 	local c3 = makeCard(p, "DODGE", "How Ultra Instinct reacts")
@@ -2347,7 +2620,8 @@ do
 		end
 
 		updateRedMarks()
-		senseStep()
+		local okS, errS = pcall(senseStep)
+		if not okS then warn("[JAYVEE] Sense error:", errS) end
 
 		espAcc += dt
 		if espAcc >= 0.1 then
@@ -2436,4 +2710,4 @@ security.Visible = true
 main.Visible = false
 minimized.Visible = false
 
-print("[JAYVEE] Ability Menu v3 loaded - Security screen should be visible.")
+print("[JAYVEE] Ability Menu v3.4 loaded - Security screen should be visible.")
