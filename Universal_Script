@@ -68,7 +68,7 @@ local U = {} -- helper functions live here (Luau allows only 200 locals per scop
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local SCRIPT_VERSION = "v4.0"
+local SCRIPT_VERSION = "v4.1"
 local VERSION_MAJOR = SCRIPT_VERSION:match("%d+") or "4"
 local PASSWORD_PREFIX = "ULTRAINSTINCTBYJAYVEE"
 local PASSWORD = PASSWORD_PREFIX .. "V" .. VERSION_MAJOR
@@ -429,8 +429,12 @@ local gui = new("ScreenGui", {
 --==================================================
 local character, humanoid, root, lastHealth, damageConnection
 local dodging, following, followTarget, followToken = false, false, nil, 0
+local dodgeToken = 0
 local cameraLocked, cameraTarget, bodyLocked = false, nil, false
 local senseCooldown = 0
+local pendingThreat = nil
+local nextScan = 0
+local nextRanged = 0
 local unlocked = false
 local lastOwnAction = 0 -- last time YOU used a tool / pressed an ability key
 local applyScale
@@ -1350,7 +1354,23 @@ local function ultraCinematic(enabled)
 end
 
 local function setUltra(on)
-	if Settings.UltraActive == on then return end
+	on = on == true
+	if Settings.UltraActive == on then
+		if not on then
+			dodgeToken += 1
+			dodging = false
+			following = false
+			followToken += 1
+			followTarget = nil
+			pendingThreat = nil
+			U.cancelCameraLock()
+			if humanoid then pcall(function() humanoid.AutoRotate = true end) end
+		end
+		U.refreshBodyAura()
+		U.refreshAll()
+		return
+	end
+
 	Settings.UltraActive = on
 	if on then
 		ultraCinematic(true)
@@ -1358,21 +1378,30 @@ local function setUltra(on)
 		if Settings.ChatIntro then U.ultraChatIntro() end
 		U.auraBurst()
 	else
-		ultraCinematic(false)
-		U.play("toggleOff")
+		-- HARD OFF: invalidate any running dodge/follow task immediately.
+		dodgeToken += 1
+		dodging = false
 		following = false
 		followToken += 1
 		followTarget = nil
+		pendingThreat = nil
+		senseCooldown = 0
+		nextScan = 0
+		nextRanged = 0
+		ultraCinematic(false)
+		U.play("toggleOff")
 		U.cancelCameraLock()
+		if humanoid then pcall(function() humanoid.AutoRotate = true end) end
 	end
 	U.refreshBodyAura()
+	U.refreshAll()
 end
 
 --==================================================
 -- FOLLOW
 --==================================================
 function U.startFollow(target)
-	if not Settings.FollowAfterDodge or not target then return end
+	if not Settings.Enabled or not Settings.UltraActive or not Settings.FollowAfterDodge or not target then return end
 	local targetRoot, targetHum = U.getRoot(target), U.getHum(target)
 	if not targetRoot or not targetHum then return end
 
@@ -1500,6 +1529,8 @@ local function runDodge(target, threat)
 	if math.random(1, 100) > Settings.DodgeChance then return end
 
 	dodging = true
+	dodgeToken += 1
+	local myDodgeToken = dodgeToken
 	followToken += 1
 	following = false
 
@@ -1532,6 +1563,10 @@ local function runDodge(target, threat)
 	local ghosts = 0
 	local start = os.clock()
 	while true do
+		if myDodgeToken ~= dodgeToken or not Settings.UltraActive or not Settings.Enabled then
+			dodging = false
+			return
+		end
 		local a = math.clamp((os.clock() - start) / act.dur, 0, 1)
 		local e = 1 - (1 - a) ^ 3
 		if root and root.Parent then
@@ -1546,12 +1581,19 @@ local function runDodge(target, threat)
 		RunService.RenderStepped:Wait()
 	end
 
+	if myDodgeToken ~= dodgeToken or not Settings.UltraActive or not Settings.Enabled then
+		dodging = false
+		return
+	end
+
 	U.createTrail(startPos + Vector3.new(0, 1, 0), destination + Vector3.new(0, 1, 0))
 	U.smokePuff(destination)
 
-	if target then U.startFollow(target) end
+	if target and Settings.UltraActive and Settings.Enabled then U.startFollow(target) end
 
-	task.delay(act.lock, function() dodging = false end)
+	task.delay(act.lock, function()
+		if myDodgeToken == dodgeToken then dodging = false end
+	end)
 end
 
 local function dodge(target, threat)
@@ -1652,10 +1694,6 @@ local bornAt = setmetatable({}, {__mode = "k"})       -- part -> time it appeare
 local partTrack = setmetatable({}, {__mode = "k"})    -- part -> {pos, t, vel}
 local ignoreCache = setmetatable({}, {__mode = "k"})  -- part -> bool (never a threat)
 local rangedCd = setmetatable({}, {__mode = "k"})     -- model -> next time we may react
-local pendingThreat = nil
-local nextScan = 0
-local nextRanged = 0
-
 local overlap = OverlapParams.new()
 overlap.FilterType = Enum.RaycastFilterType.Exclude
 overlap.MaxParts = 800
@@ -2853,7 +2891,11 @@ do
 	U.toggleRow(c1, "ULTRA INSTINCT", function() return Settings.UltraActive end, setUltra)
 	U.toggleRow(c1, "SYSTEM", function() return Settings.Enabled end, function(v)
 		Settings.Enabled = v
-		U.refreshBodyAura()
+		if not v and Settings.UltraActive then
+			setUltra(false)
+		else
+			U.refreshBodyAura()
+		end
 	end)
 	U.toggleRow(c1, "AUTO DODGE", function() return Settings.AutoDodge end, function(v) Settings.AutoDodge = v end)
 	U.toggleRow(c1, "CAMERA LOCK", function() return Settings.CameraLock end, function(v)
@@ -3095,6 +3137,9 @@ end
 --==================================================
 unloadFn = function()
 	Settings.UltraActive = false
+	dodgeToken += 1
+	dodging = false
+	pendingThreat = nil
 	following = false
 	followToken += 1
 	for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
