@@ -1,5 +1,5 @@
 --==================================================================
--- ABILITY MENU - JAYVEE  (v4.0)
+-- ABILITY MENU - JAYVEE  (v4.2)
 -- Own-game LocalScript
 -- Place in: StarterPlayer > StarterPlayerScripts
 --
@@ -10,6 +10,24 @@
 --   PLAYER   : player info, dodge counter (+reset), Player ESP
 --   SETTINGS : theme, scale, sounds, animations, keybind, reset/unload
 --
+-- v4.2 CHANGES
+--   BUG FIXES
+--   * Ultra Instinct ON crashed (ultraFxToken was never declared) - fixed.
+--   * Dragging the UI bubble made it jump to the top-left - fixed.
+--   * Tapping a tab while a search was active threw you back to another tab - fixed.
+--   * Search matched hidden RichText tags ("font", "color") on every row - fixed.
+--   * SIZE drag re-tweened every toggle on every mouse move (lag) - fixed.
+--   * Custom walk/run toggle did nothing until you respawned - fixed.
+--   * Credits showed an old version number; SIZE range now matches the stepper.
+--   * Spamming UNLOCK with a wrong key made the security box drift - fixed.
+--   * Access key ignores spaces / letter case (mobile keyboards add them).
+--   MAIN UI
+--   * Drag the header to move the menu (the Settings text promised it).
+--   * Tap a card title to collapse / expand it.
+--   * Tap the ULTRA pill in the header for a quick ON / OFF.
+--   * Search clear (X) button, "no results on this tab" hint, Enter to unlock.
+--   * Hover feedback on buttons, theme-colored SIZE / MOVE buttons.
+--
 -- v3.4 CHANGES
 --   * Dodges EVERYTHING: melee, projectiles, beams, hitboxes, explosions,
 --     moving ability parts, and ranged attack animations.
@@ -17,7 +35,7 @@
 --   * Damage fallback dodges even when no enemy is inside the radius.
 --==================================================================
 
-print("[JAYVEE] Ability Menu v4.0 loading...")
+print("[JAYVEE] Ability Menu v4.2 loading...")
 
 -- On-screen status banner: shows "loading", "loaded" or the exact ERROR on your screen.
 local function JV_Banner(text, isError)
@@ -68,7 +86,7 @@ local U = {} -- helper functions live here (Luau allows only 200 locals per scop
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local SCRIPT_VERSION = "v4.1"
+local SCRIPT_VERSION = "v4.2"
 local VERSION_MAJOR = SCRIPT_VERSION:match("%d+") or "4"
 local PASSWORD_PREFIX = "ULTRAINSTINCTBYJAYVEE"
 local PASSWORD = PASSWORD_PREFIX .. "V" .. VERSION_MAJOR
@@ -201,7 +219,7 @@ local function new(class, props, parent)
 		o.TextSize = math.floor(o.TextSize * PIXEL_TEXT_BOOST + 0.5)
 	end
 	if parent then
-		if o:IsA("GuiObject") then
+		if o:IsA("GuiObject") and not (props and props.LayoutOrder) then
 			local n = (parent:GetAttribute("_n") or 0) + 1
 			parent:SetAttribute("_n", n)
 			o.LayoutOrder = n
@@ -365,6 +383,24 @@ function U.play(key)
 	end
 end
 
+-- Keeps a frame fully on-screen. Uses AbsolutePosition/AbsoluteSize, so anchor points,
+-- scale-based positions and UIScale are all handled by Roblox instead of guessed.
+function U.clampGui(frame, margin)
+	if not frame or not frame.Parent then return end
+	local cam = workspace.CurrentCamera
+	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
+	if vp.X < 200 or vp.Y < 200 then return end
+	margin = margin or 8
+	local absPos, absSize = frame.AbsolutePosition, frame.AbsoluteSize
+	local x = math.clamp(absPos.X, margin, math.max(margin, vp.X - absSize.X - margin))
+	local y = math.clamp(absPos.Y, margin, math.max(margin, vp.Y - absSize.Y - margin))
+	if math.abs(x - absPos.X) > 0.5 or math.abs(y - absPos.Y) > 0.5 then
+		local pos = frame.Position
+		frame.Position = UDim2.new(pos.X.Scale, pos.X.Offset + (x - absPos.X),
+			pos.Y.Scale, pos.Y.Offset + (y - absPos.Y))
+	end
+end
+
 -- Draggable (mobile friendly). Optional bounds callback keeps the frame on-screen.
 function U.draggable(frame, handle, canDrag)
 	handle = handle or frame
@@ -392,23 +428,8 @@ function U.draggable(frame, handle, canDrag)
 		if delta.Magnitude > 6 then st.moved = true end
 		local nextPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
 			startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-		if frame:GetAttribute("JV_ClampToViewport") then
-			local cam = workspace.CurrentCamera
-			local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
-			local abs = frame.AbsoluteSize
-			local halfW, halfH = abs.X * 0.5, abs.Y * 0.5
-			local margin = 6
-			local center = Vector2.new(vp.X * 0.5 + nextPos.X.Offset, vp.Y * 0.5 + nextPos.Y.Offset)
-			if frame.AnchorPoint.X ~= 0.5 then center = Vector2.new(nextPos.X.Offset + abs.X * frame.AnchorPoint.X, center.Y) end
-			if frame.AnchorPoint.Y ~= 0.5 then center = Vector2.new(center.X, nextPos.Y.Offset + abs.Y * frame.AnchorPoint.Y) end
-			center = Vector2.new(math.clamp(center.X, margin + halfW, vp.X - margin - halfW), math.clamp(center.Y, margin + halfH, vp.Y - margin - halfH))
-			if frame.AnchorPoint.X == 0.5 and frame.AnchorPoint.Y == 0.5 then
-				nextPos = UDim2.fromOffset(center.X - vp.X * 0.5, center.Y - vp.Y * 0.5)
-			else
-				nextPos = UDim2.fromOffset(center.X - abs.X * frame.AnchorPoint.X, center.Y - abs.Y * frame.AnchorPoint.Y)
-			end
-		end
 		frame.Position = nextPos
+		if frame:GetAttribute("JV_ClampToViewport") then U.clampGui(frame, 6) end
 	end)
 	return st
 end
@@ -550,6 +571,7 @@ local auraLight, auraRings = nil, {}
 local visualCharacter = nil
 local nextBolt = 0
 local fovBusy = false
+local ultraFxToken = 0 -- was missing: ultraCinematic() crashed on every Ultra ON/OFF
 
 local auraAlpha = Instance.new("NumberValue")
 auraAlpha.Value = 0
@@ -2070,20 +2092,37 @@ function U.makeCard(page, title, sub)
 	}, c)
 	new("UIListLayout", {Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder}, c)
 
-	local t = new("TextLabel", {
-		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 18), Text = title,
+	local t = new("TextButton", {
+		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 18), Text = title, AutoButtonColor = false,
 		Font = Enum.Font.GothamBlack, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left,
 		TextColor3 = Color3.new(1, 1, 1),
 	}, c)
+	local arrow = new("TextLabel", {
+		BackgroundTransparency = 1, AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, 0, 0.5, 0),
+		Size = UDim2.fromOffset(18, 18), Text = "-", Font = Enum.Font.GothamBlack, TextSize = 14,
+		TextColor3 = COL.sub,
+	}, t)
+	local subLbl
 	if sub then
-		new("TextLabel", {
+		subLbl = new("TextLabel", {
 			BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 14), Text = sub,
 			Font = Enum.Font.Gotham, TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left,
 			TextColor3 = COL.sub, TextTruncate = Enum.TextTruncate.AtEnd,
 		}, c)
 	end
+	-- tap the card title to collapse / expand the card
+	local collapsed = false
+	t.Activated:Connect(function()
+		collapsed = not collapsed
+		for _, ch in ipairs(c:GetChildren()) do
+			if ch:IsA("GuiObject") and ch ~= t and ch ~= subLbl then ch.Visible = not collapsed end
+		end
+		arrow.Text = collapsed and "+" or "-"
+		U.play("click")
+	end)
 	U.reg(function()
 		t.TextColor3 = theme().a
+		arrow.TextColor3 = theme().a
 		st.Color = theme().b
 	end)
 	return c
@@ -2221,26 +2260,7 @@ function U.fitScale(w, h, extra)
 end
 
 local function clampGuiToViewport(frame, margin)
-	if not frame or not frame.Parent then return end
-	local cam = workspace.CurrentCamera
-	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
-	if vp.X < 200 or vp.Y < 200 then return end
-	margin = margin or 8
-
-	-- AbsolutePosition/AbsoluteSize are used here so UIScale, mobile aspect ratios,
-	-- and the GUI inset are accounted for by Roblox instead of guessed from offsets.
-	local absPos = frame.AbsolutePosition
-	local absSize = frame.AbsoluteSize
-	local maxX = math.max(margin, vp.X - absSize.X - margin)
-	local maxY = math.max(margin, vp.Y - absSize.Y - margin)
-	local x = math.clamp(absPos.X, margin, maxX)
-	local y = math.clamp(absPos.Y, margin, maxY)
-
-	if math.abs(x - absPos.X) > 0.5 or math.abs(y - absPos.Y) > 0.5 then
-		local delta = Vector2.new(x - absPos.X, y - absPos.Y)
-		local pos = frame.Position
-		frame.Position = UDim2.new(pos.X.Scale, pos.X.Offset + delta.X, pos.Y.Scale, pos.Y.Offset + delta.Y)
-	end
+	U.clampGui(frame, margin)
 end
 
 local security = new("Frame", {
@@ -2333,11 +2353,14 @@ local subLabel = new("TextLabel", {
 	TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = COL.sub,
 }, header)
 
-local ultraPill = new("TextLabel", {
+local ultraPill = new("TextButton", {
 	AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -108, 0, 22), Size = UDim2.fromOffset(124, 28),
 	Font = Enum.Font.GothamBlack, TextSize = 10, Text = "", BackgroundColor3 = COL.off,
 }, header)
 U.corner(ultraPill, 14)
+ultraPill.AutoButtonColor = false
+-- quick ON / OFF straight from the header
+ultraPill.Activated:Connect(function() setUltra(not Settings.UltraActive) end)
 
 function U.headerBtn(x, text)
 	local b = new("TextButton", {
@@ -2350,6 +2373,11 @@ function U.headerBtn(x, text)
 end
 local minimizeBtn = U.headerBtn(-52, "-")
 local closeBtn = U.headerBtn(-10, "X")
+
+-- drag the header to move the menu (stays on-screen)
+header.Active = true
+main:SetAttribute("JV_ClampToViewport", true)
+U.draggable(main, header)
 
 local glowLine = new("Frame", {
 	Position = UDim2.fromOffset(18, 74), Size = UDim2.new(1, -36, 0, 2),
@@ -2388,7 +2416,13 @@ local searchBox = new("TextBox", {
 	Selectable = true,
 }, toolBar)
 U.corner(searchBox, 10)
-local searchPad = new("UIPadding", {PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 10)}, searchBox)
+local searchPad = new("UIPadding", {PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 30)}, searchBox)
+local searchClear = new("TextButton", {
+	AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -6, 0.5, 0), Size = UDim2.fromOffset(22, 22),
+	BackgroundTransparency = 1, Text = "X", TextColor3 = COL.sub, Font = Enum.Font.GothamBlack,
+	TextSize = 11, Visible = false, AutoButtonColor = false,
+}, searchBox)
+searchClear.Activated:Connect(function() searchBox.Text = "" end)
 
 local function toolButton(parent, x, width, label)
 	local b = new("TextButton", {
@@ -2500,7 +2534,7 @@ moveBtn.InputBegan:Connect(function(input)
 	moveHeld = true
 	moveStart = input.Position
 	moveOrigin = main.Position
-	moveBtn.BackgroundColor3 = THEMES[1].b
+	moveBtn.BackgroundColor3 = theme().b
 	U.play("click")
 	input.Changed:Connect(function()
 		if input.UserInputState == Enum.UserInputState.End then
@@ -2577,60 +2611,68 @@ local function smartSearchScore(query, hay)
 	return matched == 0 and 0 or (score + matched * 25)
 end
 
-local function searchHaystack(pageName, child)
+local function searchHaystack(pageName, child, aliasText)
 	local parts = {pageName, child.Name}
 	for _, d in ipairs(child:GetDescendants()) do
 		if d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox") then
-			parts[#parts + 1] = d.Text or ""
+			-- strip RichText tags so a query like "color" does not match every stepper row
+			parts[#parts + 1] = (tostring(d.Text or ""):gsub("<[^>]+>", ""))
 		end
 	end
-	local base = table.concat(parts, " ")
-	local q = normalizeSearch(searchBox.Text)
-	for token in q:gmatch("%S+") do
-		for alias, words in pairs(SEARCH_ALIASES) do
-			if token == alias then base ..= " " .. table.concat(words, " ") end
-		end
-	end
-	return base
+	return table.concat(parts, " ") .. aliasText
 end
 
-local function applyMenuSearch()
+-- noJump = true: just re-filter the tab you are on (used when you tap a tab)
+local function applyMenuSearch(noJump)
 	local q = normalizeSearch(searchBox.Text)
-	local firstMatch, bestScore = nil, -1
-	for pageName, page in pairs(pages) do
-		local pageMatch = false
-		for _, child in ipairs(page:GetChildren()) do
-			if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then
-				local score = smartSearchScore(q, searchHaystack(pageName, child))
-				local match = q == "" or score > 0
-				child.Visible = match
-				if match then pageMatch = true end
-				if q ~= "" and score > bestScore then bestScore, firstMatch = score, pageName end
-			end
-		end
-		if q ~= "" and pageMatch and not firstMatch then firstMatch = pageName end
+	searchClear.Visible = searchBox.Text ~= ""
+
+	local aliasText = ""
+	for token in q:gmatch("%S+") do
+		local words = SEARCH_ALIASES[token]
+		if words then aliasText ..= " " .. table.concat(words, " ") end
 	end
-	searchEmpty.Visible = (q ~= "" and not firstMatch)
-	if q ~= "" and firstMatch then
-		if firstMatch ~= currentPage then U.showPage(firstMatch) end
-	else
-		if q == "" then
-			for _, page in pairs(pages) do
-				for _, child in ipairs(page:GetChildren()) do
-					if child:IsA("GuiObject") and not child:IsA("UIListLayout") and not child:IsA("UIPadding") then child.Visible = true end
+
+	local hits, bestOf = {}, {}
+	local bestPage, bestScore, total = nil, 0, 0
+	for pageName, page in pairs(pages) do
+		for _, child in ipairs(page:GetChildren()) do
+			if child:IsA("GuiObject") then
+				local score = (q == "") and 1 or smartSearchScore(q, searchHaystack(pageName, child, aliasText))
+				child.Visible = score > 0
+				if score > 0 then
+					total += 1
+					hits[pageName] = (hits[pageName] or 0) + 1
+					bestOf[pageName] = math.max(bestOf[pageName] or 0, score)
+					if score > bestScore then bestScore, bestPage = score, pageName end
 				end
 			end
 		end
+	end
+
+	-- only leave the current tab when it has no match, or another tab is an exact phrase match
+	if q ~= "" and not noJump and bestPage and bestPage ~= currentPage then
+		local here = bestOf[currentPage] or 0
+		if here == 0 or (bestScore >= 900 and here < 900) then
+			U.showPage(bestPage)
+		end
+	end
+
+	local empty = (q ~= "") and ((hits[currentPage] or 0) == 0)
+	searchEmpty.Visible = empty
+	if empty then
+		searchEmpty.Text = (total > 0) and "NO MATCHES ON THIS TAB\nCheck the other tabs"
+			or "NO RESULTS\nTry another keyword"
 	end
 	content.CanvasPosition = Vector2.new(0, 0)
 end
 
 searchBox:GetPropertyChangedSignal("Text"):Connect(function()
-	applyMenuSearch()
+	applyMenuSearch(false)
 end)
 for _, b in pairs(tabButtons) do
 	b.Activated:Connect(function()
-		task.defer(applyMenuSearch)
+		task.defer(applyMenuSearch, true)
 	end)
 end
 
@@ -2650,7 +2692,7 @@ local minDrag = U.draggable(minimized)
 
 -- DRAG-SIZE: drag the SIZE button left/right to resize continuously.
 -- No cycling and no ON/OFF state.
-local SIZE_MIN, SIZE_MAX = 0.70, 1.30
+local SIZE_MIN, SIZE_MAX = 0.60, 1.40 -- same range as the MENU SIZE stepper
 local sizeDragging, sizeStartX, sizeStartValue = false, 0, Settings.MenuScale
 local function refreshSizeButton()
 	sizeBtn.Text = string.format("SIZE %d%%", math.floor(Settings.MenuScale * 100 + 0.5))
@@ -2662,12 +2704,12 @@ sizeBtn.InputBegan:Connect(function(input)
 	sizeDragging = true
 	sizeStartX = input.Position.X
 	sizeStartValue = Settings.MenuScale
-	sizeBtn.BackgroundColor3 = THEMES[1].b
+	sizeBtn.BackgroundColor3 = theme().b
 	U.play("click")
 	input.Changed:Connect(function()
 		if input.UserInputState == Enum.UserInputState.End then
 			sizeDragging = false
-			sizeBtn.BackgroundColor3 = Color3.fromRGB(28, 25, 38)
+			U.refreshAll() -- sync the SETTINGS stepper once, on release
 		end
 	end)
 end)
@@ -2678,8 +2720,6 @@ bind(UIS.InputChanged, function(input)
 	Settings.MenuScale = math.clamp(sizeStartValue + delta / 420, SIZE_MIN, SIZE_MAX)
 	refreshSizeButton()
 	applyScale()
-	U.refreshAll()
-	main:SetAttribute("JV_ClampToViewport", true)
 end)
 refreshSizeButton()
 
@@ -2768,10 +2808,16 @@ local function addClickFX(b)
 	if not b:IsA("TextButton") or b:GetAttribute("FX") then return end
 	b:SetAttribute("FX", true)
 	local s = new("UIScale", {Name = "ClickScale", Scale = 1}, b)
+	local solid = b.BackgroundTransparency < 1
+	local hover = false
 	b.Activated:Connect(function()
 		s.Scale = 0.95
-		U.tw(s, 0.2, {Scale = 1}, Enum.EasingStyle.Back)
+		U.tw(s, 0.2, {Scale = (hover and solid) and 1.02 or 1}, Enum.EasingStyle.Back)
 	end)
+	if solid then -- subtle hover grow on PC
+		b.MouseEnter:Connect(function() hover = true; U.tw(s, 0.12, {Scale = 1.02}) end)
+		b.MouseLeave:Connect(function() hover = false; U.tw(s, 0.12, {Scale = 1}) end)
+	end
 end
 for _, o in ipairs(main:GetDescendants()) do addClickFX(o) end
 main.DescendantAdded:Connect(addClickFX)
@@ -2862,7 +2908,7 @@ do
 			.. "2. Tune radius, dodge chance, threat sense and follow to your taste.\n"
 			.. "3. Use PLAYER for ESP and your dodge counter.\n"
 			.. "4. Use SETTINGS to change theme, size and sounds.\n"
-			.. "Tip: press RightShift (or tap the UI bubble) to hide / show the menu."
+			.. "Tip: RightShift (or the UI bubble) hides / shows the menu. Tap a card title to collapse it, tap the ULTRA pill for a quick ON / OFF."
 	end)
 
 	local status = U.makeCard(p, "LIVE STATUS", "Updates in real time")
@@ -2877,7 +2923,7 @@ do
 
 	local credits = U.makeCard(p, "CREDITS", nil)
 	U.infoText(credits, function()
-		return "Creator: JAYVEE\nStatus: ONLINE - Ability System Ready\nVersion: 3.5"
+		return "Creator: JAYVEE\nStatus: ONLINE - Ability System Ready\nVersion: " .. SCRIPT_VERSION
 	end)
 end
 
@@ -3051,12 +3097,12 @@ do
 	local c4 = U.makeCard(p, "CHARACTER", nil)
 	U.toggleRow(c4, "CUSTOM WALK / RUN ANIMATION", function() return Settings.CustomMovement end, function(v)
 		Settings.CustomMovement = v
-		if not v then Arczis.Stop() end
+		if not v then Arczis.Stop() elseif character then task.spawn(Arczis.Setup, character) end
 	end)
 
 	local c5 = U.makeCard(p, "CONTROLS", nil)
 	U.infoText(c5, function()
-		return "Hide / show menu: RightShift (PC) or tap the UI bubble.\nDrag the header to move the menu.\nThe menu auto-fits your screen size."
+		return "Hide / show menu: RightShift (PC) or tap the UI bubble.\nDrag the header (or hold MOVE) to move the menu.\nTap a card title to collapse it.\nThe menu auto-fits your screen size."
 	end, false, 11)
 
 	local c6 = U.makeCard(p, "DATA", "Reset or unload")
@@ -3090,7 +3136,8 @@ U.reg(function()
 		b.TextColor3 = (n == currentPage) and Color3.new(1, 1, 1) or COL.sub
 	end
 	sizeBtn.Text = string.format("SIZE %d%%", math.floor(Settings.MenuScale * 100 + 0.5))
-	moveBtn.BackgroundColor3 = moveMode and theme().b or Color3.fromRGB(28, 25, 38)
+	moveBtn.BackgroundColor3 = moveHeld and theme().b or Color3.fromRGB(28, 25, 38)
+	sizeBtn.BackgroundColor3 = sizeDragging and theme().b or Color3.fromRGB(28, 25, 38)
 end)
 
 --==================================================
@@ -3171,12 +3218,12 @@ shared.JAYVEE_AbilityMenu_Destroy = unloadFn
 --==================================================
 -- UNLOCK FLOW:  Security -> Password -> Loading -> Menu
 --==================================================
-local unlocking = false
-unlockBtn.Activated:Connect(function()
-	if unlocking then return end
+local unlocking, shaking = false, false
+local function tryUnlock()
+	if unlocking or shaking then return end
 	U.play(clickSound)
 
-	if passBox.Text == expectedPassword() then
+	if string.upper((passBox.Text:gsub("%s+", ""))) == string.upper(expectedPassword()) then
 		unlocking = true
 		secStatus.Text = "ACCESS GRANTED - LOADING..."
 		secStatus.TextColor3 = Color3.fromRGB(175, 255, 195)
@@ -3196,13 +3243,20 @@ unlockBtn.Activated:Connect(function()
 		U.play("error")
 		secStatus.Text = "ACCESS DENIED - INVALID KEY"
 		secStatus.TextColor3 = Color3.fromRGB(255, 120, 130)
+		shaking = true
 		local old = security.Position
 		U.tw(security, 0.07, {Position = old + UDim2.fromOffset(8, 0)}, Enum.EasingStyle.Linear)
 		task.wait(0.07)
 		U.tw(security, 0.07, {Position = old - UDim2.fromOffset(8, 0)}, Enum.EasingStyle.Linear)
 		task.wait(0.07)
 		U.tw(security, 0.07, {Position = old}, Enum.EasingStyle.Linear)
+		task.wait(0.07)
+		shaking = false
 	end
+end
+unlockBtn.Activated:Connect(tryUnlock)
+passBox.FocusLost:Connect(function(enterPressed)
+	if enterPressed then tryUnlock() end
 end)
 
 -- INITIALIZE
