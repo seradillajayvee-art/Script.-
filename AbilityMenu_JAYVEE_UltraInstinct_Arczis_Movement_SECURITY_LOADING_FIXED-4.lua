@@ -1447,6 +1447,27 @@ local function getRoot(model)
 	return model and model:FindFirstChild("HumanoidRootPart")
 end
 
+-- Tracks ALL humanoid models in workspace (players + bots/NPCs, kahit nasa loob ng folder).
+local targetModels = {}
+local function trackHumanoid(h)
+	if h:IsA("Humanoid") then
+		local m = h.Parent
+		if m and m:IsA("Model") then targetModels[m] = true end
+	end
+end
+for _, d in ipairs(workspace:GetDescendants()) do trackHumanoid(d) end
+workspace.DescendantAdded:Connect(function(d) task.defer(trackHumanoid, d) end)
+
+local function eachTarget(fn)
+	for m in pairs(targetModels) do
+		if not m.Parent or not m:IsDescendantOf(workspace) then
+			targetModels[m] = nil
+		elseif m ~= character then
+			fn(m)
+		end
+	end
+end
+
 -- ================================================================
 -- TARGET / ATTACK DETECTION
 -- Radius alone is NOT a dodge trigger. Attack/contact/damage is.
@@ -1471,17 +1492,7 @@ local function getEnemyInsideRadius()
 		end
 	end
 
-	for _, other in ipairs(Players:GetPlayers()) do
-		if other ~= player then
-			consider(other.Character)
-		end
-	end
-
-	for _, obj in ipairs(workspace:GetChildren()) do
-		if obj:IsA("Model") and not Players:GetPlayerFromCharacter(obj) then
-			consider(obj)
-		end
-	end
+	eachTarget(consider)
 
 	return nearest, best
 end
@@ -1831,12 +1842,7 @@ local function markEnemiesRed()
 			end
 		end)
 	end
-	for _, other in ipairs(Players:GetPlayers()) do
-		if other ~= player then mark(other.Character) end
-	end
-	for _, obj in ipairs(workspace:GetChildren()) do
-		if obj:IsA("Model") and not Players:GetPlayerFromCharacter(obj) then mark(obj) end
-	end
+	eachTarget(mark)
 end
 
 local function stopEffect()
@@ -2235,12 +2241,7 @@ local function getAllNearbyTargets()
 			table.insert(list, model)
 		end
 	end
-	for _, other in ipairs(Players:GetPlayers()) do
-		if other ~= player then add(other.Character) end
-	end
-	for _, obj in ipairs(workspace:GetChildren()) do
-		if obj:IsA("Model") then add(obj) end
-	end
+	eachTarget(add)
 	return list
 end
 
@@ -2261,47 +2262,67 @@ local function detectEnemyHit(target)
 end
 
 local function detectAnyEnemyHit()
-	for _, other in ipairs(Players:GetPlayers()) do
-		if other ~= player and other.Character and getRoot(other.Character) then
-			local tr = getRoot(other.Character)
-			if root and (tr.Position - root.Position).Magnitude <= Settings.Radius then
-				if detectEnemyHit(other.Character) then
-					return other.Character
-				end
-			end
+	if not root then return nil end
+	local found
+	eachTarget(function(m)
+		if found or not isValidTarget(m) then return end
+		local tr = getRoot(m)
+		if (tr.Position - root.Position).Magnitude <= Settings.Radius then
+			if detectEnemyHit(m) then found = m end
 		end
+	end)
+	return found
+end
+
+local ATTACK_WORDS = {"attack","punch","kick","swing","slash","hit","strike","stab","bite","claw","smash","combo","melee","m1","skill","slam","shoot","fire"}
+local MOVE_WORDS = {"idle","walk","run","jump","fall","climb","swim","sit","emote","dance","wave","point","cheer","laugh"}
+
+local function hasWord(str, list)
+	for _, w in ipairs(list) do
+		if str:find(w, 1, true) then return true end
 	end
-	for _, obj in ipairs(workspace:GetChildren()) do
-		if obj:IsA("Model") and obj ~= character and not Players:GetPlayerFromCharacter(obj) then
-			local tr = getRoot(obj)
-			if tr and root and (tr.Position - root.Position).Magnitude <= Settings.Radius then
-				if detectEnemyHit(obj) then
-					return obj
-				end
-			end
-		end
-	end
-	return nil
+	return false
 end
 
 local function enemyLooksLikeAttacking(model)
 	local hum = getHum(model)
 	if not hum then return false end
 
-	for _, track in ipairs(hum:GetPlayingAnimationTracks()) do
-		local a = track.Animation
-		local n = string.lower(track.Name .. " " .. (a and a.AnimationId or ""))
-		if n:find("attack") or n:find("punch") or n:find("kick") or n:find("swing") or n:find("slash") or n:find("hit") then
-			return true
+	-- Works sa players at bots (Animator / AnimationController / Humanoid).
+	local animator = hum:FindFirstChildOfClass("Animator")
+		or model:FindFirstChildWhichIsA("Animator", true)
+	local ok, tracks = pcall(function()
+		if animator then return animator:GetPlayingAnimationTracks() end
+		return hum:GetPlayingAnimationTracks()
+	end)
+	if ok and tracks then
+		for _, track in ipairs(tracks) do
+			local a = track.Animation
+			local n = string.lower(track.Name .. " " .. (a and a.Name or ""))
+			if hasWord(n, ATTACK_WORDS) then
+				return true
+			end
+			-- Bots na iba ang pangalan ng animation: non-looping action animation = attack.
+			if not track.Looped and track.Priority.Value >= Enum.AnimationPriority.Action.Value
+				and not hasWord(n, MOVE_WORDS) then
+				return true
+			end
 		end
 	end
 
 	local tr = getRoot(model)
 	if tr and root then
 		local toPlayer = root.Position - tr.Position
-		if toPlayer.Magnitude > 0.1 then
+		local dist = toPlayer.Magnitude
+		if dist > 0.1 then
+			-- rumaragasa palapit sa'yo
 			local closing = tr.AssemblyLinearVelocity:Dot(toPlayer.Unit)
 			if closing > 8 then return true end
+			-- bot na malapit, nakaharap sa'yo, at gumagalaw papunta sa'yo (melee bot)
+			if dist <= Settings.ContactTriggerDistance + 3 then
+				local facing = tr.CFrame.LookVector:Dot(toPlayer.Unit)
+				if facing > 0.6 and closing > 3 then return true end
+			end
 		end
 	end
 
@@ -2362,15 +2383,13 @@ end)
 local function nearestEnemy()
 	local best, bestDist
 	if not root then return nil end
-	for _,m in ipairs(workspace:GetChildren()) do
-		if m:IsA("Model") and m ~= character then
-			local hum=getHum(m); local tr=getRoot(m)
-			if hum and tr and hum.Health>0 then
-				local d=(tr.Position-root.Position).Magnitude
-				if d<=Settings.Radius and (not bestDist or d<bestDist) then best,bestDist=m,d end
-			end
+	eachTarget(function(m)
+		local hum, tr = getHum(m), getRoot(m)
+		if hum and tr and hum.Health > 0 then
+			local d = (tr.Position - root.Position).Magnitude
+			if d <= Settings.Radius and (not bestDist or d < bestDist) then best, bestDist = m, d end
 		end
-	end
+	end)
 	return best
 end
 
