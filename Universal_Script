@@ -1,5 +1,5 @@
 --==================================================================
--- ABILITY MENU - JAYVEE  (v5.4)
+-- ABILITY MENU - JAYVEE  (v5.5)
 -- Own-game LocalScript
 -- Place in: StarterPlayer > StarterPlayerScripts
 --
@@ -9,6 +9,14 @@
 --              THREAT SENSE (dodge projectiles / abilities / explosions / ranged)
 --   PLAYER   : player info, dodge counter (+reset), Player ESP
 --   SETTINGS : theme, scale, sounds, animations, keybind, reset/unload
+--
+-- v5.5 CHANGES
+--   * FIX: Ultra Instinct no longer dodges when the enemy is merely inside the circle.
+--     Melee / attack animations only count inside DODGE REACH (new stepper, default 6 studs).
+--   * New SECURITY screen + full LOADING SCREEN (progress, stages, tips, particles).
+--   * SETTINGS > CUSTOMIZE: Background / Icon / Security -> IMPORT (PNG / JPG / BMP only).
+--     Images auto-fit (no stretching) and the UI theme color stays on top (colorable).
+--   * SETTINGS > DATA: SAVE (writes every setting) next to RESET (back to last save / defaults).
 --
 -- v5.4 CHANGES
 --   * Delta local Intro.mp3 / Outro.mp3 support (lazy-loaded; no startup preload).
@@ -42,7 +50,7 @@
 --   * Damage fallback dodges even when no enemy is inside the radius.
 --==================================================================
 
-print("[JAYVEE] Ability Menu v5.4 loading...")
+print("[JAYVEE] Ability Menu v5.5 loading...")
 
 -- On-screen status banner: shows "loading", "loaded" or the exact ERROR on your screen.
 local function JV_Banner(text, isError)
@@ -93,7 +101,7 @@ local U = {} -- helper functions live here (Luau allows only 200 locals per scop
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local SCRIPT_VERSION = "v5.4"
+local SCRIPT_VERSION = "v5.5"
 local VERSION_MAJOR = SCRIPT_VERSION:match("%d+") or "4"
 local PASSWORD_PREFIX = "ULTRAINSTINCTBYJAYVEE"
 local PASSWORD = PASSWORD_PREFIX .. "V" .. VERSION_MAJOR
@@ -193,6 +201,13 @@ local Settings = {
 	AutoDodgeChat = true,
 	AutoDodgeChatEvery = 5,
 	CustomMovement = false,
+
+	-- v5.5
+	AttackReach = 6,              -- melee / attack animations only trigger a dodge inside this distance
+	BgImage = "",                 -- imported background (file path in the executor workspace)
+	IconImage = "",               -- imported icon
+	SecImage = "",                -- imported security / loading background
+	ImageTint = 0.6,              -- transparency of the theme color laid over imported images
 }
 
 local Defaults = table.clone(Settings)
@@ -201,6 +216,103 @@ local UI_KEYS = {
 	"AnimationSpeed", "IntroAnimation", "BorderGlow", "DodgePopup",
 	"ChatIntro", "AutoDodgeChat", "AutoDodgeChatEvery", "CustomMovement",
 }
+
+--==================================================
+-- SAVE / RESET STORAGE  (executor file functions are optional; falls back to memory)
+--==================================================
+U.DIR = "JAYVEE_Menu"
+U.IMG_DIR = "JAYVEE_Menu/images"
+U.SAVE_FILE = "JAYVEE_Menu/settings.json"
+U.NO_SAVE = {UltraActive = true, DodgeCount = true, MinRadius = true, MaxRadius = true, RadiusStep = true}
+U.CHOICES = {
+	IntroAnimation = {"Back", "Quint", "Elastic", "Linear"},
+	DodgeAnimation = {"Side Burst", "Backstep", "Blink"},
+	DodgeActivity = {"Low", "Normal", "High", "Max"},
+	FollowMode = {"Behind", "Side"},
+}
+
+function U.fsReady()
+	return type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
+end
+
+function U.ensureDir(path)
+	pcall(function()
+		if type(makefolder) == "function" and type(isfolder) == "function" and not isfolder(path) then
+			makefolder(path)
+		end
+	end)
+end
+
+-- copy of every saveable setting (numbers / booleans / strings only)
+function U.snapshot(source)
+	local t = {}
+	for k, v in pairs(source or Settings) do
+		local tv = type(v)
+		if not U.NO_SAVE[k] and (tv == "number" or tv == "boolean" or tv == "string") then t[k] = v end
+	end
+	return t
+end
+
+function U.saveToDisk(snap)
+	shared.JAYVEE_SavedSettings = table.clone(snap) -- memory copy (works without file functions)
+	if not U.fsReady() then return false end
+	U.ensureDir(U.DIR)
+	local ok = pcall(function()
+		writefile(U.SAVE_FILE, game:GetService("HttpService"):JSONEncode(snap))
+	end)
+	return ok
+end
+
+function U.loadSaved()
+	local data
+	if U.fsReady() then
+		pcall(function()
+			if isfile(U.SAVE_FILE) then
+				data = game:GetService("HttpService"):JSONDecode(readfile(U.SAVE_FILE))
+			end
+		end)
+	end
+	if type(data) ~= "table" then data = shared.JAYVEE_SavedSettings end
+	if type(data) ~= "table" then return nil end
+	return data
+end
+
+-- copies only known keys with the right type, then clamps everything to a safe range
+function U.applySnapshot(snap)
+	for k, v in pairs(snap) do
+		if not U.NO_SAVE[k] and Settings[k] ~= nil and type(Settings[k]) == type(v) then
+			if type(v) ~= "number" or (v == v and v > -1e9 and v < 1e9) then Settings[k] = v end
+		end
+	end
+	Settings.MenuScale = math.clamp(Settings.MenuScale, 0.6, 1.4)
+	Settings.UITransparency = math.clamp(Settings.UITransparency, 0, 0.5)
+	Settings.UIVolume = math.clamp(Settings.UIVolume, 0, 1)
+	Settings.AnimationSpeed = math.clamp(Settings.AnimationSpeed, 0.2, 0.9)
+	Settings.Radius = math.clamp(Settings.Radius, Settings.MinRadius, Settings.MaxRadius)
+	Settings.DodgeChance = math.clamp(Settings.DodgeChance, 0, 100)
+	Settings.AttackReach = math.clamp(Settings.AttackReach, 2, 14)
+	Settings.ImageTint = math.clamp(Settings.ImageTint, 0.1, 0.9)
+	Settings.ThreatRange = math.clamp(Settings.ThreatRange, 10, 80)
+	Settings.ContactTriggerDistance = math.clamp(Settings.ContactTriggerDistance, 1, 10)
+	Settings.PerfectDodgeWindow = math.clamp(Settings.PerfectDodgeWindow, 0.1, 0.8)
+	Settings.AuraIntensity = math.clamp(Settings.AuraIntensity, 0.5, 2)
+	Settings.FollowDuration = math.clamp(Settings.FollowDuration, 1, 15)
+	Settings.FollowDistance = math.clamp(Settings.FollowDistance, 1, 10)
+	Settings.FollowSpeed = math.clamp(Settings.FollowSpeed, 0.06, 0.3)
+	for _, key in ipairs({"ThemeIndex", "AuraTintIndex", "ESPColorIndex"}) do
+		Settings[key] = math.max(1, math.floor(Settings[key]))
+	end
+	for key, list in pairs(U.CHOICES) do
+		if not table.find(list, Settings[key]) then Settings[key] = Defaults[key] end
+	end
+end
+
+-- load what the player saved last time
+U.Saved = U.loadSaved()
+if U.Saved then
+	pcall(U.applySnapshot, U.Saved)
+	U.Saved = U.snapshot()
+end
 
 --==================================================
 -- HELPERS
@@ -1987,7 +2099,7 @@ function U.scanThreats(now)
 				local par = p.Parent
 				local isTool = par and par:IsA("Tool")
 				local gap = math.max(dist - halfDiag, 0)
-				if not isTool and biggest >= 1.5 and gap <= math.min(Settings.Radius, 14)
+				if not isTool and biggest >= 1.5 and gap <= math.min(Settings.Radius, math.max(Settings.AttackReach or 6, 4))
 					and (not p.CanCollide or speed >= 4) then
 					local closing = (dist > 0.05) and vel:Dot(rel / dist) or 0
 					if closing > -6 and gap < bestFreshGap then
@@ -2053,7 +2165,13 @@ local function senseStep()
 
 	-- melee / damage / contact
 	local nearby = U.getAllNearbyTargets()
+	-- melee / attack reactions only count when the enemy is really close (fixes dodging from far away)
+	local reach = math.max(Settings.AttackReach or 6, Settings.ContactTriggerDistance)
 	local hitTarget = (#nearby > 0) and U.detectAnyEnemyHit(nearby) or nil
+	if hitTarget then
+		local htr = U.getRoot(hitTarget)
+		if not htr or (htr.Position - root.Position).Magnitude > reach + 2 then hitTarget = nil end
+	end
 	local contact, attack, attacker = false, false, nil
 	for _, model in ipairs(nearby) do
 		local tr = U.getRoot(model)
@@ -2065,7 +2183,7 @@ local function senseStep()
 				contact = true
 				attacker = attacker or model
 			end
-			if U.facingMe(tr, 0.3) and U.enemyLooksLikeAttacking(model) then
+			if d <= reach and U.facingMe(tr, 0.3) and U.enemyLooksLikeAttacking(model) then
 				attack = true
 				attacker = model
 			end
@@ -2289,6 +2407,7 @@ function U.makeCard(page, title, sub)
 		t.TextColor3 = theme().a
 		arrow.TextColor3 = theme().a
 		st.Color = theme().b
+		c.BackgroundTransparency = (U.IMG and U.IMG.hasBg) and 0.3 or 0.05
 	end)
 	return c
 end
@@ -2428,34 +2547,130 @@ local function clampGuiToViewport(frame, margin)
 	U.clampGui(frame, margin)
 end
 
+U.IMG = {icons = {}, cache = {}, hasBg = false}
+U.SEC = {dots = {}, tweens = {}}
+
+-- Round / rounded icon that shows either the imported icon image or a text fallback
+function U.makeIcon(parent, props)
+	local z = props.ZIndex or 1
+	local holder = new("Frame", {
+		Name = "Icon", AnchorPoint = props.AnchorPoint or Vector2.new(0, 0),
+		Position = props.Position or UDim2.new(), Size = props.Size or UDim2.fromOffset(60, 60),
+		BackgroundColor3 = Color3.fromRGB(20, 18, 30), BorderSizePixel = 0, ZIndex = z,
+		BackgroundTransparency = props.Transparent and 1 or 0,
+	}, parent)
+	U.corner(holder, props.Corner or 999)
+	local lbl = new("TextLabel", {
+		BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Text = props.Text or "JV",
+		Font = Enum.Font.GothamBlack, TextSize = props.TextSize or 22, TextColor3 = Color3.new(1, 1, 1),
+		ZIndex = z + 1,
+	}, holder)
+	local img = new("ImageLabel", {
+		BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ScaleType = Enum.ScaleType.Crop,
+		Image = "", Visible = false, ZIndex = z + 2,
+	}, holder)
+	U.corner(img, props.Corner or 999)
+	table.insert(U.IMG.icons, {img = img, label = lbl, holder = holder})
+	return holder, lbl, img
+end
+
 local security = new("Frame", {
 	Name = "Security", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
-	Size = UDim2.fromOffset(420, 310), BackgroundColor3 = Color3.fromRGB(12, 11, 17),
-	BackgroundTransparency = 0.02, Visible = true, ZIndex = 200,
+	Size = UDim2.fromOffset(460, 400), BackgroundColor3 = Color3.new(1, 1, 1),
+	BackgroundTransparency = 0, Visible = true, ZIndex = 200, ClipsDescendants = true,
 }, gui)
 U.corner(security, 22)
+U.SEC.bgGrad = new("UIGradient", {Rotation = 90, Color = ColorSequence.new(
+	Color3.fromRGB(24, 19, 40), Color3.fromRGB(8, 7, 12))}, security)
+
+-- imported SECURITY background (auto-fit / fills the panel) + theme tint so it stays colorable
+U.IMG.secImg = new("ImageLabel", {
+	Name = "SecBackground", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1),
+	ScaleType = Enum.ScaleType.Crop, Image = "", Visible = false, ZIndex = 200,
+}, security)
+U.corner(U.IMG.secImg, 22)
+U.IMG.secTint = new("Frame", {
+	Name = "SecTint", Size = UDim2.fromScale(1, 1), BackgroundColor3 = THEMES[1].b,
+	BackgroundTransparency = Settings.ImageTint, BorderSizePixel = 0, Visible = false, ZIndex = 200,
+}, security)
+U.corner(U.IMG.secTint, 22)
+
+-- floating particles
+for i = 1, 12 do
+	local d = new("Frame", {
+		Size = UDim2.fromOffset(3, 3), BackgroundColor3 = THEMES[1].a, BackgroundTransparency = 0.55,
+		BorderSizePixel = 0, ZIndex = 201,
+		Position = UDim2.fromOffset(math.random(14, 444), math.random(120, 380)),
+	}, security)
+	U.corner(d, 2)
+	table.insert(U.SEC.dots, d)
+	local tw = TweenService:Create(d, TweenInfo.new(1.8 + math.random() * 2, Enum.EasingStyle.Sine,
+		Enum.EasingDirection.InOut, -1, true, math.random() * 1.5),
+		{Position = d.Position - UDim2.fromOffset(0, math.random(20, 44)), BackgroundTransparency = 0.95})
+	tw:Play()
+	table.insert(U.SEC.tweens, tw)
+end
+
+-- scanning line
+U.SEC.scan = new("Frame", {
+	Size = UDim2.new(1, 0, 0, 2), Position = UDim2.fromOffset(0, 0), BackgroundColor3 = THEMES[1].a,
+	BackgroundTransparency = 0.3, BorderSizePixel = 0, ZIndex = 201,
+}, security)
+new("UIGradient", {Transparency = NumberSequence.new({
+	NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.5, 0), NumberSequenceKeypoint.new(1, 1),
+})}, U.SEC.scan)
+do
+	local tw = TweenService:Create(U.SEC.scan, TweenInfo.new(2.6, Enum.EasingStyle.Sine,
+		Enum.EasingDirection.InOut, -1, true), {Position = UDim2.new(0, 0, 1, -2)})
+	tw:Play()
+	table.insert(U.SEC.tweens, tw)
+end
+
 local secDragHandle = new("Frame", {
-	Size = UDim2.new(1, 0, 0, 72), BackgroundTransparency = 1, Active = true, ZIndex = 202,
+	Size = UDim2.new(1, 0, 0, 130), BackgroundTransparency = 1, Active = true, ZIndex = 203,
 }, security)
 local secStroke = stroke(security, 2, 0)
 local secGradient = new("UIGradient", {}, secStroke)
-local secScale = new("UIScale", {Scale = U.fitScale(420, 310)}, security)
+local secScale = new("UIScale", {Scale = U.fitScale(460, 400)}, security)
 U.draggable(security, secDragHandle)
 
 local passBox, unlockBtn, secStatus, loadBar
 do
-	new("TextLabel", {
-		BackgroundTransparency = 1, Size = UDim2.new(1, -30, 0, 40), Position = UDim2.fromOffset(15, 16),
-		Text = "SECURITY", Font = Enum.Font.GothamBlack, TextSize = 28, TextColor3 = Color3.new(1, 1, 1),
+	-- spinning ring + icon
+	local ring = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0, 76),
+		Size = UDim2.fromOffset(100, 100), BackgroundTransparency = 1, ZIndex = 201,
+	}, security)
+	U.corner(ring, 50)
+	local ringStroke = stroke(ring, 3, 0)
+	U.SEC.ringGrad = new("UIGradient", {Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(0.45, 0.1),
+		NumberSequenceKeypoint.new(0.55, 1), NumberSequenceKeypoint.new(1, 1),
+	})}, ringStroke)
+	U.makeIcon(security, {
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0, 76),
+		Size = UDim2.fromOffset(78, 78), ZIndex = 201, Text = "JV", TextSize = 24,
+	})
+
+	local title = new("TextLabel", {
+		BackgroundTransparency = 1, Size = UDim2.new(1, -30, 0, 40), Position = UDim2.fromOffset(15, 132),
+		Text = "SECURITY", Font = Enum.Font.GothamBlack, TextSize = 30, TextColor3 = Color3.new(1, 1, 1),
 		ZIndex = 201,
 	}, security)
+	U.SEC.titleGrad = new("UIGradient", {}, title)
 	new("TextLabel", {
-		BackgroundTransparency = 1, Size = UDim2.new(1, -30, 0, 20), Position = UDim2.fromOffset(15, 54),
-		Text = "ACCESS KEY REQUIRED  -  JAYVEE", Font = Enum.Font.GothamBold, TextSize = 11,
+		BackgroundTransparency = 1, Size = UDim2.new(1, -30, 0, 18), Position = UDim2.fromOffset(15, 176),
+		Text = "ACCESS KEY REQUIRED  -  JAYVEE", Font = Enum.Font.GothamBold, TextSize = 10,
 		TextColor3 = COL.sub, ZIndex = 201,
 	}, security)
+	U.SEC.chips = new("TextLabel", {
+		BackgroundTransparency = 1, Size = UDim2.new(1, -30, 0, 16), Position = UDim2.fromOffset(15, 196),
+		Text = "ULTRA INSTINCT  |  THREAT SENSE  |  AUTO DODGE", Font = Enum.Font.GothamBold, TextSize = 8,
+		TextColor3 = THEMES[1].a, ZIndex = 201,
+	}, security)
+
 	passBox = new("TextBox", {
-		Size = UDim2.new(1, -40, 0, 48), Position = UDim2.fromOffset(20, 96),
+		Size = UDim2.new(1, -48, 0, 48), Position = UDim2.fromOffset(24, 224),
 		PlaceholderText = "ENTER ACCESS KEY", Text = "", ClearTextOnFocus = false,
 		Font = Enum.Font.GothamBold, TextSize = 13, TextColor3 = Color3.new(1, 1, 1),
 		TextEditable = true, Active = true, Selectable = true,
@@ -2463,29 +2678,66 @@ do
 		ZIndex = 201,
 	}, security)
 	U.corner(passBox, 13)
+	U.SEC.passStroke = stroke(passBox, 1.5, 0.35)
 	unlockBtn = new("TextButton", {
-		Size = UDim2.new(1, -40, 0, 48), Position = UDim2.fromOffset(20, 156), Text = "UNLOCK",
+		Size = UDim2.new(1, -48, 0, 48), Position = UDim2.fromOffset(24, 282), Text = "UNLOCK",
 		Font = Enum.Font.GothamBlack, TextSize = 13, TextColor3 = Color3.new(1, 1, 1),
 		BackgroundColor3 = THEMES[1].b, AutoButtonColor = false, ZIndex = 201,
 	}, security)
 	U.corner(unlockBtn, 13)
+	local unlockScale = new("UIScale", {Scale = 1}, unlockBtn)
+	unlockBtn.MouseEnter:Connect(function() U.tw(unlockScale, 0.12, {Scale = 1.03}) end)
+	unlockBtn.MouseLeave:Connect(function() U.tw(unlockScale, 0.12, {Scale = 1}) end)
+	unlockBtn.MouseButton1Down:Connect(function() unlockScale.Scale = 0.96 end)
+	unlockBtn.MouseButton1Up:Connect(function() U.tw(unlockScale, 0.18, {Scale = 1.03}, Enum.EasingStyle.Back) end)
+
 	secStatus = new("TextLabel", {
-		BackgroundTransparency = 1, Size = UDim2.new(1, -40, 0, 24), Position = UDim2.fromOffset(20, 214),
+		BackgroundTransparency = 1, Size = UDim2.new(1, -40, 0, 22), Position = UDim2.fromOffset(20, 338),
 		Text = "SECURE - WAITING FOR ACCESS", Font = Enum.Font.GothamBold, TextSize = 10,
-		TextColor3 = Color3.fromRGB(145, 140, 165), ZIndex = 201,
+		TextColor3 = Color3.fromRGB(145, 140, 165), ZIndex = 201, TextWrapped = true,
 	}, security)
 	local barBg = new("Frame", {
-		Position = UDim2.fromOffset(20, 252), Size = UDim2.new(1, -40, 0, 6),
-		BackgroundColor3 = Color3.fromRGB(30, 28, 42), ZIndex = 201, Visible = true,
+		Position = UDim2.fromOffset(24, 370), Size = UDim2.new(1, -48, 0, 6),
+		BackgroundColor3 = Color3.fromRGB(30, 28, 42), ZIndex = 201, Visible = true, BorderSizePixel = 0,
 	}, security)
 	U.corner(barBg, 3)
-	loadBar = new("Frame", {Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = THEMES[1].a, ZIndex = 202}, barBg)
+	loadBar = new("Frame", {
+		Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = THEMES[1].a, ZIndex = 202, BorderSizePixel = 0,
+	}, barBg)
 	U.corner(loadBar, 3)
+	new("TextLabel", {
+		BackgroundTransparency = 1, Size = UDim2.new(1, -30, 0, 14), Position = UDim2.fromOffset(15, 382),
+		Text = "JAYVEE  -  " .. SCRIPT_VERSION, Font = Enum.Font.GothamBold, TextSize = 7,
+		TextColor3 = Color3.fromRGB(110, 105, 130), ZIndex = 201,
+	}, security)
 end
+
+-- theme colors for the security screen
+U.reg(function()
+	local t = theme()
+	U.SEC.bgGrad.Color = ColorSequence.new(Color3.fromRGB(24, 19, 40):Lerp(t.b, 0.3), Color3.fromRGB(8, 7, 12))
+	U.IMG.secTint.BackgroundColor3 = t.b
+	U.IMG.secTint.BackgroundTransparency = Settings.ImageTint
+	U.SEC.ringGrad.Color = ColorSequence.new(t.a, t.b)
+	U.SEC.titleGrad.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, t.a), ColorSequenceKeypoint.new(0.5, Color3.new(1, 1, 1)),
+		ColorSequenceKeypoint.new(1, t.a),
+	})
+	U.SEC.scan.BackgroundColor3 = t.a
+	U.SEC.passStroke.Color = t.b
+	U.SEC.chips.TextColor3 = t.a
+	for _, d in ipairs(U.SEC.dots) do d.BackgroundColor3 = t.a end
+end)
 
 -- typing / focus blips on the security screen
 passBox:GetPropertyChangedSignal("Text"):Connect(function() U.play("type") end)
-passBox.Focused:Connect(function() U.play("click") end)
+passBox.Focused:Connect(function()
+	U.play("click")
+	U.tw(U.SEC.passStroke, 0.15, {Thickness = 3, Transparency = 0})
+end)
+passBox.FocusLost:Connect(function()
+	U.tw(U.SEC.passStroke, 0.15, {Thickness = 1.5, Transparency = 0.35})
+end)
 
 --==================================================
 -- MAIN WINDOW
@@ -2501,6 +2753,18 @@ local mainStroke = stroke(main, 2, 0)
 local mainStrokeGradient = new("UIGradient", {}, mainStroke)
 local mainBg = new("UIGradient", {Rotation = 90}, main)
 local mainScale = new("UIScale", {Scale = U.fitScale(MAIN_W, MAIN_H, Settings.MenuScale)}, main)
+
+-- imported BACKGROUND (auto-fit, drawn under everything) + theme tint so the menu stays colorable
+U.IMG.bg = new("ImageLabel", {
+	Name = "BgImage", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1),
+	ScaleType = Enum.ScaleType.Crop, Image = "", Visible = false, ZIndex = 0,
+}, main)
+U.corner(U.IMG.bg, 24)
+U.IMG.bgTint = new("Frame", {
+	Name = "BgTint", Size = UDim2.fromScale(1, 1), BackgroundColor3 = THEMES[1].b,
+	BackgroundTransparency = Settings.ImageTint, BorderSizePixel = 0, Visible = false, ZIndex = 0,
+}, main)
+U.corner(U.IMG.bgTint, 24)
 
 function U.targetScale() return U.fitScale(MAIN_W, MAIN_H, Settings.MenuScale) end
 
@@ -2850,6 +3114,10 @@ local minimized = new("TextButton", {
 	BackgroundColor3 = THEMES[1].b, Visible = false, AutoButtonColor = false,
 }, gui)
 U.corner(minimized, 20)
+minimized.Text = ""
+U.makeIcon(minimized, {
+	Size = UDim2.fromScale(1, 1), Corner = 20, Text = "UI", TextSize = 16, ZIndex = 1, Transparent = true,
+})
 minimized:SetAttribute("JV_ClampToViewport", true)
 local minStroke = stroke(minimized, 2, 0)
 local minGradient = new("UIGradient", {}, minStroke)
@@ -2952,7 +3220,7 @@ applyScale = function()
 	if not animating then
 		if menuOpen then mainScale.Scale = U.targetScale() end
 	end
-	secScale.Scale = U.fitScale(420, 310)
+	secScale.Scale = U.fitScale(460, 400)
 	task.defer(function()
 		clampGuiToViewport(main, 6)
 		clampGuiToViewport(minimized, 6)
@@ -3034,7 +3302,11 @@ end)
 -- Idle animations (border spin, title shimmer)
 bind(RunService.RenderStepped, function()
 	local t = os.clock()
-	if security.Visible then secGradient.Rotation = (t * 80) % 360 end
+	if security.Visible then
+		secGradient.Rotation = (t * 80) % 360
+		U.SEC.ringGrad.Rotation = (t * 140) % 360
+		U.SEC.titleGrad.Offset = Vector2.new(((t * 0.5) % 2) - 1, 0)
+	end
 	if main.Visible then
 		mainStrokeGradient.Rotation = (t * 60) % 360
 		titleGradient.Offset = Vector2.new(((t * 0.5) % 2) - 1, 0)
@@ -3121,8 +3393,10 @@ do
 	U.toggleRow(c2, "RADIUS CIRCLE", function() return Settings.RadiusCircle end, function(v) Settings.RadiusCircle = v end)
 	U.stepperRow(c2, "CONTACT DISTANCE", function() return U.fmt(Settings.ContactTriggerDistance) end,
 		U.adjust("ContactTriggerDistance", 0.5, 1, 10))
+	U.stepperRow(c2, "DODGE REACH", function() return U.fmt(Settings.AttackReach) end,
+		U.adjust("AttackReach", 0.5, 2, 14))
 	U.infoText(c2, function()
-		return "Being inside the radius alone does NOT trigger a dodge. An attack, real damage, close contact or an incoming ability must happen first."
+		return "Being inside the radius alone does NOT trigger a dodge. The enemy must attack inside DODGE REACH, touch you, hurt you, or send an ability at you first."
 	end, false, 10)
 
 	local c5 = U.makeCard(p, "THREAT SENSE", "Dodge everything - not just melee")
@@ -3227,6 +3501,590 @@ do
 end
 
 --==================================================
+-- IMAGE IMPORT: BACKGROUND / ICON / SECURITY
+-- Images are copied into <executor workspace>/JAYVEE_Menu/images, validated (PNG / JPG / BMP only)
+-- and shown with ScaleType.Crop = auto-fit with no stretching. A theme color overlay stays on top,
+-- so the UI is still colorable.
+--==================================================
+U.IMG.kinds = {
+	Background = {key = "BgImage", name = "BACKGROUND"},
+	Icon = {key = "IconImage", name = "ICON"},
+	Security = {key = "SecImage", name = "SECURITY"},
+}
+U.IMG.exts = {png = true, jpg = true, jpeg = true, bmp = true}
+
+function U.trim(s)
+	s = tostring(s or "")
+	s = s:gsub("^%s+", "")
+	s = s:gsub("%s+$", "")
+	s = s:gsub('^"(.*)"$', "%1")
+	return s
+end
+
+function U.assetFn()
+	local fn
+	pcall(function() fn = getcustomasset end)
+	if type(fn) ~= "function" then pcall(function() fn = getsynasset end) end
+	if type(fn) ~= "function" then return nil end
+	return fn
+end
+
+-- returns ext, width, height  |  nil, errorMessage
+function U.imageInfo(b)
+	if type(b) ~= "string" or #b < 24 then return nil, "That file is empty or too small to be an image." end
+	local ok, ext, w, h = pcall(function()
+		if b:sub(1, 8) == "\137PNG\r\n\26\n" then
+			local pw, ph = string.unpack(">I4I4", b, 17)
+			return "png", pw, ph
+		end
+		if b:sub(1, 3) == "\255\216\255" then
+			local i, n = 3, #b
+			while i < n - 8 do
+				if b:byte(i) ~= 255 then
+					i += 1
+				else
+					local m = b:byte(i + 1)
+					if m == 255 then
+						i += 1
+					elseif m == 216 or m == 1 or (m >= 208 and m <= 215) then
+						i += 2
+					elseif m >= 192 and m <= 207 and m ~= 196 and m ~= 200 and m ~= 204 then
+						local ph = b:byte(i + 5) * 256 + b:byte(i + 6)
+						local pw = b:byte(i + 7) * 256 + b:byte(i + 8)
+						return "jpg", pw, ph
+					else
+						i += 2 + b:byte(i + 2) * 256 + b:byte(i + 3)
+					end
+				end
+			end
+			return "jpg"
+		end
+		if b:sub(1, 2) == "BM" then
+			local pw, ph = string.unpack("<i4i4", b, 19)
+			return "bmp", pw, math.abs(ph)
+		end
+		if b:sub(1, 4) == "GIF8" then return "gif" end
+		if b:sub(1, 4) == "RIFF" and b:sub(9, 12) == "WEBP" then return "webp" end
+		return nil
+	end)
+	if not ok or not ext then return nil, "That is not an image file. Only PNG, JPG and BMP images are allowed." end
+	if ext == "gif" or ext == "webp" then
+		return nil, "GIF / WEBP images are not supported by Roblox. Convert it to PNG or JPG first."
+	end
+	if w and h and (w < 1 or h < 1 or w > 16384 or h > 16384) then
+		return nil, "That image has an invalid size."
+	end
+	return ext, w, h
+end
+
+-- file path -> rbxasset content string (cached)
+function U.imageAsset(path)
+	if type(path) ~= "string" or path == "" then return nil end
+	local c = U.IMG.cache[path]
+	if c then return c end
+	local fn = U.assetFn()
+	if not fn or type(isfile) ~= "function" then return nil end
+	local ok, asset = pcall(function()
+		if not isfile(path) then return nil end
+		return fn(path)
+	end)
+	if ok and type(asset) == "string" and asset ~= "" then
+		U.IMG.cache[path] = asset
+		return asset
+	end
+	return nil
+end
+
+function U.httpGet(url)
+	local body
+	pcall(function() body = game:HttpGet(url) end)
+	if type(body) == "string" and #body > 0 then return body end
+	local req
+	pcall(function() req = request or http_request or (syn and syn.request) end)
+	if type(req) == "function" then
+		local ok, res = pcall(req, {Url = url, Method = "GET"})
+		if ok and type(res) == "table" and type(res.Body) == "string" and #res.Body > 0
+			and (res.StatusCode == nil or res.StatusCode == 200) then
+			return res.Body
+		end
+	end
+	return nil
+end
+
+-- image files the player can pick from
+function U.listImages()
+	local out, seen = {}, {}
+	if type(listfiles) ~= "function" then return out end
+	for _, dir in ipairs({U.IMG_DIR, U.DIR, "", "Pictures", "Download", "images"}) do
+		pcall(function()
+			for _, f in ipairs(listfiles(dir)) do
+				local ext = string.lower(f):match("%.(%w+)$")
+				if ext and U.IMG.exts[ext] and not seen[f] then
+					seen[f] = true
+					table.insert(out, f)
+				end
+			end
+		end)
+	end
+	table.sort(out)
+	return out
+end
+
+-- puts the images on screen (background / security / loading screen / every icon)
+function U.applyImages()
+	local I = U.IMG
+	local bgA = U.imageAsset(Settings.BgImage)
+	local secA = U.imageAsset(Settings.SecImage)
+	local icoA = U.imageAsset(Settings.IconImage)
+	I.hasBg = bgA ~= nil
+	if I.bg then
+		I.bg.Image = bgA or ""
+		I.bg.Visible = bgA ~= nil
+		I.bgTint.Visible = bgA ~= nil
+	end
+	if I.secImg then
+		I.secImg.Image = secA or ""
+		I.secImg.Visible = secA ~= nil
+		I.secTint.Visible = secA ~= nil
+	end
+	local L = U.LOAD
+	if L and L.root and L.root.Parent then
+		L.bg.Image = secA or ""
+		L.bg.Visible = secA ~= nil
+		L.tint.Visible = secA ~= nil
+	end
+	for i = #I.icons, 1, -1 do
+		local ic = I.icons[i]
+		if not ic.img.Parent then
+			table.remove(I.icons, i)
+		else
+			ic.img.Image = icoA or ""
+			ic.img.Visible = icoA ~= nil
+			ic.label.Visible = icoA == nil
+		end
+	end
+	U.refreshAll()
+end
+
+-- import from a file name / path in the workspace, or from an https link
+-- returns ok, message
+function U.importFrom(kind, source)
+	local K = U.IMG.kinds[kind]
+	if not K then return false, "Unknown import type." end
+	if not (U.fsReady() and U.assetFn()) then
+		return false, "Your executor has no file functions (writefile / readfile / getcustomasset)."
+	end
+	source = U.trim(source)
+	if source == "" then return false, "Tap an image from the list, or type its file name / link." end
+
+	local bytes
+	if source:lower():match("^https?://") then
+		bytes = U.httpGet(source)
+		if not bytes then return false, "Could not download that link." end
+	else
+		for _, p in ipairs({source, U.IMG_DIR .. "/" .. source, U.DIR .. "/" .. source}) do
+			local ok, got = pcall(function()
+				if isfile(p) then return readfile(p) end
+				return nil
+			end)
+			if ok and type(got) == "string" then bytes = got; break end
+		end
+		if not bytes then return false, "File not found: " .. source end
+	end
+
+	local ext, w, h = U.imageInfo(bytes)
+	if not ext then return false, w end
+	if #bytes > 30 * 1024 * 1024 then return false, "Image is too big (max 30 MB)." end
+
+	U.ensureDir(U.DIR)
+	U.ensureDir(U.IMG_DIR)
+	local path = string.format("%s/%s_%d%d.%s", U.IMG_DIR, string.lower(kind), os.time(), math.random(100, 999), ext)
+	if not pcall(writefile, path, bytes) then return false, "Could not save a copy of the image." end
+	U.IMG.cache[path] = nil
+	if not U.imageAsset(path) then
+		pcall(function() if type(delfile) == "function" then delfile(path) end end)
+		return false, "Roblox could not load that image."
+	end
+
+	Settings[K.key] = path
+	U.applyImages()
+	local sizeText = (w and h) and string.format("%dx%d  -  ", w, h) or ""
+	return true, "IMPORTED " .. sizeText .. "AUTO-FIT + SMOOTH 4K SCALE. PRESS SAVE TO KEEP IT."
+end
+
+-- IMPORT PANEL (pops up over the menu)
+function U.buildImportPanel()
+	local P = U.IMG.panel
+	if P and P.shade.Parent then return P end
+	P = {}
+	U.IMG.panel = P
+	P.shade = new("Frame", {
+		Name = "ImportShade", Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0),
+		BackgroundTransparency = 0.45, BorderSizePixel = 0, Active = true, Visible = false, ZIndex = 600,
+	}, gui)
+	P.frame = new("Frame", {
+		Name = "ImportPanel", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(440, 430), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0,
+		Active = true,
+	}, P.shade)
+	U.corner(P.frame, 20)
+	P.bgGrad = new("UIGradient", {Rotation = 90}, P.frame)
+	P.stroke = stroke(P.frame, 2, 0)
+	P.strokeGrad = new("UIGradient", {}, P.stroke)
+	P.scale = new("UIScale", {Scale = 1}, P.frame)
+
+	P.title = new("TextLabel", {
+		BackgroundTransparency = 1, Position = UDim2.fromOffset(18, 14), Size = UDim2.new(1, -36, 0, 28),
+		Text = "IMPORT", Font = Enum.Font.GothamBlack, TextSize = 18, TextColor3 = Color3.new(1, 1, 1),
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, P.frame)
+	new("TextLabel", {
+		BackgroundTransparency = 1, Position = UDim2.fromOffset(18, 44), Size = UDim2.new(1, -36, 0, 44),
+		Text = "Tap an image below, or type its file name / paste an https link. Only PNG, JPG and BMP images work. Gallery photos: copy them into your executor workspace folder JAYVEE_Menu/images first.",
+		Font = Enum.Font.Gotham, TextSize = 9, TextColor3 = COL.sub, TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
+	}, P.frame)
+
+	P.list = new("ScrollingFrame", {
+		Position = UDim2.fromOffset(16, 92), Size = UDim2.new(1, -32, 0, 150), BackgroundColor3 = COL.card,
+		BorderSizePixel = 0, ScrollBarThickness = 3, CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollingDirection = Enum.ScrollingDirection.Y,
+	}, P.frame)
+	U.corner(P.list, 12)
+	new("UIListLayout", {Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder}, P.list)
+	new("UIPadding", {PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6),
+		PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6)}, P.list)
+	P.empty = new("TextLabel", {
+		BackgroundTransparency = 1, Position = UDim2.fromOffset(28, 120), Size = UDim2.new(1, -56, 0, 90),
+		Text = "NO IMAGES FOUND\nPut PNG / JPG files in JAYVEE_Menu/images, then press REFRESH.",
+		Font = Enum.Font.GothamBold, TextSize = 10, TextColor3 = COL.sub, TextWrapped = true, ZIndex = 2,
+	}, P.frame)
+
+	P.box = new("TextBox", {
+		Position = UDim2.fromOffset(16, 250), Size = UDim2.new(1, -32, 0, 36), Text = "",
+		PlaceholderText = "FILE NAME OR IMAGE LINK (HTTPS)", PlaceholderColor3 = Color3.fromRGB(120, 115, 135),
+		ClearTextOnFocus = false, Font = Enum.Font.GothamBold, TextSize = 10, TextColor3 = Color3.new(1, 1, 1),
+		BackgroundColor3 = COL.row, TextXAlignment = Enum.TextXAlignment.Left, BorderSizePixel = 0,
+	}, P.frame)
+	U.corner(P.box, 10)
+	new("UIPadding", {PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10)}, P.box)
+
+	P.buttons = {}
+	local function mkBtn(text, x, w, y, h)
+		local b = new("TextButton", {
+			Position = UDim2.fromOffset(x, y), Size = UDim2.fromOffset(w, h), Text = text,
+			Font = Enum.Font.GothamBlack, TextSize = 11, TextColor3 = Color3.new(1, 1, 1),
+			BackgroundColor3 = COL.off, AutoButtonColor = false, BorderSizePixel = 0,
+		}, P.frame)
+		U.corner(b, 10)
+		return b
+	end
+	P.importBtn = mkBtn("IMPORT", 16, 128, 294, 36)
+	P.refreshBtn = mkBtn("REFRESH", 156, 128, 294, 36)
+	P.removeBtn = mkBtn("REMOVE", 296, 128, 294, 36)
+	P.closeBtn = mkBtn("CLOSE", 16, 408, 386, 34)
+	P.removeBtn.BackgroundColor3 = COL.danger
+
+	P.status = new("TextLabel", {
+		BackgroundTransparency = 1, Position = UDim2.fromOffset(18, 336), Size = UDim2.new(1, -36, 0, 46),
+		Text = "", Font = Enum.Font.GothamBold, TextSize = 9, TextColor3 = COL.sub, TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
+	}, P.frame)
+
+	function P.setStatus(text, isError)
+		P.status.Text = text
+		P.status.TextColor3 = isError and Color3.fromRGB(255, 120, 130) or Color3.fromRGB(175, 255, 195)
+	end
+
+	function P.refresh()
+		for _, ch in ipairs(P.list:GetChildren()) do
+			if ch:IsA("TextButton") then ch:Destroy() end
+		end
+		local files = U.listImages()
+		P.empty.Visible = #files == 0
+		for i, f in ipairs(files) do
+			if i > 80 then break end
+			local name = f:match("[^/\\]+$") or f
+			local b = new("TextButton", {
+				Size = UDim2.new(1, -6, 0, 30), BackgroundColor3 = COL.row, Text = name,
+				Font = Enum.Font.GothamBold, TextSize = 10, TextColor3 = COL.text, AutoButtonColor = false,
+				TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+				BorderSizePixel = 0,
+			}, P.list)
+			U.corner(b, 8)
+			new("UIPadding", {PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 8)}, b)
+			b.Activated:Connect(function()
+				U.play("click")
+				P.box.Text = f
+				P.run(f)
+			end)
+		end
+	end
+
+	function P.run(source)
+		if P.busy then return end
+		P.busy = true
+		P.setStatus("IMPORTING...", false)
+		task.spawn(function()
+			local ok, res, msg = pcall(U.importFrom, P.kind, source)
+			P.busy = false
+			if not ok then
+				P.setStatus("ERROR: " .. tostring(res), true)
+				U.play("error")
+			else
+				P.setStatus(msg or (res and "DONE" or "FAILED"), not res)
+				U.play(res and "success" or "error")
+				if res then P.refresh() end
+			end
+		end)
+	end
+
+	P.importBtn.Activated:Connect(function() U.play("click"); P.run(P.box.Text) end)
+	P.refreshBtn.Activated:Connect(function() U.play("click"); P.refresh(); P.setStatus("LIST REFRESHED", false) end)
+	P.removeBtn.Activated:Connect(function()
+		U.play("click")
+		local K = U.IMG.kinds[P.kind]
+		if K then
+			Settings[K.key] = ""
+			U.applyImages()
+			P.setStatus("REMOVED - USING THE DEFAULT LOOK", false)
+		end
+	end)
+	P.closeBtn.Activated:Connect(function() U.play("close"); P.shade.Visible = false end)
+
+	U.reg(function()
+		if not P.shade.Parent then return end
+		local t = theme()
+		P.bgGrad.Color = ColorSequence.new(Color3.fromRGB(26, 21, 42):Lerp(t.b, 0.25), Color3.fromRGB(9, 8, 14))
+		P.strokeGrad.Color = U.glowSeq()
+		P.title.TextColor3 = t.a
+		P.importBtn.BackgroundColor3 = t.b
+		P.refreshBtn.BackgroundColor3 = COL.off
+		P.closeBtn.BackgroundColor3 = COL.off
+	end)
+	return P
+end
+
+function U.openImport(kind)
+	local K = U.IMG.kinds[kind]
+	if not K then return end
+	local P = U.buildImportPanel()
+	P.kind = kind
+	P.title.Text = "IMPORT " .. K.name
+	P.scale.Scale = U.fitScale(440, 430, 1)
+	P.box.Text = ""
+	if U.fsReady() and U.assetFn() then
+		P.setStatus("TAP A FILE TO IMPORT IT.", false)
+	else
+		P.setStatus("YOUR EXECUTOR HAS NO FILE FUNCTIONS - IMPORT CANNOT WORK HERE.", true)
+	end
+	P.refresh()
+	P.shade.Visible = true
+	U.play("open")
+end
+
+-- one registered refresher keeps every tint overlay in sync with theme + IMAGE TINT
+U.reg(function()
+	local t = theme()
+	if U.IMG.bgTint then
+		U.IMG.bgTint.BackgroundColor3 = t.b
+		U.IMG.bgTint.BackgroundTransparency = Settings.ImageTint
+	end
+	if U.IMG.secTint then
+		U.IMG.secTint.BackgroundColor3 = t.b
+		U.IMG.secTint.BackgroundTransparency = Settings.ImageTint
+	end
+	local L = U.LOAD
+	if L and L.root and L.root.Parent then
+		L.tint.BackgroundColor3 = t.b
+		L.tint.BackgroundTransparency = Settings.ImageTint
+	end
+end)
+
+--==================================================
+-- LOADING SCREEN (after the correct key)
+--==================================================
+U.LOAD_STAGES = {
+	{0.00, "VERIFYING ACCESS KEY"},
+	{0.18, "LOADING ABILITY MODULES"},
+	{0.38, "CALIBRATING ULTRA INSTINCT"},
+	{0.58, "SCANNING THREAT SENSE"},
+	{0.78, "SYNCING SETTINGS + IMAGES"},
+	{0.94, "PREPARING INTERFACE"},
+	{1.00, "READY"},
+}
+U.LOAD_TIPS = {
+	"TIP: TAP THE ULTRA PILL IN THE HEADER FOR A QUICK ON / OFF.",
+	"TIP: PRESS SAVE IN SETTINGS TO KEEP EVERYTHING YOU CHANGED.",
+	"TIP: TAP A CARD TITLE TO COLLAPSE IT.",
+	"TIP: IMPORT YOUR OWN BACKGROUND, ICON AND SECURITY IMAGE.",
+}
+
+function U.buildLoader()
+	if U.LOAD and U.LOAD.root and U.LOAD.root.Parent then return U.LOAD end
+	local L = {tweens = {}, dots = {}}
+	U.LOAD = L
+	L.root = new("CanvasGroup", {
+		Name = "Loader", Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.fromRGB(6, 6, 10),
+		BorderSizePixel = 0, Visible = false, ZIndex = 900, GroupTransparency = 1, Active = true,
+	}, gui)
+	L.gradBg = new("Frame", {Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0}, L.root)
+	L.bgGrad = new("UIGradient", {Rotation = 90}, L.gradBg)
+	L.bg = new("ImageLabel", {
+		BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ScaleType = Enum.ScaleType.Crop,
+		Image = "", Visible = false,
+	}, L.root)
+	L.tint = new("Frame", {
+		Size = UDim2.fromScale(1, 1), BackgroundColor3 = THEMES[1].b, BackgroundTransparency = Settings.ImageTint,
+		BorderSizePixel = 0, Visible = false,
+	}, L.root)
+	L.vignette = new("Frame", {Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BorderSizePixel = 0}, L.root)
+	new("UIGradient", {Rotation = 90, Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.9), NumberSequenceKeypoint.new(0.5, 0.72), NumberSequenceKeypoint.new(1, 0.2),
+	})}, L.vignette)
+
+	for i = 1, 26 do
+		local d = new("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(4, 4), BackgroundColor3 = THEMES[1].a,
+			BackgroundTransparency = 0.55, BorderSizePixel = 0,
+			Position = UDim2.fromScale(math.random(), 0.15 + math.random() * 0.8),
+		}, L.root)
+		U.corner(d, 2)
+		table.insert(L.dots, d)
+		local tw = TweenService:Create(d, TweenInfo.new(1.6 + math.random() * 2.2, Enum.EasingStyle.Sine,
+			Enum.EasingDirection.InOut, -1, true, math.random() * 1.5),
+			{Position = d.Position - UDim2.fromScale(0, 0.05 + math.random() * 0.07), BackgroundTransparency = 0.95})
+		tw:Play()
+		table.insert(L.tweens, tw)
+	end
+
+	L.box = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(420, 400), BackgroundTransparency = 1,
+	}, L.root)
+	L.scale = new("UIScale", {Scale = U.fitScale(420, 400, 1)}, L.box)
+
+	local function ring(size, thick)
+		local f = new("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0, 100),
+			Size = UDim2.fromOffset(size, size), BackgroundTransparency = 1,
+		}, L.box)
+		U.corner(f, size)
+		local g = new("UIGradient", {Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(0.4, 0.15),
+			NumberSequenceKeypoint.new(0.5, 1), NumberSequenceKeypoint.new(1, 1),
+		})}, stroke(f, thick, 0))
+		return g
+	end
+	L.g1 = ring(176, 3)
+	L.g2 = ring(142, 2)
+	U.makeIcon(L.box, {
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0, 100),
+		Size = UDim2.fromOffset(104, 104), ZIndex = 3, Text = "JV", TextSize = 30,
+	})
+
+	L.title = new("TextLabel", {
+		BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 206), Size = UDim2.new(1, 0, 0, 40),
+		Text = "ABILITY MENU", Font = Enum.Font.GothamBlack, TextSize = 28, TextColor3 = Color3.new(1, 1, 1),
+	}, L.box)
+	L.titleGrad = new("UIGradient", {}, L.title)
+	new("TextLabel", {
+		BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 248), Size = UDim2.new(1, 0, 0, 16),
+		Text = "JAYVEE  -  POWER SYSTEM  -  " .. SCRIPT_VERSION, Font = Enum.Font.GothamBold, TextSize = 9,
+		TextColor3 = COL.sub,
+	}, L.box)
+	L.stage = new("TextLabel", {
+		BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 284), Size = UDim2.new(1, 0, 0, 18),
+		Text = "", Font = Enum.Font.GothamBold, TextSize = 11, TextColor3 = Color3.new(1, 1, 1),
+	}, L.box)
+	L.barBg = new("Frame", {
+		Position = UDim2.new(0.5, -170, 0, 314), Size = UDim2.fromOffset(340, 10),
+		BackgroundColor3 = Color3.fromRGB(30, 28, 42), BorderSizePixel = 0,
+	}, L.box)
+	U.corner(L.barBg, 5)
+	L.barStroke = stroke(L.barBg, 1, 0.6)
+	L.fill = new("Frame", {Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = THEMES[1].a, BorderSizePixel = 0}, L.barBg)
+	U.corner(L.fill, 5)
+	L.fillGrad = new("UIGradient", {}, L.fill)
+	L.pct = new("TextLabel", {
+		BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 330), Size = UDim2.new(1, 0, 0, 22),
+		Text = "0%", Font = Enum.Font.GothamBlack, TextSize = 15, TextColor3 = Color3.new(1, 1, 1),
+	}, L.box)
+	L.tip = new("TextLabel", {
+		BackgroundTransparency = 1, Position = UDim2.new(0.5, -190, 0, 360), Size = UDim2.fromOffset(380, 30),
+		Text = "", Font = Enum.Font.Gotham, TextSize = 9, TextColor3 = COL.sub, TextWrapped = true,
+	}, L.box)
+
+	U.reg(function()
+		if not L.root.Parent then return end
+		local t = theme()
+		L.bgGrad.Color = ColorSequence.new(Color3.fromRGB(26, 20, 44):Lerp(t.b, 0.35), Color3.fromRGB(6, 6, 10))
+		L.g1.Color = ColorSequence.new(t.a, t.b)
+		L.g2.Color = ColorSequence.new(t.b, t.a)
+		L.titleGrad.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, t.a), ColorSequenceKeypoint.new(0.5, Color3.new(1, 1, 1)),
+			ColorSequenceKeypoint.new(1, t.a),
+		})
+		L.fillGrad.Color = ColorSequence.new(t.b, t.a)
+		L.barStroke.Color = t.b
+		L.tint.BackgroundColor3 = t.b
+		L.tint.BackgroundTransparency = Settings.ImageTint
+		for _, d in ipairs(L.dots) do d.BackgroundColor3 = t.a end
+	end)
+	return L
+end
+
+-- onCovered runs once the loading screen fully covers the screen (hide the security screen there)
+function U.runLoader(onCovered)
+	local L = U.buildLoader()
+	U.applyImages()
+	L.scale.Scale = U.fitScale(420, 400, 1)
+	L.root.GroupTransparency = 1
+	L.root.Visible = true
+	U.tw(L.root, 0.35, {GroupTransparency = 0}, Enum.EasingStyle.Quad)
+	task.wait(0.4)
+	if onCovered then pcall(onCovered) end
+
+	local total = 3.4
+	local t0 = os.clock()
+	local lastStage, lastTip = 0, 0
+	while L.root.Parent do
+		local now = os.clock()
+		local a = math.clamp((now - t0) / total, 0, 1)
+		local e = a * a * (3 - 2 * a)
+		L.fill.Size = UDim2.new(e, 0, 1, 0)
+		L.pct.Text = string.format("%d%%", math.floor(e * 100 + 0.5))
+		local stageIdx = 1
+		for i, st in ipairs(U.LOAD_STAGES) do
+			if e >= st[1] then stageIdx = i end
+		end
+		if stageIdx ~= lastStage then
+			lastStage = stageIdx
+			L.stage.Text = U.LOAD_STAGES[stageIdx][2] .. (stageIdx < #U.LOAD_STAGES and "..." or "")
+			if stageIdx > 1 then U.play("type") end
+			lastTip = (lastTip % #U.LOAD_TIPS) + 1
+			L.tip.Text = U.LOAD_TIPS[lastTip]
+		end
+		L.g1.Rotation = (now * 150) % 360
+		L.g2.Rotation = 360 - ((now * 100) % 360)
+		L.titleGrad.Offset = Vector2.new(((now * 0.6) % 2) - 1, 0)
+		L.fillGrad.Offset = Vector2.new(((now * 0.8) % 2) - 1, 0)
+		if a >= 1 then break end
+		RunService.RenderStepped:Wait()
+	end
+
+	if L.root.Parent then
+		U.play("success")
+		task.wait(0.25)
+		U.tw(L.root, 0.45, {GroupTransparency = 1}, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		task.wait(0.5)
+	end
+	for _, tw in ipairs(L.tweens) do pcall(function() tw:Cancel() end) end
+	pcall(function() L.root:Destroy() end)
+	U.LOAD = nil
+end
+
+--==================================================
 -- PAGE: SETTINGS
 --==================================================
 local unloadFn -- assigned below
@@ -3272,12 +4130,104 @@ do
 		return "Hide / show menu: RightShift (PC) or tap the UI bubble.\nDrag the header (or hold MOVE) to move the menu.\nTap a card title to collapse it.\nThe menu auto-fits your screen size."
 	end, false, 11)
 
-	local c6 = U.makeCard(p, "DATA", "Reset or unload")
-	U.actionRow(c6, "RESET UI SETTINGS", function()
-		for _, k in ipairs(UI_KEYS) do Settings[k] = Defaults[k] end
+	-- CUSTOMIZE: Background / Icon / Security -> IMPORT
+	local cI = U.makeCard(p, "CUSTOMIZE", "Import your own images (PNG / JPG / BMP)")
+	local function importRow(label, kind, key)
+		local row = new("Frame", {Size = UDim2.new(1, 0, 0, 42), BackgroundColor3 = COL.row}, cI)
+		U.corner(row, 10)
+		local lbl = new("TextLabel", {
+			BackgroundTransparency = 1, Position = UDim2.fromOffset(12, 0), Size = UDim2.new(1, -120, 1, 0),
+			Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = COL.text, RichText = true,
+			TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, Text = "",
+		}, row)
+		local btn = new("TextButton", {
+			AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -10, 0.5, 0),
+			Size = UDim2.fromOffset(96, 28), Text = "IMPORT", Font = Enum.Font.GothamBlack, TextSize = 12,
+			TextColor3 = Color3.new(1, 1, 1), BackgroundColor3 = COL.off, AutoButtonColor = false,
+		}, row)
+		U.corner(btn, 9)
+		btn.Activated:Connect(function()
+			U.play(clickSound)
+			U.openImport(kind)
+		end)
+		U.reg(function()
+			local custom = Settings[key] ~= "" and U.imageAsset(Settings[key]) ~= nil
+			lbl.Text = U.richValue(label, custom and "CUSTOM" or "DEFAULT")
+			btn.BackgroundColor3 = theme().b
+		end)
+	end
+	importRow("BACKGROUND", "Background", "BgImage")
+	importRow("ICON", "Icon", "IconImage")
+	importRow("SECURITY", "Security", "SecImage")
+	U.stepperRow(cI, "IMAGE TINT", function() return string.format("%d%%", math.floor((1 - Settings.ImageTint) * 100 + 0.5)) end,
+		U.adjust("ImageTint", -0.05, 0.1, 0.9))
+	U.infoText(cI, function()
+		return "Small images are auto-fitted to fill the screen (never stretched) and scaled smoothly up to 4K. Your theme color stays on top, so the UI is still colorable. Press SAVE to keep your images."
+	end, false, 10)
+
+	-- DATA: SAVE | RESET side by side
+	local c6 = U.makeCard(p, "DATA", "Save everything you changed, or go back")
+
+	-- puts the whole saved/default snapshot back on screen
+	local function applyAll(snap)
+		U.applySnapshot(snap)
+		if not Settings.CustomMovement then Arczis.Stop() elseif character then task.spawn(Arczis.Setup, character) end
+		if not Settings.CameraLock then pcall(U.cancelCameraLock) end
+		if not Settings.FollowAfterDodge then following = false; followToken += 1; followTarget = nil end
+		if not Settings.Enabled and Settings.UltraActive then
+			setUltra(false)
+		else
+			visualCharacter = nil
+			pcall(U.refreshBodyAura)
+		end
 		applyScale()
-		U.refreshAll()
+		U.applyImages() -- also refreshes every row
+	end
+
+	local pair = new("Frame", {Size = UDim2.new(1, 0, 0, 40), BackgroundTransparency = 1}, c6)
+	local function pairBtn(text, xScale, xOffset, danger)
+		local b = new("TextButton", {
+			Size = UDim2.new(0.5, -4, 1, 0), Position = UDim2.new(xScale, xOffset, 0, 0), Text = text,
+			Font = Enum.Font.GothamBlack, TextSize = 12, TextColor3 = Color3.new(1, 1, 1),
+			BackgroundColor3 = danger and COL.danger or COL.off, AutoButtonColor = false,
+		}, pair)
+		U.corner(b, 10)
+		return b
+	end
+	local saveBtn = pairBtn("SAVE", 0, 0, false)
+	local resetBtn = pairBtn("RESET", 0.5, 4, true)
+	U.reg(function() saveBtn.BackgroundColor3 = theme().b end)
+
+	local flashToken = {}
+	local function flashText(btn, txt, original)
+		flashToken[btn] = (flashToken[btn] or 0) + 1
+		local my = flashToken[btn]
+		btn.Text = txt
+		task.delay(1.6, function()
+			if flashToken[btn] == my and btn.Parent then btn.Text = original end
+		end)
+	end
+
+	saveBtn.Activated:Connect(function()
+		U.play(clickSound)
+		local snap = U.snapshot()
+		U.Saved = snap
+		local onDisk = U.saveToDisk(snap)
+		U.play("success")
+		flashText(saveBtn, onDisk and "SAVED!" or "SAVED (SESSION)", "SAVE")
 	end)
+
+	resetBtn.Activated:Connect(function()
+		U.play(clickSound)
+		local hadSave = U.Saved ~= nil
+		applyAll(hadSave and U.Saved or U.snapshot(Defaults))
+		U.play("close")
+		flashText(resetBtn, hadSave and "RESTORED!" or "DEFAULTS!", "RESET")
+	end)
+
+	U.infoText(c6, function()
+		return "SAVE keeps every setting you changed (also after you re-run the script). RESET goes back to your last save, or to the original defaults if you never saved."
+	end, false, 10)
 	local confirmToken = 0
 	U.actionRow(c6, "UNLOAD SCRIPT", function(btn)
 		if btn:GetAttribute("armed") then
@@ -3392,14 +4342,20 @@ local function tryUnlock()
 
 	if string.upper((passBox.Text:gsub("%s+", ""))) == string.upper(expectedPassword()) then
 		unlocking = true
-		secStatus.Text = "ACCESS GRANTED - LOADING..."
+		secStatus.Text = "ACCESS GRANTED"
 		secStatus.TextColor3 = Color3.fromRGB(175, 255, 195)
 		U.play("success")
-		U.tw(loadBar, 0.9, {Size = UDim2.new(1, 0, 1, 0)}, Enum.EasingStyle.Quad)
-		task.wait(1)
-		U.tw(secScale, 0.25, {Scale = secScale.Scale * 0.85}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-		task.wait(0.25)
+		U.tw(loadBar, 0.7, {Size = UDim2.new(1, 0, 1, 0)}, Enum.EasingStyle.Quad)
+		task.wait(0.8)
+		-- full loading screen; the security panel is hidden once the loader covers the screen
+		local okL, errL = pcall(U.runLoader, function() security.Visible = false end)
+		if not okL then
+			warn("[JAYVEE] Loader error:", errL)
+			pcall(function() if U.LOAD and U.LOAD.root then U.LOAD.root:Destroy() end end)
+			U.LOAD = nil
+		end
 		security.Visible = false
+		for _, tw in ipairs(U.SEC.tweens) do pcall(function() tw:Cancel() end) end
 		unlocked = true
 		U.showPage("Home")
 		-- Re-fit and clamp after the security screen disappears, before the menu animation.
@@ -3437,6 +4393,7 @@ end)
 -- INITIALIZE
 Settings.UltraActive = false
 U.showPage("Home")
+pcall(U.applyImages)
 U.refreshAll()
 U.refreshBodyAura()
 security.Visible = true
