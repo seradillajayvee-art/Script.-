@@ -1508,6 +1508,11 @@ function U.startFollow(target)
 			and os.clock() - start < Settings.FollowDuration do
 			if not root or not root.Parent then break end
 			if not targetRoot.Parent or targetHum.Health <= 0 then break end
+			-- moving the joystick / WASD cancels the follow immediately
+			if humanoid and humanoid.MoveDirection.Magnitude > 0.12 then
+				following = false
+				break
+			end
 
 			local offset
 			if Settings.FollowMode == "Side" then
@@ -1525,7 +1530,7 @@ function U.startFollow(target)
 		if token == followToken then
 			following = false
 			followTarget = nil
-			if Settings.StopEffect and Settings.FollowAfterDodge and Settings.UltraActive then U.stopEffect() end
+			if Settings.StopEffect and Settings.FollowAfterDodge and Settings.UltraActive and not (humanoid and humanoid.MoveDirection.Magnitude > 0.12) then U.stopEffect() end
 		end
 	end)
 end
@@ -1613,24 +1618,6 @@ function U.dodgeDestination(targetRoot, threat, profile)
 		local right = Vector3.new(-look.Z, 0, look.X)
 		local dist = math.max(Settings.FollowDistance, 3.5) * profile.distMul
 		local mode = Settings.DodgeAnimation
-		if not Settings.FollowAfterDodge then
-			-- FOLLOW OFF: never end the dodge next to / behind the enemy.
-			-- Sidestep (or step back) so the final distance is always >= the current distance.
-			local away = Vector3.new(origin.X - tp.X, 0, origin.Z - tp.Z)
-			away = away.Magnitude > 0.05 and away.Unit or -look
-			if mode == "Backstep" then
-				return clip(origin + away * math.max(8, dist * 2))
-			end
-			local perp = Vector3.new(-away.Z, 0, away.X)
-			local step = math.max(8, Settings.FollowDistance * 2) * profile.distMul
-			local a = clip(origin + perp * step + away * (step * 0.35))
-			local b = clip(origin - perp * step + away * (step * 0.35))
-			local la, lb = (a - origin).Magnitude, (b - origin).Magnitude
-			if la >= step * 0.8 and lb >= step * 0.8 then
-				return (math.random(1, 2) == 1) and a or b
-			end
-			return (la >= lb) and a or b
-		end
 		if mode == "Backstep" then
 			local away = Vector3.new(origin.X - tp.X, 0, origin.Z - tp.Z)
 			away = away.Magnitude > 0.05 and away.Unit or -look
