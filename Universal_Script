@@ -1233,6 +1233,7 @@ function U.lockCameraToTarget(target)
 	if not Settings.CameraLock or not Settings.UltraActive or not target then return end
 	local hum, tr = U.getHum(target), U.getRoot(target)
 	if not hum or not tr or hum.Health <= 0 then return end
+	if not U.inRadius(target) then return end -- far attackers never lock the camera
 	cameraTarget = target
 	cameraLocked = true
 end
@@ -1649,6 +1650,9 @@ local function runDodge(target, threat)
 
 	target = (target and U.isValidTarget(target)) and target or U.getEnemyInsideRadius()
 	local targetRoot = target and U.getRoot(target)
+	-- attacker outside the circle: dodge sideways from where I am, never go to / follow him
+	local farTarget = targetRoot ~= nil and not U.inRadius(target)
+	local destRoot = (not farTarget) and targetRoot or nil
 
 	U.playRandomDodgeSound()
 	U.flash()
@@ -1662,7 +1666,7 @@ local function runDodge(target, threat)
 	local profile = U.dodgeProfile()
 	local act = {dur = baseAct.dur * profile.durMul, lock = baseAct.lock * profile.lockMul}
 	local startPos = root.Position
-	local destination = U.dodgeDestination(targetRoot, threat, profile)
+	local destination = U.dodgeDestination(destRoot, threat, profile)
 	local startCF = root.CFrame
 	local endCF
 	if targetRoot then
@@ -1705,7 +1709,7 @@ local function runDodge(target, threat)
 	U.createTrail(startPos + Vector3.new(0, 1, 0), destination + Vector3.new(0, 1, 0))
 	U.smokePuff(destination)
 
-	if target and Settings.UltraActive and Settings.Enabled then U.startFollow(target) end
+	if target and not farTarget and Settings.UltraActive and Settings.Enabled then U.startFollow(target) end
 
 	task.delay(act.lock, function()
 		if myDodgeToken == dodgeToken then dodging = false end
@@ -1740,10 +1744,32 @@ function U.detectEnemyHit(target)
 	return false
 end
 
+-- is this enemy root pointing at me?  (ignores enemies fighting someone else / looking away)
+function U.facingMe(tr, minDot)
+	if not tr or not root then return false end
+	local toMe = root.Position - tr.Position
+	if toMe.Magnitude < 0.1 then return true end
+	return tr.CFrame.LookVector:Dot(toMe.Unit) >= (minDot or 0.3)
+end
+
+function U.approachingMe(tr)
+	if not tr or not root then return false end
+	local toMe = root.Position - tr.Position
+	if toMe.Magnitude < 0.1 then return true end
+	return tr.AssemblyLinearVelocity:Dot(toMe.Unit) > 2
+end
+
+function U.inRadius(model)
+	local tr = U.getRoot(model)
+	return tr ~= nil and root ~= nil and (tr.Position - root.Position).Magnitude <= Settings.Radius
+end
+
 function U.detectAnyEnemyHit(nearby)
 	local found
 	for _, m in ipairs(nearby) do
-		if U.detectEnemyHit(m) and not found then found = m end
+		-- always update the health tracker, but only react when that enemy is facing me
+		-- (an enemy being hit by somebody else must not make me dodge)
+		if U.detectEnemyHit(m) and not found and U.facingMe(U.getRoot(m), 0.3) then found = m end
 	end
 	return found
 end
@@ -1962,7 +1988,7 @@ function U.scanRanged(now)
 		local toMe = root.Position - tr.Position
 		local d = toMe.Magnitude
 		if d <= Settings.Radius or d > range or d < 0.1 then return end
-		if tr.CFrame.LookVector:Dot(toMe.Unit) < 0.3 then return end -- not facing you
+		if tr.CFrame.LookVector:Dot(toMe.Unit) < 0.85 then return end -- must be aiming at you
 		if U.enemyLooksLikeAttacking(m, true) and d < bd then
 			bd, found = d, m
 		end
@@ -2004,11 +2030,12 @@ local function senseStep()
 		if tr then
 			local d = (tr.Position - root.Position).Magnitude
 			-- contact is ignored while following (follow keeps you close on purpose)
-			if d <= Settings.ContactTriggerDistance and not following then
+			if d <= Settings.ContactTriggerDistance and not following
+				and (U.facingMe(tr, 0.3) or U.approachingMe(tr)) then
 				contact = true
 				attacker = attacker or model
 			end
-			if U.enemyLooksLikeAttacking(model) then
+			if U.facingMe(tr, 0.3) and U.enemyLooksLikeAttacking(model) then
 				attack = true
 				attacker = model
 			end
