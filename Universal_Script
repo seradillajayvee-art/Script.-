@@ -1667,6 +1667,30 @@ local function runDodge(target, threat)
 	local act = {dur = baseAct.dur * profile.durMul, lock = baseAct.lock * profile.lockMul}
 	local startPos = root.Position
 	local destination = U.dodgeDestination(destRoot, threat, profile)
+	if farTarget and targetRoot then
+		local tp = targetRoot.Position
+		local function flatDist(a) return Vector3.new(a.X - tp.X, 0, a.Z - tp.Z).Magnitude end
+		if flatDist(destination) < flatDist(startPos) then
+			-- would move toward the far attacker: mirror it so the dodge goes away from him
+			local mirrored = Vector3.new(2 * startPos.X - destination.X, startPos.Y, 2 * startPos.Z - destination.Z)
+			local rp = RaycastParams.new()
+			rp.FilterType = Enum.RaycastFilterType.Exclude
+			rp.FilterDescendantsInstances = {character, ringFolder}
+			rp.RespectCanCollide = true
+			local dir = mirrored - startPos
+			if dir.Magnitude > 0.1 then
+				local hit = workspace:Raycast(startPos, dir, rp)
+				if hit then
+					local back = hit.Position - dir.Unit * 2
+					mirrored = ((back - startPos):Dot(dir) < 0) and startPos or Vector3.new(back.X, startPos.Y, back.Z)
+				end
+			end
+			destination = mirrored
+		end
+		-- far attacker: keep the dodge short, never a long run
+		local travel = destination - startPos
+		if travel.Magnitude > 14 then destination = startPos + travel.Unit * 14 end
+	end
 	local startCF = root.CFrame
 	local endCF
 	if targetRoot then
@@ -2156,6 +2180,7 @@ do
 			-- Invalid/unavailable custom animation: leave Roblox's normal movement animation alone.
 			Settings.CustomMovement = false
 			Arczis.Disconnect()
+			task.defer(U.refreshAll)
 			return
 		end
 		t.Priority = Enum.AnimationPriority.Movement
@@ -3376,8 +3401,16 @@ local function tryUnlock()
 		U.openMenu()
 	else
 		U.play("error")
+		U.wrongKeys = (U.wrongKeys or 0) + 1
 		secStatus.Text = "ACCESS DENIED - INVALID KEY"
 		secStatus.TextColor3 = Color3.fromRGB(255, 120, 130)
+		if U.wrongKeys % 3 == 0 then
+			-- warning + Ultra Instinct pops up, even though Ultra is NOT turned on in the main menu
+			secStatus.Text = "WARNING: " .. U.wrongKeys .. " WRONG KEYS - ULTRA INSTINCT SENSES YOU"
+			secStatus.TextColor3 = Color3.fromRGB(255, 70, 85)
+			pcall(ultraCinematic, true)
+			U.play("stop")
+		end
 		shaking = true
 		local old = security.Position
 		U.tw(security, 0.07, {Position = old + UDim2.fromOffset(8, 0)}, Enum.EasingStyle.Linear)
