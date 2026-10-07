@@ -208,6 +208,17 @@ local Settings = {
 	IconImage = "",               -- imported icon
 	SecImage = "",                -- imported security / loading background
 	ImageTint = 0.6,              -- transparency of the theme color laid over imported images
+
+	-- auto dodge chat configuration
+	ChatMode = "HP Based",        -- "HP Based" / "Custom" / "Mixed"
+	ChatCustom = "",              -- your own messages, separated by |
+	ChatCooldown = 3,             -- minimum seconds between two chat messages
+	ChatChance = 100,             -- % chance to chat when a message is due
+	ChatEmoji = true,             -- keep the emoji at the end of the built-in messages
+
+	-- own-ability protection (JJS / SBT style games): your own attacks and dashes never trigger a dodge
+	IgnoreOwn = true,
+	OwnActionGrace = 0.9,         -- seconds after your own attack / dash / ability that count as "mine"
 }
 
 local Defaults = table.clone(Settings)
@@ -229,6 +240,7 @@ U.CHOICES = {
 	DodgeAnimation = {"Side Burst", "Backstep", "Blink"},
 	DodgeActivity = {"Low", "Normal", "High", "Max"},
 	FollowMode = {"Behind", "Side"},
+	ChatMode = {"HP Based", "Custom", "Mixed"},
 }
 
 function U.fsReady()
@@ -291,6 +303,11 @@ function U.applySnapshot(snap)
 	Settings.Radius = math.clamp(Settings.Radius, Settings.MinRadius, Settings.MaxRadius)
 	Settings.DodgeChance = math.clamp(Settings.DodgeChance, 0, 100)
 	Settings.AttackReach = math.clamp(Settings.AttackReach, 2, 14)
+	Settings.OwnActionGrace = math.clamp(Settings.OwnActionGrace, 0.2, 3)
+	Settings.AutoDodgeChatEvery = math.clamp(math.floor(Settings.AutoDodgeChatEvery), 1, 30)
+	Settings.ChatCooldown = math.clamp(Settings.ChatCooldown, 0, 30)
+	Settings.ChatChance = math.clamp(Settings.ChatChance, 0, 100)
+	Settings.ChatCustom = string.sub(Settings.ChatCustom, 1, 400)
 	Settings.ImageTint = math.clamp(Settings.ImageTint, 0.1, 0.9)
 	Settings.ThreatRange = math.clamp(Settings.ThreatRange, 10, 80)
 	Settings.ContactTriggerDistance = math.clamp(Settings.ContactTriggerDistance, 1, 10)
@@ -1475,16 +1492,43 @@ local DODGE_CHAT = {
 	},
 }
 local lastDodgeChatIndex = 0
+U.lastChatAt = 0
+
+-- builds the next message from the CHAT MODE setting
+function U.pickDodgeChat()
+	local custom = {}
+	for part in string.gmatch(Settings.ChatCustom or "", "[^|]+") do
+		part = part:gsub("^%s+", ""):gsub("%s+$", "")
+		if part ~= "" then table.insert(custom, part) end
+	end
+	local mode = Settings.ChatMode
+	local text
+	if #custom > 0 and (mode == "Custom" or (mode == "Mixed" and math.random(1, 2) == 1)) then
+		text = custom[math.random(1, #custom)]
+	else
+		local profile = U.dodgeProfile()
+		local pool = DODGE_CHAT[profile.tier] or DODGE_CHAT.CALM
+		local idx = math.random(1, #pool)
+		if #pool > 1 and idx == lastDodgeChatIndex then idx = (idx % #pool) + 1 end
+		lastDodgeChatIndex = idx
+		text = pool[idx]
+		if not Settings.ChatEmoji then
+			local body, tail = text:match("^(.*)%s(%S+)$")
+			if body and tail and not tail:find("%a") then text = body end
+		end
+	end
+	return string.sub(text, 1, 200)
+end
+
 function U.autoDodgeChat()
 	if not Settings.AutoDodgeChat then return end
 	local every = math.max(1, math.floor(Settings.AutoDodgeChatEvery or 5))
 	if Settings.DodgeCount < every or Settings.DodgeCount % every ~= 0 then return end
-	local profile = U.dodgeProfile()
-	local pool = DODGE_CHAT[profile.tier] or DODGE_CHAT.CALM
-	local idx = math.random(1, #pool)
-	if #pool > 1 and idx == lastDodgeChatIndex then idx = (idx % #pool) + 1 end
-	lastDodgeChatIndex = idx
-	U.sendChat(pool[idx])
+	local now = os.clock()
+	if now - U.lastChatAt < Settings.ChatCooldown then return end
+	if math.random(1, 100) > Settings.ChatChance then return end
+	U.lastChatAt = now
+	U.sendChat(U.pickDodgeChat())
 end
 
 --==================================================
@@ -1631,6 +1675,11 @@ function U.startFollow(target)
 			if humanoid and humanoid.MoveDirection.Magnitude > 0.12 then
 				following = false
 				break
+			end
+
+			if Settings.IgnoreOwn and os.clock() - lastOwnAction < Settings.OwnActionGrace then
+				task.wait() -- you are using your own ability / dash: do not pull you back
+				continue
 			end
 
 			local offset
@@ -2022,9 +2071,22 @@ local function onExplosion(ex)
 	end
 end
 
+U.ownBorn = setmetatable({}, {__mode = "k"}) -- effect parts created by MY ability (never a threat)
 bind(workspace.DescendantAdded, function(d)
 	if d:IsA("BasePart") then
-		bornAt[d] = os.clock()
+		local born = os.clock()
+		bornAt[d] = born
+		if Settings.IgnoreOwn and root and (born - lastOwnAction) < Settings.OwnActionGrace
+			and (d.Position - root.Position).Magnitude < 30 then
+			U.ownBorn[d] = true
+		elseif Settings.IgnoreOwn then
+			-- the ability animation / key can register a moment after its first effect part appears
+			task.delay(0.15, function()
+				if d.Parent and root and lastOwnAction >= born and (d.Position - root.Position).Magnitude < 45 then
+					U.ownBorn[d] = true
+				end
+			end)
+		end
 	elseif d:IsA("Explosion") then
 		task.defer(onExplosion, d)
 	end
@@ -2043,12 +2105,12 @@ function U.scanThreats(now)
 	end)
 	if not ok or not parts then return nil end
 
-	local ownBusy = (now - lastOwnAction) < 0.6
+	local ownBusy = (now - lastOwnAction) < Settings.OwnActionGrace
 	local bestMoving, bestT = nil, math.huge
 	local bestFresh, bestFreshGap = nil, math.huge
 
 	for _, p in ipairs(parts) do
-		if not U.ignorePart(p) then
+		if not U.ignorePart(p) and not U.ownBorn[p] then
 			local pos = p.Position
 			local tr = partTrack[p]
 			local vel = Vector3.zero
@@ -2166,8 +2228,17 @@ local function senseStep()
 	-- melee / damage / contact
 	local nearby = U.getAllNearbyTargets()
 	-- melee / attack reactions only count when the enemy is really close (fixes dodging from far away)
+	-- is the player doing his OWN attack / dash / ability right now?  (animation poll covers mobile buttons)
+	if Settings.IgnoreOwn and now >= (U.nextOwnPoll or 0) then
+		U.nextOwnPoll = now + 0.05
+		if character and now - (U.lastDamaged or 0) > 0.35 and U.enemyLooksLikeAttacking(character, true) then
+			lastOwnAction = now
+		end
+	end
+	local ownActive = Settings.IgnoreOwn and (now - lastOwnAction) < Settings.OwnActionGrace
 	local reach = math.max(Settings.AttackReach or 6, Settings.ContactTriggerDistance)
 	local hitTarget = (#nearby > 0) and U.detectAnyEnemyHit(nearby) or nil
+	if hitTarget and ownActive then hitTarget = nil end -- I hit him, he did not hit me
 	if hitTarget then
 		local htr = U.getRoot(hitTarget)
 		if not htr or (htr.Position - root.Position).Magnitude > reach + 2 then hitTarget = nil end
@@ -2178,7 +2249,7 @@ local function senseStep()
 		if tr then
 			local d = (tr.Position - root.Position).Magnitude
 			-- contact is ignored while following (follow keeps you close on purpose)
-			if d <= Settings.ContactTriggerDistance and not following
+			if d <= Settings.ContactTriggerDistance and not following and not ownActive
 				and (U.facingMe(tr, 0.3) or U.approachingMe(tr)) then
 				contact = true
 				attacker = attacker or model
@@ -2252,6 +2323,7 @@ function U.hookDamage()
 				task.defer(dodge, enemyInside)
 			end
 		end
+		if oldHealth and newHealth < oldHealth - 0.5 then U.lastDamaged = os.clock() end
 		lastHealth = newHealth
 	end)
 end
@@ -2269,6 +2341,8 @@ bind(UIS.InputBegan, function(input, processed)
 	if t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.MouseButton2 then
 		lastOwnAction = os.clock()
 	elseif t == Enum.UserInputType.Keyboard and not MOVE_KEYS[input.KeyCode] then
+		lastOwnAction = os.clock()
+	elseif t == Enum.UserInputType.Gamepad1 and string.find(input.KeyCode.Name, "Button") then
 		lastOwnAction = os.clock()
 	end
 end)
@@ -3395,6 +3469,9 @@ do
 		U.adjust("ContactTriggerDistance", 0.5, 1, 10))
 	U.stepperRow(c2, "DODGE REACH", function() return U.fmt(Settings.AttackReach) end,
 		U.adjust("AttackReach", 0.5, 2, 14))
+	U.toggleRow(c2, "IGNORE MY OWN ABILITIES", function() return Settings.IgnoreOwn end, function(v) Settings.IgnoreOwn = v end)
+	U.stepperRow(c2, "OWN ABILITY GRACE", function() return string.format("%.1fs", Settings.OwnActionGrace) end,
+		U.adjust("OwnActionGrace", 0.1, 0.2, 3))
 	U.infoText(c2, function()
 		return "Being inside the radius alone does NOT trigger a dodge. The enemy must attack inside DODGE REACH, touch you, hurt you, or send an ability at you first."
 	end, false, 10)
@@ -4117,7 +4194,43 @@ do
 	U.stepperRow(c3, "VOLUME", function() return string.format("%d%%", math.floor(Settings.UIVolume * 100 + 0.5)) end,
 		U.adjust("UIVolume", 0.05, 0, 1))
 	U.toggleRow(c3, "CHAT INTRO (ULTRA)", function() return Settings.ChatIntro end, function(v) Settings.ChatIntro = v end)
-	U.toggleRow(c3, "AUTO DODGE CHAT", function() return Settings.AutoDodgeChat end, function(v) Settings.AutoDodgeChat = v end)
+
+	local cc = U.makeCard(p, "AUTO DODGE CHAT", "What Ultra says while you dodge")
+	U.toggleRow(cc, "CHAT WHILE DODGING", function() return Settings.AutoDodgeChat end, function(v) Settings.AutoDodgeChat = v end)
+	U.stepperRow(cc, "CHAT EVERY", function() return Settings.AutoDodgeChatEvery .. " DODGES" end,
+		U.adjust("AutoDodgeChatEvery", 1, 1, 30))
+	U.choiceRow(cc, "MESSAGE MODE", function() return Settings.ChatMode end, function()
+		Settings.ChatMode = U.cycleList({"HP Based", "Custom", "Mixed"}, Settings.ChatMode)
+	end)
+	U.stepperRow(cc, "COOLDOWN", function() return U.fmt(Settings.ChatCooldown) .. "s" end,
+		U.adjust("ChatCooldown", 1, 0, 30))
+	U.stepperRow(cc, "CHAT CHANCE", function() return U.fmt(Settings.ChatChance) .. "%" end,
+		U.adjust("ChatChance", 10, 10, 100))
+	U.toggleRow(cc, "EMOJI IN MESSAGES", function() return Settings.ChatEmoji end, function(v) Settings.ChatEmoji = v end)
+	local chatBox = new("TextBox", {
+		Size = UDim2.new(1, 0, 0, 38), BackgroundColor3 = COL.row, Text = Settings.ChatCustom,
+		PlaceholderText = "YOUR MESSAGES (SEPARATE WITH | )", PlaceholderColor3 = Color3.fromRGB(120, 115, 135),
+		ClearTextOnFocus = false, Font = Enum.Font.GothamBold, TextSize = 10, TextColor3 = Color3.new(1, 1, 1),
+		TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, BorderSizePixel = 0,
+	}, cc)
+	U.corner(chatBox, 10)
+	new("UIPadding", {PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10)}, chatBox)
+	chatBox.FocusLost:Connect(function()
+		Settings.ChatCustom = string.sub(chatBox.Text, 1, 400)
+		U.play(clickSound)
+	end)
+	U.reg(function()
+		if not chatBox:IsFocused() then chatBox.Text = Settings.ChatCustom end
+	end)
+	U.actionRow(cc, "SEND TEST MESSAGE", function(btn)
+		Settings.ChatCustom = string.sub(chatBox.Text, 1, 400)
+		local ok = U.sendChat(U.pickDodgeChat())
+		btn.Text = ok and "SENT!" or "CHAT NOT AVAILABLE"
+		task.delay(1.5, function() if btn.Parent then btn.Text = "SEND TEST MESSAGE" end end)
+	end)
+	U.infoText(cc, function()
+		return "HP BASED = built-in messages that change with your HP. CUSTOM = only your own messages (type several, split with |). MIXED = both. Custom mode falls back to the built-in ones if the box is empty."
+	end, false, 10)
 
 	local c4 = U.makeCard(p, "CHARACTER", nil)
 	U.toggleRow(c4, "CUSTOM WALK / RUN ANIMATION", function() return Settings.CustomMovement end, function(v)
