@@ -152,7 +152,7 @@ local Settings = {
 	-- Threat sense (dodge everything)
 	DodgeProjectiles = true,      -- moving parts, beams, hitboxes, abilities
 	DodgeExplosions = true,       -- Explosion instances
-	DodgeRanged = true,           -- enemies attacking from outside the radius
+	DodgeRanged = false,          -- enemies attacking from outside the radius (OFF by default: circle only)
 	ThreatRange = 40,             -- how far away threats are detected
 
 	-- Ability / dodge
@@ -1194,11 +1194,17 @@ local counterGui = new("TextLabel", {
 	TextStrokeTransparency = 0.35, Visible = false, ZIndex = 200,
 }, gui)
 local popupToken = 0
+U.dodgeStreak, U.lastDodgeAt = 0, -math.huge
 function U.showDodgeIndicator()
+	-- streak: starts again from 1 when 3 seconds passed since the last dodge
+	local now = os.clock()
+	if now - U.lastDodgeAt > 3 then U.dodgeStreak = 0 end
+	U.dodgeStreak += 1
+	U.lastDodgeAt = now
 	if not Settings.DodgePopup then return end
 	popupToken += 1
 	local my = popupToken
-	counterGui.Text = "DODGE  " .. tostring(Settings.DodgeCount) .. "x"
+	counterGui.Text = "DODGE  " .. tostring(U.dodgeStreak) .. "x"
 	counterGui.Visible = true
 	counterGui.TextTransparency = 0
 	counterGui.TextStrokeTransparency = 0.35
@@ -2216,6 +2222,7 @@ local function setupCharacter(char)
 	character, humanoid, root = char, hum, hrp
 	dodging, following, followTarget = false, false, nil
 	halfHealthTriggered = false
+	U.dodgeStreak = 0
 	followToken += 1
 	U.cancelCameraLock()
 	U.hookCharacterTools(char)
