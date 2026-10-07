@@ -3800,7 +3800,10 @@ end
 function U.listImages()
 	local out, seen = {}, {}
 	if type(listfiles) ~= "function" then return out end
-	for _, dir in ipairs({U.IMG_DIR, U.DIR, "", "Pictures", "Download", "images"}) do
+	-- the last six are the phone gallery folders: they only show up if your executor allows reading outside its workspace
+	for _, dir in ipairs({U.IMG_DIR, U.DIR, "", "Pictures", "Download", "images",
+		"/storage/emulated/0/DCIM/Camera", "/storage/emulated/0/Pictures", "/storage/emulated/0/Download",
+		"/sdcard/DCIM/Camera", "/sdcard/Pictures", "/sdcard/Download"}) do
 		pcall(function()
 			for _, f in ipairs(listfiles(dir)) do
 				local ext = string.lower(f):match("%.(%w+)$")
@@ -3925,7 +3928,7 @@ function U.buildImportPanel()
 	}, P.frame)
 	new("TextLabel", {
 		BackgroundTransparency = 1, Position = UDim2.fromOffset(18, 44), Size = UDim2.new(1, -36, 0, 44),
-		Text = "Tap an image below, or type its file name / paste an https link. Only PNG, JPG and BMP images work. Gallery photos: copy them into your executor workspace folder JAYVEE_Menu/images first.",
+		Text = "Roblox cannot open the Gallery app. Pick from the list, type a file name, or paste an https link (upload the photo to Imgur / Discord, then paste the direct image link). PNG, JPG and BMP only.",
 		Font = Enum.Font.Gotham, TextSize = 9, TextColor3 = COL.sub, TextWrapped = true,
 		TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
 	}, P.frame)
@@ -3941,7 +3944,7 @@ function U.buildImportPanel()
 		PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6)}, P.list)
 	P.empty = new("TextLabel", {
 		BackgroundTransparency = 1, Position = UDim2.fromOffset(28, 120), Size = UDim2.new(1, -56, 0, 90),
-		Text = "NO IMAGES FOUND\nPut PNG / JPG files in JAYVEE_Menu/images, then press REFRESH.",
+		Text = "NO IMAGES FOUND\nCopy a photo into your executor workspace folder, or paste an image link below, then press IMPORT.",
 		Font = Enum.Font.GothamBold, TextSize = 10, TextColor3 = COL.sub, TextWrapped = true, ZIndex = 2,
 	}, P.frame)
 
