@@ -1,5 +1,5 @@
 --==================================================================
--- ABILITY MENU - JAYVEE  (v5.5)
+-- ABILITY MENU - JAYVEE  (v5.7)
 -- Own-game LocalScript
 -- Place in: StarterPlayer > StarterPlayerScripts
 --
@@ -9,6 +9,13 @@
 --              THREAT SENSE (dodge projectiles / abilities / explosions / ranged)
 --   PLAYER   : player info, dodge counter (+reset), Player ESP
 --   SETTINGS : theme, scale, sounds, animations, keybind, reset/unload
+--
+-- v5.7 CHANGES
+--   * ICON UI settings card (size, shape, opacity, border, idle fade, move mode, hold time, snap, reset).
+--   * Icon / window drag only follows the finger that started it; ICON MOVE = HOLD means the joystick
+--     can never grab the icon. Quick tap still opens the menu.
+--   * Smart image fit (Smart / Fill / Fit / Stretch), smoothing toggle, PANEL GLASS so the background shows.
+--   * Real quality label (LOW RES / HD / FULL HD / QHD / 4K) read from the image itself.
 --
 -- v5.6 CHANGES
 --   * Dash / attached effects are judged relative to YOUR speed, so your own dash never counts as a threat.
@@ -56,7 +63,7 @@
 --   * Damage fallback dodges even when no enemy is inside the radius.
 --==================================================================
 
-print("[JAYVEE] Ability Menu v5.5 loading...")
+print("[JAYVEE] Ability Menu v5.7 loading...")
 
 -- On-screen status banner: shows "loading", "loaded" or the exact ERROR on your screen.
 local function JV_Banner(text, isError)
@@ -107,7 +114,7 @@ local U = {} -- helper functions live here (Luau allows only 200 locals per scop
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local SCRIPT_VERSION = "v5.5"
+local SCRIPT_VERSION = "v5.7"
 local VERSION_MAJOR = SCRIPT_VERSION:match("%d+") or "4"
 local PASSWORD_PREFIX = "ULTRAINSTINCTBYJAYVEE"
 local PASSWORD = PASSWORD_PREFIX .. "V" .. VERSION_MAJOR
@@ -230,6 +237,19 @@ local Settings = {
 	DodgeWhileWalking = false,    -- false = no melee / contact dodge while you are walking yourself
 	DodgeCooldown = 0.7,          -- minimum seconds between two automatic dodges
 	ShowReason = true,            -- small label that tells you WHY it dodged
+
+	-- v5.7  icon UI (the small bubble) + image fitting
+	IconSize = 60,
+	IconTransparency = 0,
+	IconShape = "Rounded",        -- "Rounded" / "Circle" / "Square"
+	IconDrag = "Hold",            -- "Hold" (press and hold to move) / "Instant" / "Locked"
+	IconHoldTime = 0.35,
+	IconSnapEdge = false,
+	IconIdleFade = false,
+	IconBorder = true,
+	ImageFit = "Smart",           -- "Smart" / "Fill" / "Fit" / "Stretch"
+	ImageSmooth = true,           -- false = pixelated (pixel art)
+	PanelGlass = 0.5,             -- how see-through the cards are when a background image is used
 }
 
 local Defaults = table.clone(Settings)
@@ -252,6 +272,9 @@ U.CHOICES = {
 	DodgeActivity = {"Low", "Normal", "High", "Max"},
 	FollowMode = {"Behind", "Side"},
 	ChatMode = {"HP Based", "Custom", "Mixed"},
+	IconShape = {"Rounded", "Circle", "Square"},
+	IconDrag = {"Hold", "Instant", "Locked"},
+	ImageFit = {"Smart", "Fill", "Fit", "Stretch"},
 }
 
 function U.fsReady()
@@ -316,6 +339,10 @@ function U.applySnapshot(snap)
 	Settings.AttackReach = math.clamp(Settings.AttackReach, 2, 14)
 	Settings.OwnActionGrace = math.clamp(Settings.OwnActionGrace, 0.2, 3)
 	Settings.DodgeCooldown = math.clamp(Settings.DodgeCooldown, 0.1, 3)
+	Settings.IconSize = math.clamp(math.floor(Settings.IconSize), 36, 110)
+	Settings.IconTransparency = math.clamp(Settings.IconTransparency, 0, 0.8)
+	Settings.IconHoldTime = math.clamp(Settings.IconHoldTime, 0.15, 1.2)
+	Settings.PanelGlass = math.clamp(Settings.PanelGlass, 0.15, 0.85)
 	Settings.AutoDodgeChatEvery = math.clamp(math.floor(Settings.AutoDodgeChatEvery), 1, 30)
 	Settings.ChatCooldown = math.clamp(Settings.ChatCooldown, 0, 30)
 	Settings.ChatChance = math.clamp(Settings.ChatChance, 0, 100)
@@ -561,29 +588,59 @@ function U.clampGui(frame, margin)
 end
 
 -- Draggable (mobile friendly). Optional bounds callback keeps the frame on-screen.
-function U.draggable(frame, handle, canDrag)
+-- canDrag(): optional gate.  holdFn(): optional, seconds the player must HOLD before the drag starts
+-- (a finger that only swipes across the object, e.g. the joystick, never grabs it).
+function U.draggable(frame, handle, canDrag, holdFn)
 	handle = handle or frame
 	local st = {moved = false}
-	local dragging, dragStart, startPos = false, nil, nil
+	local dragging, armed = false, false
+	local dragInput, dragStart, startPos, pressTime
 	handle.InputBegan:Connect(function(input)
 		if handle:GetAttribute("DragEnabled") == false then return end
 		if canDrag and not canDrag() then return end
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
-			dragging = true
-			st.moved = false
-			dragStart = input.Position
-			startPos = frame.Position
-			input.Changed:Connect(function()
-				if input.UserInputState == Enum.UserInputState.End then dragging = false end
-			end)
-		end
+		local ut = input.UserInputType
+		if ut ~= Enum.UserInputType.MouseButton1 and ut ~= Enum.UserInputType.Touch then return end
+		dragging = true
+		dragInput = input
+		pressTime = os.clock()
+		local hold = holdFn and holdFn() or 0
+		armed = hold <= 0
+		st.moved = false
+		dragStart = input.Position
+		startPos = frame.Position
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End and dragInput == input then
+				local wasArmed = armed and st.moved
+				dragging, armed, dragInput = false, false, nil
+				if wasArmed and st.onEnd then pcall(st.onEnd) end
+			end
+		end)
+		if armed and st.onArm then pcall(st.onArm) end
 	end)
 	bind(UIS.InputChanged, function(input)
-		if not dragging then return end
-		if input.UserInputType ~= Enum.UserInputType.MouseMovement
-			and input.UserInputType ~= Enum.UserInputType.Touch then return end
+		if not dragging or not dragInput then return end
+		-- only the finger / button that started the drag may move it (other fingers, e.g. the joystick, are ignored)
+		local same = input == dragInput
+			or (dragInput.UserInputType == Enum.UserInputType.MouseButton1 and input.UserInputType == Enum.UserInputType.MouseMovement)
+		if not same then return end
 		local delta = input.Position - dragStart
+		if not armed then
+			local hold = holdFn and holdFn() or 0
+			if os.clock() - pressTime >= hold then
+				armed = true
+				dragStart = input.Position
+				startPos = frame.Position
+				if st.onArm then pcall(st.onArm) end
+				return
+			elseif delta.Magnitude > 10 then
+				-- moved before the hold finished = just a swipe: never grab, never open
+				dragging, dragInput = false, nil
+				st.moved = true
+				return
+			else
+				return
+			end
+		end
 		if delta.Magnitude > 6 then st.moved = true end
 		local nextPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
 			startPos.Y.Scale, startPos.Y.Offset + delta.Y)
@@ -2547,7 +2604,7 @@ function U.makeCard(page, title, sub)
 		t.TextColor3 = theme().a
 		arrow.TextColor3 = theme().a
 		st.Color = theme().b
-		c.BackgroundTransparency = (U.IMG and U.IMG.hasBg) and 0.3 or 0.05
+		c.BackgroundTransparency = (U.IMG and U.IMG.hasBg) and Settings.PanelGlass or 0.05
 	end)
 	return c
 end
@@ -2687,7 +2744,7 @@ local function clampGuiToViewport(frame, margin)
 	U.clampGui(frame, margin)
 end
 
-U.IMG = {icons = {}, cache = {}, hasBg = false}
+U.IMG = {icons = {}, cache = {}, dims = {}, hasBg = false}
 U.SEC = {dots = {}, tweens = {}}
 
 -- Round / rounded icon that shows either the imported icon image or a text fallback
@@ -2724,6 +2781,11 @@ U.SEC.bgGrad = new("UIGradient", {Rotation = 90, Color = ColorSequence.new(
 	Color3.fromRGB(24, 19, 40), Color3.fromRGB(8, 7, 12))}, security)
 
 -- imported SECURITY background (auto-fit / fills the panel) + theme tint so it stays colorable
+U.IMG.secBack = new("ImageLabel", {
+	Name = "SecBack", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1),
+	ScaleType = Enum.ScaleType.Crop, Image = "", ImageTransparency = 0.25, Visible = false, ZIndex = 200,
+}, security)
+U.corner(U.IMG.secBack, 22)
 U.IMG.secImg = new("ImageLabel", {
 	Name = "SecBackground", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1),
 	ScaleType = Enum.ScaleType.Crop, Image = "", Visible = false, ZIndex = 200,
@@ -2895,6 +2957,11 @@ local mainBg = new("UIGradient", {Rotation = 90}, main)
 local mainScale = new("UIScale", {Scale = U.fitScale(MAIN_W, MAIN_H, Settings.MenuScale)}, main)
 
 -- imported BACKGROUND (auto-fit, drawn under everything) + theme tint so the menu stays colorable
+U.IMG.bgBack = new("ImageLabel", {
+	Name = "BgBack", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1),
+	ScaleType = Enum.ScaleType.Crop, Image = "", ImageTransparency = 0.25, Visible = false, ZIndex = 0,
+}, main)
+U.corner(U.IMG.bgBack, 24)
 U.IMG.bg = new("ImageLabel", {
 	Name = "BgImage", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1),
 	ScaleType = Enum.ScaleType.Crop, Image = "", Visible = false, ZIndex = 0,
@@ -3019,6 +3086,8 @@ local content = new("ScrollingFrame", {
 	ScrollingDirection = Enum.ScrollingDirection.Y, ElasticBehavior = Enum.ElasticBehavior.Always,
 	ClipsDescendants = true,
 }, main)
+
+U.contentRef = content
 
 local searchEmpty = new("TextLabel", {
 	Name = "SearchEmpty",
@@ -3253,7 +3322,7 @@ local minimized = new("TextButton", {
 	Font = Enum.Font.GothamBlack, TextSize = 16, TextColor3 = Color3.new(1, 1, 1),
 	BackgroundColor3 = THEMES[1].b, Visible = false, AutoButtonColor = false,
 }, gui)
-U.corner(minimized, 20)
+U.minCorner = U.corner(minimized, 20)
 minimized.Text = ""
 U.makeIcon(minimized, {
 	Size = UDim2.fromScale(1, 1), Corner = 20, Text = "UI", TextSize = 16, ZIndex = 1, Transparent = true,
@@ -3261,7 +3330,65 @@ U.makeIcon(minimized, {
 minimized:SetAttribute("JV_ClampToViewport", true)
 local minStroke = stroke(minimized, 2, 0)
 local minGradient = new("UIGradient", {}, minStroke)
-local minDrag = U.draggable(minimized)
+U.minScale = new("UIScale", {Scale = 1}, minimized)
+local minDrag = U.draggable(minimized, nil,
+	function() return Settings.IconDrag ~= "Locked" end,
+	function() return Settings.IconDrag == "Hold" and Settings.IconHoldTime or 0 end)
+minDrag.onArm = function()
+	U.minLastUse = os.clock()
+	U.minScale.Scale = 1.2
+	U.tw(U.minScale, 0.25, {Scale = 1}, Enum.EasingStyle.Back)
+end
+minDrag.onEnd = function()
+	if not Settings.IconSnapEdge then return end
+	local cam = workspace.CurrentCamera
+	local vp = cam and cam.ViewportSize
+	if not vp or vp.X < 200 then return end
+	local ap, as = minimized.AbsolutePosition, minimized.AbsoluteSize
+	local x = (ap.X + as.X / 2 < vp.X / 2) and 8 or (vp.X - as.X - 8)
+	U.tw(minimized, 0.25, {Position = UDim2.fromOffset(x, ap.Y)}, Enum.EasingStyle.Back)
+end
+minimized.InputBegan:Connect(function() U.minLastUse = os.clock() end)
+
+-- icon UI configuration (size / shape / opacity / border)
+function U.paintIcon()
+	local tr = math.clamp(Settings.IconTransparency + (U.minFade or 0), 0, 0.92)
+	if U.minPainted == tr then return end
+	U.minPainted = tr
+	minimized.BackgroundTransparency = tr
+	minStroke.Transparency = tr
+	for _, ic in ipairs(U.IMG.icons) do
+		if ic.holder.Parent == minimized then
+			ic.img.ImageTransparency = tr
+			ic.label.TextTransparency = tr
+		end
+	end
+end
+function U.applyIcon()
+	local s = Settings.IconSize
+	if minimized.Size.X.Offset ~= s then
+		local old = minimized.Size.X.Offset
+		minimized.Size = UDim2.fromOffset(s, s)
+		local p = minimized.Position
+		minimized.Position = UDim2.new(p.X.Scale, p.X.Offset, p.Y.Scale, p.Y.Offset - (s - old) / 2)
+		task.defer(U.clampGui, minimized, 6)
+	end
+	local r = (Settings.IconShape == "Circle") and 999 or (Settings.IconShape == "Square") and 6 or math.floor(s * 0.33)
+	U.minCorner.CornerRadius = UDim.new(0, r)
+	for _, ic in ipairs(U.IMG.icons) do
+		if ic.holder.Parent == minimized then
+			local c1 = ic.holder:FindFirstChildOfClass("UICorner")
+			local c2 = ic.img:FindFirstChildOfClass("UICorner")
+			if c1 then c1.CornerRadius = UDim.new(0, r) end
+			if c2 then c2.CornerRadius = UDim.new(0, r) end
+			ic.label.TextSize = math.max(10, math.floor(s * 0.3))
+		end
+	end
+	minStroke.Enabled = Settings.IconBorder
+	U.minPainted = nil
+	U.paintIcon()
+end
+U.reg(U.applyIcon)
 
 -- DRAG-SIZE: drag the SIZE button left/right to resize continuously.
 -- No cycling and no ON/OFF state.
@@ -3338,6 +3465,7 @@ local function closeMenu()
 		main.Position = basePos
 		mainScale.Scale = U.targetScale()
 		minimized.Visible = true
+		U.minLastUse = os.clock()
 		animating = false
 	end)
 end
@@ -3451,7 +3579,18 @@ bind(RunService.RenderStepped, function()
 		mainStrokeGradient.Rotation = (t * 60) % 360
 		titleGradient.Offset = Vector2.new(((t * 0.5) % 2) - 1, 0)
 	end
-	if minimized.Visible then minGradient.Rotation = (t * 90) % 360 end
+	if minimized.Visible then
+		minGradient.Rotation = (t * 90) % 360
+		local target = (Settings.IconIdleFade and os.clock() - (U.minLastUse or 0) > 3) and 0.55 or 0
+		local f = U.minFade or 0
+		if math.abs(f - target) > 0.003 then
+			U.minFade = f + (target - f) * 0.12
+			U.paintIcon()
+		elseif f ~= target then
+			U.minFade = target
+			U.paintIcon()
+		end
+	end
 	U.updateRing()
 end)
 
@@ -3818,6 +3957,52 @@ function U.listImages()
 	return out
 end
 
+-- image size (read once from the file header, cached)
+function U.imageDims(path)
+	if type(path) ~= "string" or path == "" then return nil end
+	local c = U.IMG.dims[path]
+	if c ~= nil then return c or nil end
+	local dims = false
+	local ok, bytes = pcall(readfile, path)
+	if ok and type(bytes) == "string" then
+		local ext, w, h = U.imageInfo(bytes)
+		if ext and w and h and w > 0 and h > 0 then dims = {w = w, h = h} end
+	end
+	U.IMG.dims[path] = dims
+	return dims or nil
+end
+
+-- quality label from the real pixel size
+function U.qualityTag(path)
+	local d = U.imageDims(path)
+	if not d then return "" end
+	local long = math.max(d.w, d.h)
+	return long >= 3840 and "4K" or long >= 2560 and "QHD" or long >= 1920 and "FULL HD"
+		or long >= 1280 and "HD" or "LOW RES"
+end
+
+-- SMART FIT: picks Crop (fill) when the image shape is close to the frame, otherwise shows the whole
+-- image (Fit) on top of a dimmed filled copy of itself, so nothing important is cut off and no bars appear.
+function U.fitLayers(front, back, path, fw, fh)
+	local mode = Settings.ImageFit
+	local d = U.imageDims(path)
+	local smooth = Settings.ImageSmooth and Enum.ResamplerMode.Default or Enum.ResamplerMode.Pixelated
+	front.ResampleMode = smooth
+	if back then back.ResampleMode = smooth; back.Visible = false end
+	local useFit = false
+	if mode == "Stretch" then
+		front.ScaleType = Enum.ScaleType.Stretch
+		return
+	elseif mode == "Fit" then
+		useFit = true
+	elseif mode == "Smart" and d then
+		local r = (d.w / d.h) / (fw / fh)
+		useFit = not (r > 0.72 and r < 1.4)
+	end
+	front.ScaleType = useFit and Enum.ScaleType.Fit or Enum.ScaleType.Crop
+	if back and useFit then back.Visible = front.Visible end
+end
+
 -- puts the images on screen (background / security / loading screen / every icon)
 function U.applyImages()
 	local I = U.IMG
@@ -3828,18 +4013,26 @@ function U.applyImages()
 	if I.bg then
 		I.bg.Image = bgA or ""
 		I.bg.Visible = bgA ~= nil
+		I.bgBack.Image = bgA or ""
 		I.bgTint.Visible = bgA ~= nil
+		U.fitLayers(I.bg, I.bgBack, Settings.BgImage, 600, 440)
 	end
 	if I.secImg then
 		I.secImg.Image = secA or ""
 		I.secImg.Visible = secA ~= nil
+		I.secBack.Image = secA or ""
 		I.secTint.Visible = secA ~= nil
+		U.fitLayers(I.secImg, I.secBack, Settings.SecImage, 460, 400)
 	end
 	local L = U.LOAD
 	if L and L.root and L.root.Parent then
+		local cam = workspace.CurrentCamera
+		local vp = cam and cam.ViewportSize or Vector2.new(1920, 1080)
 		L.bg.Image = secA or ""
 		L.bg.Visible = secA ~= nil
+		L.back.Image = secA or ""
 		L.tint.Visible = secA ~= nil
+		U.fitLayers(L.bg, L.back, Settings.SecImage, math.max(vp.X, 1), math.max(vp.Y, 1))
 	end
 	for i = #I.icons, 1, -1 do
 		local ic = I.icons[i]
@@ -3849,9 +4042,31 @@ function U.applyImages()
 			ic.img.Image = icoA or ""
 			ic.img.Visible = icoA ~= nil
 			ic.label.Visible = icoA == nil
+			U.fitLayers(ic.img, nil, Settings.IconImage, 1, 1)
 		end
 	end
+	pcall(U.skinRows)
 	U.refreshAll()
+end
+
+-- with a background image the rows / cards become glassy so the picture is really visible
+function U.skinRows()
+	local c = U.contentRef
+	if not c then return end
+	for _, d in ipairs(c:GetDescendants()) do
+		if (d:IsA("Frame") or d:IsA("TextButton") or d:IsA("TextBox")) and d.BackgroundColor3 == COL.row then
+			local orig = d:GetAttribute("JV_Tr0")
+			if orig == nil then
+				orig = d.BackgroundTransparency
+				d:SetAttribute("JV_Tr0", orig)
+			end
+			if U.IMG.hasBg and orig < 0.9 then
+				d.BackgroundTransparency = math.max(orig, Settings.PanelGlass * 0.85)
+			else
+				d.BackgroundTransparency = orig
+			end
+		end
+	end
 end
 
 -- import from a file name / path in the workspace, or from an https link
@@ -3896,8 +4111,15 @@ function U.importFrom(kind, source)
 
 	Settings[K.key] = path
 	U.applyImages()
-	local sizeText = (w and h) and string.format("%dx%d  -  ", w, h) or ""
-	return true, "IMPORTED " .. sizeText .. "AUTO-FIT + SMOOTH 4K SCALE. PRESS SAVE TO KEEP IT."
+	local info = ""
+	if w and h then
+		info = string.format("%dx%d (%s)  -  ", w, h, U.qualityTag(path))
+	end
+	local tail = "SMART FIT APPLIED. PRESS SAVE TO KEEP IT."
+	if w and h and math.max(w, h) < 1280 then
+		tail = "LOW RES: IT WILL LOOK SOFT. USE 1920x1080 OR BIGGER FOR A SHARP RESULT. PRESS SAVE TO KEEP IT."
+	end
+	return true, "IMPORTED " .. info .. tail
 end
 
 -- IMPORT PANEL (pops up over the menu)
@@ -4106,6 +4328,7 @@ U.LOAD_TIPS = {
 	"TIP: PRESS SAVE IN SETTINGS TO KEEP EVERYTHING YOU CHANGED.",
 	"TIP: TAP A CARD TITLE TO COLLAPSE IT.",
 	"TIP: IMPORT YOUR OWN BACKGROUND, ICON AND SECURITY IMAGE.",
+	"TIP: PRESS AND HOLD THE ICON TO MOVE IT. A QUICK TAP OPENS THE MENU.",
 }
 
 function U.buildLoader()
@@ -4118,6 +4341,10 @@ function U.buildLoader()
 	}, gui)
 	L.gradBg = new("Frame", {Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0}, L.root)
 	L.bgGrad = new("UIGradient", {Rotation = 90}, L.gradBg)
+	L.back = new("ImageLabel", {
+		BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ScaleType = Enum.ScaleType.Crop,
+		Image = "", ImageTransparency = 0.25, Visible = false,
+	}, L.root)
 	L.bg = new("ImageLabel", {
 		BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ScaleType = Enum.ScaleType.Crop,
 		Image = "", Visible = false,
@@ -4338,17 +4565,57 @@ do
 		end)
 		U.reg(function()
 			local custom = Settings[key] ~= "" and U.imageAsset(Settings[key]) ~= nil
-			lbl.Text = U.richValue(label, custom and "CUSTOM" or "DEFAULT")
+			local tag = custom and U.qualityTag(Settings[key]) or ""
+			lbl.Text = U.richValue(label, custom and (tag ~= "" and ("CUSTOM " .. tag) or "CUSTOM") or "DEFAULT")
 			btn.BackgroundColor3 = theme().b
 		end)
 	end
 	importRow("BACKGROUND", "Background", "BgImage")
 	importRow("ICON", "Icon", "IconImage")
 	importRow("SECURITY", "Security", "SecImage")
+	U.choiceRow(cI, "IMAGE FIT", function() return Settings.ImageFit end, function()
+		Settings.ImageFit = U.cycleList(U.CHOICES.ImageFit, Settings.ImageFit)
+		U.applyImages()
+	end)
+	U.toggleRow(cI, "SMOOTH IMAGES", function() return Settings.ImageSmooth end, function(v)
+		Settings.ImageSmooth = v
+		U.applyImages()
+	end)
+	U.stepperRow(cI, "PANEL GLASS", function() return string.format("%d%%", math.floor(Settings.PanelGlass * 100 + 0.5)) end,
+		function(dir)
+			Settings.PanelGlass = math.clamp(math.floor((Settings.PanelGlass + 0.05 * dir) * 100 + 0.5) / 100, 0.15, 0.85)
+			U.applyImages()
+		end)
 	U.stepperRow(cI, "IMAGE TINT", function() return string.format("%d%%", math.floor((1 - Settings.ImageTint) * 100 + 0.5)) end,
 		U.adjust("ImageTint", -0.05, 0.1, 0.9))
 	U.infoText(cI, function()
-		return "Small images are auto-fitted to fill the screen (never stretched) and scaled smoothly up to 4K. Your theme color stays on top, so the UI is still colorable. Press SAVE to keep your images."
+		return "Images are smart-fitted: they fill the panel when the shape matches, otherwise the whole picture is shown with no stretching. Roblox cannot add detail to a small picture, so use 1920x1080 or bigger for a sharp result. Your theme color stays on top, so the UI is still colorable."
+	end, false, 10)
+
+
+	-- ICON UI: the small bubble you tap to open the menu
+	local cu = U.makeCard(p, "ICON UI", "The small bubble that opens the menu")
+	U.stepperRow(cu, "ICON SIZE", function() return Settings.IconSize .. "px" end,
+		U.adjust("IconSize", 4, 36, 110))
+	U.choiceRow(cu, "ICON SHAPE", function() return Settings.IconShape end, function()
+		Settings.IconShape = U.cycleList(U.CHOICES.IconShape, Settings.IconShape)
+	end)
+	U.stepperRow(cu, "ICON OPACITY", function() return string.format("%d%%", math.floor((1 - Settings.IconTransparency) * 100 + 0.5)) end,
+		U.adjust("IconTransparency", -0.1, 0, 0.8))
+	U.toggleRow(cu, "ICON BORDER", function() return Settings.IconBorder end, function(v) Settings.IconBorder = v end)
+	U.toggleRow(cu, "FADE WHEN IDLE", function() return Settings.IconIdleFade end, function(v) Settings.IconIdleFade = v end)
+	U.choiceRow(cu, "ICON MOVE", function() return Settings.IconDrag end, function()
+		Settings.IconDrag = U.cycleList(U.CHOICES.IconDrag, Settings.IconDrag)
+	end)
+	U.stepperRow(cu, "HOLD TIME", function() return string.format("%.2fs", Settings.IconHoldTime) end,
+		U.adjust("IconHoldTime", 0.05, 0.15, 1.2))
+	U.toggleRow(cu, "SNAP TO EDGE", function() return Settings.IconSnapEdge end, function(v) Settings.IconSnapEdge = v end)
+	U.actionRow(cu, "RESET ICON POSITION", function()
+		minimized.Position = UDim2.new(0, 18, 0.5, -math.floor(Settings.IconSize / 2))
+		U.clampGui(minimized, 6)
+	end)
+	U.infoText(cu, function()
+		return "ICON MOVE = HOLD means you must press and hold the icon to drag it, so your joystick finger can never grab it by accident. A quick tap opens the menu. LOCKED = it never moves."
 	end, false, 10)
 
 	-- DATA: SAVE | RESET side by side
