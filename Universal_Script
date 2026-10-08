@@ -234,8 +234,9 @@ local Settings = {
 	OwnActionGrace = 0.9,         -- seconds after your own attack / dash / ability that count as "mine"
 
 	-- v5.6
-	DodgeWhileWalking = false,    -- false = no melee / contact dodge while you are walking yourself
-	DodgeCooldown = 0.7,          -- minimum seconds between two automatic dodges
+	DodgeWhileWalking = true,     -- false = no melee / contact dodge while you are walking yourself
+	ReachFollowsRadius = true,    -- true = an enemy attack inside the CIRCLE RADIUS triggers the dodge (even if it misses)
+	DodgeCooldown = 0.25,          -- minimum seconds between two automatic dodges
 	ShowReason = true,            -- small label that tells you WHY it dodged
 
 	-- v5.7  icon UI (the small bubble) + image fitting
@@ -2238,7 +2239,7 @@ function U.scanThreats(now)
 				local par = p.Parent
 				local isTool = par and par:IsA("Tool")
 				local gap = math.max(dist - halfDiag, 0)
-				if not isTool and biggest >= 1.5 and gap <= math.min(Settings.Radius, math.max(Settings.AttackReach or 6, 4))
+				if not isTool and biggest >= 1.5 and gap <= math.min(Settings.Radius, math.max(U.effReach(), 4))
 					and (not p.CanCollide or speed >= 4) then
 					local closing = (dist > 0.05) and vel:Dot(rel / dist) or 0
 					if closing > -6 and gap < bestFreshGap then
@@ -2302,6 +2303,32 @@ function U.showReason(text)
 	end)
 end
 
+-- how close an enemy attack must be to trigger a dodge
+function U.effReach()
+	if Settings.ReachFollowsRadius then
+		return math.max(Settings.Radius, Settings.ContactTriggerDistance)
+	end
+	return math.max(Settings.AttackReach or 6, Settings.ContactTriggerDistance)
+end
+
+-- is one of MY OWN fresh attack / dash / skill animations playing? (young, non-looping, Action priority or higher)
+function U.ownAnimActive()
+	local hum = humanoid
+	if not hum then return false end
+	local animator = hum:FindFirstChildOfClass("Animator")
+	if not animator then return false end
+	local okTracks, tracks = pcall(function() return animator:GetPlayingAnimationTracks() end)
+	if not okTracks then return false end
+	local actionValue = Enum.AnimationPriority.Action.Value
+	for _, tr in ipairs(tracks) do
+		if not tr.Looped and tr.Priority ~= Enum.AnimationPriority.Core
+			and tr.Priority.Value >= actionValue and tr.TimePosition < 0.7 and tr.Length > 0.15 then
+			return true
+		end
+	end
+	return false
+end
+
 --==================================================
 -- SENSE STEP
 --==================================================
@@ -2328,11 +2355,10 @@ local function senseStep()
 
 	-- melee / damage / contact
 	local nearby = U.getAllNearbyTargets()
-	-- melee / attack reactions only count when the enemy is really close (fixes dodging from far away)
 	-- is the player doing his OWN attack / dash / ability right now?  (animation poll covers mobile buttons)
 	if Settings.IgnoreOwn and now >= (U.nextOwnPoll or 0) then
 		U.nextOwnPoll = now + 0.05
-		if character and now - (U.lastDamaged or 0) > 0.35 and U.enemyLooksLikeAttacking(character, true) then
+		if character and now - (U.lastDamaged or 0) > 0.35 and U.ownAnimActive() then
 			lastOwnAction = now
 		end
 		-- a dash / lunge / speed burst with no animation or key press (mobile buttons): judge by your own speed
@@ -2343,7 +2369,7 @@ local function senseStep()
 		end
 	end
 	local ownActive = Settings.IgnoreOwn and (now - lastOwnAction) < Settings.OwnActionGrace
-	local reach = math.max(Settings.AttackReach or 6, Settings.ContactTriggerDistance)
+	local reach = U.effReach()
 	local hitTarget = (#nearby > 0) and U.detectAnyEnemyHit(nearby) or nil
 	if hitTarget and ownActive then hitTarget = nil end -- I hit him, he did not hit me
 	if hitTarget then
@@ -2437,7 +2463,8 @@ function U.hookDamage()
 			and Settings.Enabled and Settings.AutoDodge and Settings.UltraActive then
 			local st = humanoid:GetState()
 			local fallDamage = (st == Enum.HumanoidStateType.Freefall or st == Enum.HumanoidStateType.Landed)
-			local bigEnough = (oldHealth - newHealth) >= math.max(1, maxHealth * 0.02)
+				and #U.getAllNearbyTargets() == 0
+			local bigEnough = (oldHealth - newHealth) >= math.max(0.5, maxHealth * 0.01)
 			if not fallDamage and bigEnough and os.clock() - (U.lastDodgeAt or 0) > 0.35 then
 				U.showReason("YOU TOOK DAMAGE")
 				local enemyInside = U.getEnemyInsideRadius()
@@ -3672,13 +3699,15 @@ do
 	U.toggleRow(c2, "RADIUS CIRCLE", function() return Settings.RadiusCircle end, function(v) Settings.RadiusCircle = v end)
 	U.stepperRow(c2, "CONTACT DISTANCE", function() return U.fmt(Settings.ContactTriggerDistance) end,
 		U.adjust("ContactTriggerDistance", 0.5, 1, 10))
-	U.stepperRow(c2, "DODGE REACH", function() return U.fmt(Settings.AttackReach) end,
-		U.adjust("AttackReach", 0.5, 2, 14))
+	U.toggleRow(c2, "REACH = CIRCLE RADIUS", function() return Settings.ReachFollowsRadius end, function(v) Settings.ReachFollowsRadius = v end)
+	U.stepperRow(c2, "DODGE REACH", function()
+		return Settings.ReachFollowsRadius and "CIRCLE" or U.fmt(Settings.AttackReach)
+		end, U.adjust("AttackReach", 0.5, 2, 14))
 	U.toggleRow(c2, "IGNORE MY OWN ABILITIES", function() return Settings.IgnoreOwn end, function(v) Settings.IgnoreOwn = v end)
 	U.stepperRow(c2, "OWN ABILITY GRACE", function() return string.format("%.1fs", Settings.OwnActionGrace) end,
 		U.adjust("OwnActionGrace", 0.1, 0.2, 3))
 	U.infoText(c2, function()
-		return "Being inside the radius alone does NOT trigger a dodge. The enemy must attack inside DODGE REACH, touch you, hurt you, or send an ability at you first."
+		return "Being inside the radius alone does NOT trigger a dodge. The enemy must ATTACK (punch / skill) inside the circle, touch you, hurt you, or send an ability at you first. Turn REACH = CIRCLE RADIUS off to use the smaller DODGE REACH instead."
 	end, false, 10)
 
 	local c5 = U.makeCard(p, "THREAT SENSE", "Dodge everything - not just melee")
