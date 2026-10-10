@@ -538,8 +538,12 @@ end)
 ----------------------------------------------------------------
 -- WINDOW
 ----------------------------------------------------------------
+local MIN_W, MIN_H = 320, 240
+local DEFAULT_W, DEFAULT_H = 470, 310
+local customSize = nil -- Vector2, set once the person drags the resize handle
+
 local shell = new("Frame", {
-    Name = "Window", Size = UDim2.fromOffset(470, 310),
+    Name = "Window", Size = UDim2.fromOffset(DEFAULT_W, DEFAULT_H),
     Position = UDim2.fromOffset(100, 40), BackgroundTransparency = 1, Visible = false, ZIndex = 5,
 }, gui)
 corner(shell, UDim.new(0, 14))
@@ -581,6 +585,15 @@ local closeBtn = new("TextButton", {
 }, top)
 corner(closeBtn, FULL)
 
+local moveBtn = new("TextButton", {
+    AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -42, 0.5, 0), Size = UDim2.fromOffset(26, 26),
+    BackgroundColor3 = Theme.Item, Text = "✛", Font = Enum.Font.GothamBold,
+    TextSize = 14, TextColor3 = Theme.Sub, AutoButtonColor = false,
+}, top)
+corner(moveBtn, FULL)
+onAccent(function() moveBtn.TextColor3 = Theme.Accent end)
+makeDraggable(moveBtn, shell, nil)
+
 -- Sidebar + content
 local sidebar = new("Frame", {
     Position = UDim2.fromOffset(0, 40), Size = UDim2.new(0, 104, 1, -40), BackgroundColor3 = Theme.Panel,
@@ -593,6 +606,59 @@ new("UIPadding", {
 local content = new("Frame", {
     Position = UDim2.fromOffset(104, 40), Size = UDim2.new(1, -104, 1, -40), BackgroundTransparency = 1,
 }, canvas)
+
+-- Resize grip (bottom-right corner)
+local resizeHandle = new("Frame", {
+    AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -2, 1, -2),
+    Size = UDim2.fromOffset(20, 20), BackgroundTransparency = 1, ZIndex = 40,
+}, canvas)
+local function gripLine(inset, len)
+    local line = new("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(len, 2),
+        Position = UDim2.fromOffset(20 - inset, 20 - inset), Rotation = -45,
+        BackgroundColor3 = Theme.Sub, ZIndex = 41,
+    }, resizeHandle)
+    corner(line, UDim.new(1, 0))
+    return line
+end
+local grip1, grip2 = gripLine(4, 8), gripLine(9, 13)
+onAccent(function()
+    grip1.BackgroundColor3 = Theme.Accent
+    grip2.BackgroundColor3 = Theme.Accent
+end)
+
+do
+    local resizing = false
+    local resizeStart, startSize
+    connect(resizeHandle.InputBegan, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            resizing = true
+            resizeStart = input.Position
+            startSize = Vector2.new(shell.Size.X.Offset, shell.Size.Y.Offset)
+            local ch
+            ch = input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    resizing = false
+                    if ch then ch:Disconnect() end
+                end
+            end)
+        end
+    end)
+    connect(UIS.InputChanged, function(input)
+        if resizing and (input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch) then
+            local d = input.Position - resizeStart
+            local vp = viewport()
+            local maxW = math.max(MIN_W, vp.X - shell.Position.X.Offset - 6)
+            local maxH = math.max(MIN_H, vp.Y - shell.Position.Y.Offset - 6)
+            local w = math.clamp(startSize.X + d.X, MIN_W, maxW)
+            local h = math.clamp(startSize.Y + d.Y, MIN_H, maxH)
+            shell.Size = UDim2.fromOffset(w, h)
+            customSize = Vector2.new(w, h)
+        end
+    end)
+end
 
 local function newPage()
     local sf = new("ScrollingFrame", {
@@ -1228,14 +1294,17 @@ sliderRow(settingsPage, "Volume", 0, 1, Settings.Volume,
 section(settingsPage, "Controls")
 infoRow(settingsPage, "Toggle Key (PC)", CONFIG.ToggleKey.Name)
 infoRow(settingsPage, "Open / Close", "Tap circle icon")
+infoRow(settingsPage, "Move Window", "Drag top bar or ✛ icon")
+infoRow(settingsPage, "Resize Window", "Drag bottom-right corner grip")
 
 local layoutWindow
 buttonRow(settingsPage, "Reset UI Position", function()
     local vp = viewport()
     icon.Position = UDim2.fromOffset(14, vp.Y * 0.35)
     clampFrame(icon)
+    customSize = nil
     layoutWindow(true)
-    notify("UI position reset")
+    notify("UI position & size reset")
 end)
 buttonRow(settingsPage, "Unload FastFlags", function()
     if env.FastFlagsUnload then env.FastFlagsUnload() end
@@ -1256,9 +1325,17 @@ end)
 ----------------------------------------------------------------
 layoutWindow = function(center)
     local vp = viewport()
-    shell.Size = UDim2.fromOffset(math.min(470, vp.X - 20), math.min(310, vp.Y - 20))
+    local w, h
+    if customSize then
+        w = math.clamp(customSize.X, MIN_W, vp.X - 20)
+        h = math.clamp(customSize.Y, MIN_H, vp.Y - 20)
+    else
+        w = math.min(DEFAULT_W, vp.X - 20)
+        h = math.min(DEFAULT_H, vp.Y - 20)
+    end
+    shell.Size = UDim2.fromOffset(w, h)
     if center then
-        shell.Position = UDim2.fromOffset((vp.X - shell.Size.X.Offset) / 2, (vp.Y - shell.Size.Y.Offset) / 2)
+        shell.Position = UDim2.fromOffset((vp.X - w) / 2, (vp.Y - h) / 2)
     end
     clampFrame(shell)
 end
