@@ -1,49 +1,279 @@
 --[[
-    Anti Lag / Fast Mode / Super Fast Mode
-    Universal LocalScript - Delta Executor compatible
-    Toggles are cumulative:
-      Anti Lag   = remove effects/particles/shadows
-      Fast Mode  = Anti Lag + smooth materials, no part shadows
-      Super Fast = Fast + hide decals/textures, low quality, no water/fog stuff
-    Turning a toggle OFF restores original values.
+    FastFlags v2.0  |  Universal LocalScript  |  Delta Executor compatible
+
+    Tabs:
+      Home     - creator info, date & time, game info, FPS/ping
+      Player   - player info + ESP
+      Misc     - Anti Lag / Fast Mode / Ultra Fast Mode
+      Settings - UI settings (color, rainbow border, sounds, reset, unload)
+
+    Circle icon = open/close. It can NOT leave the screen anymore.
+    PC: RightShift also opens/closes.
 ]]
 
+----------------------------------------------------------------
+-- CONFIG  (edit these)
+----------------------------------------------------------------
+local CONFIG = {
+    HubName   = "fastflagsHub",
+    Version   = "v2.0",
+    Creator   = "JAYVEE",
+    Discord   = "sooob",
+    ToggleKey = Enum.KeyCode.RightShift,
+    Sounds = {                           -- pwede mong palitan ng ibang sound ID
+        Click  = "rbxassetid://6895079853",
+        Toggle = "rbxassetid://6026984224",
+        Open   = "rbxassetid://6895079853",
+        Close  = "rbxassetid://6895079853",
+        Notify = "rbxassetid://6026984224",
+    },
+}
+
+----------------------------------------------------------------
+-- SERVICES
+----------------------------------------------------------------
 local Players = game:GetService("Players")
 local Lighting = game:GetService("Lighting")
 local UIS = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
 local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local SoundService = game:GetService("SoundService")
+local Debris = game:GetService("Debris")
+local Stats = game:GetService("Stats")
+local MarketplaceService = game:GetService("MarketplaceService")
 
 local lp = Players.LocalPlayer
+local env = (getgenv and getgenv()) or _G
 
--- Prevent duplicate GUI
-local GUI_NAME = "AntiLagDeltaUI"
-local function getParent()
+-- Unload previous copy
+if env.FastFlagsUnload then pcall(env.FastFlagsUnload) end
+
+local function getGuiParent()
     local ok, p = pcall(function()
         return (gethui and gethui()) or CoreGui
     end)
     if ok and p then return p end
     return lp:WaitForChild("PlayerGui")
 end
-local parentGui = getParent()
-local old = parentGui:FindFirstChild(GUI_NAME)
-if old then old:Destroy() end
+local parentGui = getGuiParent()
 
 ----------------------------------------------------------------
--- STATE + BACKUP
+-- HELPERS
 ----------------------------------------------------------------
-local state = { anti = false, fast = false, super = false }
+local running = true
+local conns = {}
+local function connect(signal, fn)
+    local c = signal:Connect(fn)
+    table.insert(conns, c)
+    return c
+end
+
+local function new(class, props, parent)
+    local inst = Instance.new(class)
+    if inst:IsA("GuiObject") then inst.BorderSizePixel = 0 end
+    if props then
+        for k, v in pairs(props) do inst[k] = v end
+    end
+    if parent then inst.Parent = parent end
+    return inst
+end
+
+local function corner(inst, r)
+    return new("UICorner", { CornerRadius = r or UDim.new(0, 8) }, inst)
+end
+local FULL = UDim.new(1, 0)
+
+local function stroke(inst, color, thick, trans)
+    return new("UIStroke", {
+        Color = color, Thickness = thick or 1, Transparency = trans or 0,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, inst)
+end
+
+local function TI(t, style, dir)
+    return TweenInfo.new(t or 0.2, style or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out)
+end
+local function tween(inst, info, props)
+    local t = TweenService:Create(inst, info, props)
+    t:Play()
+    return t
+end
+
+local orderCounter = 0
+local function ord()
+    orderCounter = orderCounter + 1
+    return orderCounter
+end
+
+----------------------------------------------------------------
+-- THEME
+----------------------------------------------------------------
+local Theme = {
+    Accent = Color3.fromRGB(140, 90, 255),
+    BG     = Color3.fromRGB(14, 14, 20),
+    Panel  = Color3.fromRGB(22, 22, 31),
+    Item   = Color3.fromRGB(32, 32, 44),
+    Off    = Color3.fromRGB(62, 62, 78),
+    Text   = Color3.fromRGB(240, 240, 250),
+    Sub    = Color3.fromRGB(150, 150, 172),
+}
+
+local accentFns = {}
+local function onAccent(fn)
+    table.insert(accentFns, fn)
+    pcall(fn)
+end
+local function setAccent(c)
+    Theme.Accent = c
+    for _, fn in ipairs(accentFns) do pcall(fn) end
+end
+
+local function rgbStr(c)
+    return string.format("rgb(%d,%d,%d)",
+        math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5))
+end
+
+local Settings = {
+    Sounds = true, Volume = 0.6, Rainbow = false, BgTransparency = 0.05,
+    ShowOverlay = true,
+}
+
+local function lbl(parent, props)
+    local base = {
+        BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 13,
+        TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left, Text = "",
+    }
+    for k, v in pairs(props) do base[k] = v end
+    return new("TextLabel", base, parent)
+end
+
+----------------------------------------------------------------
+-- SCREEN GUI
+----------------------------------------------------------------
+local gui = new("ScreenGui", {
+    Name = "FastFlagsUI", ResetOnSpawn = false, IgnoreGuiInset = true,
+    DisplayOrder = 999999, ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+})
+gui.Parent = parentGui
+
+local function viewport()
+    local a = gui.AbsoluteSize
+    if a.X <= 0 or a.Y <= 0 then
+        local cam = Workspace.CurrentCamera
+        return cam and cam.ViewportSize or Vector2.new(800, 400)
+    end
+    return a
+end
+
+local function clampedPos(frame, x, y)
+    local vp = viewport()
+    local s = Vector2.new(frame.Size.X.Offset, frame.Size.Y.Offset)
+    return UDim2.fromOffset(
+        math.clamp(x, 0, math.max(0, vp.X - s.X)),
+        math.clamp(y, 0, math.max(0, vp.Y - s.Y))
+    )
+end
+local function clampFrame(frame)
+    frame.Position = clampedPos(frame, frame.Position.X.Offset, frame.Position.Y.Offset)
+end
+
+----------------------------------------------------------------
+-- SOUND
+----------------------------------------------------------------
+local function playSound(key)
+    if not Settings.Sounds then return end
+    local id = CONFIG.Sounds[key]
+    if not id then return end
+    pcall(function()
+        local s = Instance.new("Sound")
+        s.SoundId = id
+        s.Volume = Settings.Volume
+        s.Parent = SoundService
+        s:Play()
+        Debris:AddItem(s, 3)
+    end)
+end
+
+----------------------------------------------------------------
+-- TOAST NOTIFICATION
+----------------------------------------------------------------
+local toast = new("Frame", {
+    Size = UDim2.fromOffset(250, 38), AnchorPoint = Vector2.new(0.5, 0),
+    Position = UDim2.new(0.5, 0, 0, -60), BackgroundColor3 = Theme.Panel, ZIndex = 50,
+}, gui)
+corner(toast, UDim.new(0, 10))
+local toastStroke = stroke(toast, Theme.Accent, 1.5)
+local toastLbl = lbl(toast, {
+    Size = UDim2.fromScale(1, 1), TextXAlignment = Enum.TextXAlignment.Center,
+    Font = Enum.Font.GothamSemibold, TextSize = 13, ZIndex = 51, RichText = true,
+})
+onAccent(function() toastStroke.Color = Theme.Accent end)
+
+local toastToken = 0
+local function notify(text)
+    toastToken = toastToken + 1
+    local my = toastToken
+    toastLbl.Text = text
+    playSound("Notify")
+    tween(toast, TI(0.35, Enum.EasingStyle.Back), { Position = UDim2.new(0.5, 0, 0, 14) })
+    task.delay(2, function()
+        if my == toastToken and running then
+            tween(toast, TI(0.25), { Position = UDim2.new(0.5, 0, 0, -60) })
+        end
+    end)
+end
+
+----------------------------------------------------------------
+-- DRAG (clamped to screen, tap detection)
+----------------------------------------------------------------
+local function makeDraggable(handle, target, onTap)
+    local dragging, moved = false, false
+    local dragStart, startX, startY
+    connect(handle.InputBegan, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging, moved = true, false
+            dragStart = input.Position
+            startX, startY = target.Position.X.Offset, target.Position.Y.Offset
+            local ch
+            ch = input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                    if ch then ch:Disconnect() end
+                    if not moved and onTap then onTap() end
+                end
+            end)
+        end
+    end)
+    connect(UIS.InputChanged, function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch) then
+            local d = input.Position - dragStart
+            if d.Magnitude > 6 then moved = true end
+            if moved then
+                target.Position = clampedPos(target, startX + d.X, startY + d.Y)
+            end
+        end
+    end)
+end
+
+----------------------------------------------------------------
+-- OPTIMIZER (Anti Lag / Fast / Ultra Fast)
+----------------------------------------------------------------
+local opt = { anti = false, fast = false, ultra = false }
 local backup = setmetatable({}, { __mode = "k" })
 local generation = 0
-local conn
+local descConn
+local origQuality
+local fpsCapChanged = false
 
 local function setProp(inst, prop, value)
     local ok, cur = pcall(function() return inst[prop] end)
     if not ok then return end
     backup[inst] = backup[inst] or {}
-    if backup[inst][prop] == nil then
-        backup[inst][prop] = cur
-    end
+    if backup[inst][prop] == nil then backup[inst][prop] = cur end
     pcall(function() inst[prop] = value end)
 end
 
@@ -56,22 +286,19 @@ local function restoreAll()
     table.clear(backup)
 end
 
-local function flags()
+local function optFlags()
     return {
-        anti = state.anti or state.fast or state.super,
-        fast = state.fast or state.super,
-        super = state.super,
+        anti = opt.anti or opt.fast or opt.ultra,
+        fast = opt.fast or opt.ultra,
+        ultra = opt.ultra,
     }
 end
 
 local function isOwnCharacter(inst)
     local char = lp.Character
-    return char and inst:IsDescendantOf(char)
+    return char ~= nil and inst:IsDescendantOf(char)
 end
 
-----------------------------------------------------------------
--- APPLY TO A SINGLE INSTANCE
-----------------------------------------------------------------
 local function applyInstance(inst, f)
     if f.anti then
         if inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam")
@@ -85,7 +312,6 @@ local function applyInstance(inst, f)
             setProp(inst, "Visible", false)
         end
     end
-
     if f.fast and inst:IsA("BasePart") then
         setProp(inst, "CastShadow", false)
         if not isOwnCharacter(inst) then
@@ -96,8 +322,7 @@ local function applyInstance(inst, f)
             setProp(inst, "RenderFidelity", Enum.RenderFidelity.Performance)
         end
     end
-
-    if f.super then
+    if f.ultra then
         if (inst:IsA("Decal") or inst:IsA("Texture")) and not isOwnCharacter(inst) then
             setProp(inst, "Transparency", 1)
         elseif inst:IsA("Atmosphere") then
@@ -110,9 +335,6 @@ local function applyInstance(inst, f)
     end
 end
 
-----------------------------------------------------------------
--- APPLY GLOBAL SETTINGS
-----------------------------------------------------------------
 local function applyGlobal(f)
     if f.anti then
         setProp(Lighting, "GlobalShadows", false)
@@ -129,43 +351,52 @@ local function applyGlobal(f)
             setProp(t, "WaterTransparency", 1)
         end)
     end
-    if f.super then
-        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
-        pcall(function() Workspace.Terrain.Decoration = false end)
-        if setfpscap then pcall(setfpscap, 999) end
+    if f.ultra then
+        pcall(function()
+            origQuality = settings().Rendering.QualityLevel
+            settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+        end)
+        pcall(function() setProp(Workspace.Terrain, "Decoration", false) end)
+        if setfpscap then
+            pcall(setfpscap, 999)
+            fpsCapChanged = true
+        end
     end
 end
 
-----------------------------------------------------------------
--- REFRESH (restore -> reapply based on toggles)
-----------------------------------------------------------------
-local function refresh()
-    generation += 1
+local function refreshOptimizer()
+    generation = generation + 1
     local myGen = generation
 
-    if conn then conn:Disconnect() conn = nil end
+    if descConn then descConn:Disconnect() descConn = nil end
     restoreAll()
+    if origQuality then
+        pcall(function() settings().Rendering.QualityLevel = origQuality end)
+        origQuality = nil
+    end
+    if fpsCapChanged and setfpscap then
+        pcall(setfpscap, 60)
+        fpsCapChanged = false
+    end
 
-    local f = flags()
-    if not (f.anti or f.fast or f.super) then return end
+    local f = optFlags()
+    if not (f.anti or f.fast or f.ultra) then return end
 
     applyGlobal(f)
 
-    -- new objects that spawn later
-    conn = game.DescendantAdded:Connect(function(inst)
+    descConn = game.DescendantAdded:Connect(function(inst)
         task.defer(function()
-            applyInstance(inst, flags())
+            if running then applyInstance(inst, optFlags()) end
         end)
     end)
 
-    -- existing objects (batched so it won't freeze)
     task.spawn(function()
         local count = 0
         local function scan(root)
             for _, inst in ipairs(root:GetDescendants()) do
-                if generation ~= myGen then return end
+                if generation ~= myGen or not running then return end
                 applyInstance(inst, f)
-                count += 1
+                count = count + 1
                 if count % 250 == 0 then task.wait() end
             end
         end
@@ -175,131 +406,943 @@ local function refresh()
 end
 
 ----------------------------------------------------------------
--- UI
+-- ESP
 ----------------------------------------------------------------
-local gui = Instance.new("ScreenGui")
-gui.Name = GUI_NAME
-gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = true
-gui.Parent = parentGui
+local ESP = {
+    Enabled = false, Names = true, Distance = true, Health = true,
+    Chams = true, TeamCheck = false, Color = Color3.fromRGB(255, 70, 70),
+}
+local espFolder = Instance.new("Folder")
+espFolder.Name = "FF_ESP"
+local okp = pcall(function() espFolder.Parent = CoreGui end)
+if not okp or not espFolder.Parent then espFolder.Parent = parentGui end
 
-local main = Instance.new("Frame")
-main.Size = UDim2.fromOffset(210, 190)
-main.Position = UDim2.new(0, 20, 0.5, -95)
-main.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-main.BorderSizePixel = 0
-main.Active = true
-main.Parent = gui
-Instance.new("UICorner", main).CornerRadius = UDim.new(0, 10)
+local espObjects = {}
 
-local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, -60, 0, 32)
-title.Position = UDim2.fromOffset(10, 0)
-title.BackgroundTransparency = 1
-title.Text = "Anti Lag Hub"
-title.TextColor3 = Color3.new(1, 1, 1)
-title.Font = Enum.Font.GothamBold
-title.TextSize = 16
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.Parent = main
+local function removeESP(plr)
+    local o = espObjects[plr]
+    if o then
+        pcall(function() o.hl:Destroy() end)
+        pcall(function() o.bb:Destroy() end)
+        espObjects[plr] = nil
+    end
+end
+local function clearESP()
+    for plr in pairs(espObjects) do removeESP(plr) end
+end
 
-local function smallButton(text, xOffset, color)
-    local b = Instance.new("TextButton")
-    b.Size = UDim2.fromOffset(24, 24)
-    b.Position = UDim2.new(1, xOffset, 0, 4)
-    b.BackgroundColor3 = color
-    b.Text = text
-    b.TextColor3 = Color3.new(1, 1, 1)
-    b.Font = Enum.Font.GothamBold
-    b.TextSize = 14
-    b.BorderSizePixel = 0
-    b.Parent = main
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+local function buildESP(plr, char)
+    removeESP(plr)
+    local head = char:FindFirstChild("Head") or char:FindFirstChildWhichIsA("BasePart")
+    if not head then return end
+    local hl = new("Highlight", {
+        Adornee = char, FillColor = ESP.Color, OutlineColor = Color3.new(1, 1, 1),
+        FillTransparency = 0.6, OutlineTransparency = 0,
+        DepthMode = Enum.HighlightDepthMode.AlwaysOnTop,
+    }, espFolder)
+    local bb = new("BillboardGui", {
+        Adornee = head, Size = UDim2.fromOffset(170, 44), StudsOffset = Vector3.new(0, 2.8, 0),
+        AlwaysOnTop = true,
+    }, espFolder)
+    local label = lbl(bb, {
+        Size = UDim2.fromScale(1, 1), TextXAlignment = Enum.TextXAlignment.Center,
+        Font = Enum.Font.GothamBold, TextSize = 13, TextColor3 = ESP.Color,
+        TextStrokeTransparency = 0.4, RichText = false,
+    })
+    espObjects[plr] = { hl = hl, bb = bb, label = label, char = char }
+end
+
+task.spawn(function()
+    local wasOn = false
+    while running do
+        if ESP.Enabled then
+            wasOn = true
+            local myChar = lp.Character
+            local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= lp then
+                    local char = plr.Character
+                    local hum = char and char:FindFirstChildOfClass("Humanoid")
+                    local skip = (not char) or (not hum) or hum.Health <= 0
+                        or (ESP.TeamCheck and lp.Team ~= nil and plr.Team == lp.Team)
+                    if skip then
+                        removeESP(plr)
+                    else
+                        local o = espObjects[plr]
+                        if (not o) or o.char ~= char then
+                            buildESP(plr, char)
+                            o = espObjects[plr]
+                        end
+                        if o then
+                            o.hl.Enabled = ESP.Chams
+                            o.hl.FillColor = ESP.Color
+                            o.label.TextColor3 = ESP.Color
+                            o.bb.Enabled = ESP.Names or ESP.Distance or ESP.Health
+                            local lines = {}
+                            if ESP.Names then table.insert(lines, plr.DisplayName) end
+                            local second = {}
+                            local root = char:FindFirstChild("HumanoidRootPart")
+                            if ESP.Distance and myRoot and root then
+                                table.insert(second, math.floor((myRoot.Position - root.Position).Magnitude) .. "m")
+                            end
+                            if ESP.Health then
+                                table.insert(second, "HP " .. math.floor(hum.Health))
+                            end
+                            if #second > 0 then table.insert(lines, table.concat(second, " | ")) end
+                            o.label.Text = table.concat(lines, "\n")
+                        end
+                    end
+                end
+            end
+        elseif wasOn then
+            wasOn = false
+            clearESP()
+        end
+        task.wait(0.1)
+    end
+end)
+connect(Players.PlayerRemoving, function(plr) removeESP(plr) end)
+
+----------------------------------------------------------------
+-- ICON (circle)
+----------------------------------------------------------------
+local icon = new("TextButton", {
+    Name = "Icon", Size = UDim2.fromOffset(54, 54), Position = UDim2.fromOffset(14, 120),
+    BackgroundColor3 = Theme.Panel, Text = "FF", Font = Enum.Font.GothamBlack, TextSize = 20,
+    TextColor3 = Theme.Accent, AutoButtonColor = false, ZIndex = 20,
+}, gui)
+corner(icon, FULL)
+local iconStroke = stroke(icon, Theme.Accent, 2.5)
+onAccent(function()
+    icon.TextColor3 = Theme.Accent
+    iconStroke.Color = Theme.Accent
+end)
+
+local ring = new("Frame", {
+    AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
+    Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 19,
+}, icon)
+corner(ring, FULL)
+local ringStroke = stroke(ring, Theme.Accent, 2, 0.3)
+onAccent(function() ringStroke.Color = Theme.Accent end)
+task.spawn(function()
+    while running do
+        ring.Size = UDim2.fromScale(1, 1)
+        ringStroke.Transparency = 0.3
+        tween(ring, TI(1.4), { Size = UDim2.fromScale(1.55, 1.55) })
+        tween(ringStroke, TI(1.4), { Transparency = 1 })
+        task.wait(2)
+    end
+end)
+
+----------------------------------------------------------------
+-- WINDOW
+----------------------------------------------------------------
+local shell = new("Frame", {
+    Name = "Window", Size = UDim2.fromOffset(470, 310),
+    Position = UDim2.fromOffset(100, 40), BackgroundTransparency = 1, Visible = false, ZIndex = 5,
+}, gui)
+corner(shell, UDim.new(0, 14))
+local shellStroke = stroke(shell, Theme.Accent, 2, 1)
+local rainbowGrad = new("UIGradient", {
+    Enabled = false,
+    Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
+        ColorSequenceKeypoint.new(0.17, Color3.fromRGB(255, 255, 0)),
+        ColorSequenceKeypoint.new(0.33, Color3.fromRGB(0, 255, 0)),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 255, 255)),
+        ColorSequenceKeypoint.new(0.67, Color3.fromRGB(0, 0, 255)),
+        ColorSequenceKeypoint.new(0.83, Color3.fromRGB(255, 0, 255)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0)),
+    }),
+}, shellStroke)
+onAccent(function() shellStroke.Color = Theme.Accent end)
+
+local canvas = new("CanvasGroup", {
+    Size = UDim2.fromScale(1, 1), BackgroundColor3 = Theme.BG,
+    BackgroundTransparency = Settings.BgTransparency, GroupTransparency = 1,
+}, shell)
+corner(canvas, UDim.new(0, 14))
+
+-- Top bar
+local top = new("Frame", { Size = UDim2.new(1, 0, 0, 40), BackgroundColor3 = Theme.Panel }, canvas)
+local titleLbl = lbl(top, {
+    Position = UDim2.fromOffset(14, 0), Size = UDim2.new(1, -100, 1, 0),
+    Font = Enum.Font.GothamBlack, TextSize = 18, RichText = true,
+})
+onAccent(function()
+    titleLbl.Text = string.format('<font color="%s">%s</font>%s  <font size="11" color="rgb(150,150,172)">%s</font>',
+        rgbStr(Theme.Accent), string.sub(CONFIG.HubName, 1, 4), string.sub(CONFIG.HubName, 5), CONFIG.Version)
+end)
+local closeBtn = new("TextButton", {
+    AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -10, 0.5, 0), Size = UDim2.fromOffset(26, 26),
+    BackgroundColor3 = Color3.fromRGB(200, 60, 70), Text = "X", Font = Enum.Font.GothamBold,
+    TextSize = 13, TextColor3 = Color3.new(1, 1, 1), AutoButtonColor = false,
+}, top)
+corner(closeBtn, FULL)
+
+-- Sidebar + content
+local sidebar = new("Frame", {
+    Position = UDim2.fromOffset(0, 40), Size = UDim2.new(0, 104, 1, -40), BackgroundColor3 = Theme.Panel,
+}, canvas)
+new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, sidebar)
+new("UIPadding", {
+    PaddingTop = UDim.new(0, 10), PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8),
+}, sidebar)
+
+local content = new("Frame", {
+    Position = UDim2.fromOffset(104, 40), Size = UDim2.new(1, -104, 1, -40), BackgroundTransparency = 1,
+}, canvas)
+
+local function newPage()
+    local sf = new("ScrollingFrame", {
+        Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ScrollBarThickness = 3,
+        CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        ScrollingDirection = Enum.ScrollingDirection.Y, Visible = false,
+    }, content)
+    new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, sf)
+    new("UIPadding", {
+        PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8),
+        PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 10),
+    }, sf)
+    onAccent(function() sf.ScrollBarImageColor3 = Theme.Accent end)
+    return sf
+end
+
+-- Tabs
+local tabButtons, tabPages = {}, {}
+local currentTab
+local function selectTab(name, silent)
+    currentTab = name
+    for n, b in pairs(tabButtons) do
+        local on = (n == name)
+        tween(b, TI(0.2), {
+            BackgroundColor3 = on and Theme.Accent or Theme.Item,
+            TextColor3 = on and Color3.new(1, 1, 1) or Theme.Sub,
+        })
+        tabPages[n].Visible = on
+    end
+    if not silent then playSound("Click") end
+end
+local function addTab(name, emoji)
+    local b = new("TextButton", {
+        Size = UDim2.new(1, 0, 0, 38), BackgroundColor3 = Theme.Item, Text = emoji .. "  " .. name,
+        Font = Enum.Font.GothamSemibold, TextSize = 13, TextColor3 = Theme.Sub,
+        AutoButtonColor = false, LayoutOrder = ord(),
+    }, sidebar)
+    corner(b, UDim.new(0, 8))
+    tabButtons[name] = b
+    tabPages[name] = newPage()
+    connect(b.MouseButton1Click, function() selectTab(name) end)
+    return tabPages[name]
+end
+onAccent(function() if currentTab then selectTab(currentTab, true) end end)
+
+----------------------------------------------------------------
+-- UI COMPONENTS
+----------------------------------------------------------------
+local function section(page, text)
+    local l = lbl(page, {
+        Size = UDim2.new(1, 0, 0, 20), Text = string.upper(text),
+        Font = Enum.Font.GothamBold, TextSize = 11, LayoutOrder = ord(),
+    })
+    onAccent(function() l.TextColor3 = Theme.Accent end)
+    return l
+end
+
+local function infoRow(page, name, value)
+    local row = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 30), BackgroundColor3 = Theme.Item, LayoutOrder = ord(),
+    }, page)
+    corner(row, UDim.new(0, 8))
+    lbl(row, {
+        Position = UDim2.fromOffset(12, 0), Size = UDim2.new(0.4, -12, 1, 0), Text = name,
+        TextColor3 = Theme.Sub, TextSize = 12,
+    })
+    local v = lbl(row, {
+        Position = UDim2.new(0.4, 0, 0, 0), Size = UDim2.new(0.6, -12, 1, 0), Text = tostring(value or ""),
+        TextXAlignment = Enum.TextXAlignment.Right, Font = Enum.Font.GothamSemibold, TextSize = 12,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    })
+    return function(newValue) v.Text = tostring(newValue) end
+end
+
+local function buttonRow(page, text, cb, color)
+    local b = new("TextButton", {
+        Size = UDim2.new(1, 0, 0, 36), BackgroundColor3 = color or Theme.Item, Text = text,
+        Font = Enum.Font.GothamSemibold, TextSize = 13, TextColor3 = Theme.Text,
+        AutoButtonColor = false, LayoutOrder = ord(),
+    }, page)
+    corner(b, UDim.new(0, 8))
+    local base = color or Theme.Item
+    connect(b.MouseEnter, function() tween(b, TI(0.12), { BackgroundColor3 = base:Lerp(Color3.new(1, 1, 1), 0.12) }) end)
+    connect(b.MouseLeave, function() tween(b, TI(0.12), { BackgroundColor3 = base }) end)
+    connect(b.MouseButton1Click, function()
+        playSound("Click")
+        if cb then cb() end
+    end)
     return b
 end
 
-local minBtn = smallButton("-", -56, Color3.fromRGB(70, 70, 80))
-local closeBtn = smallButton("X", -28, Color3.fromRGB(200, 60, 60))
+local function toggleRow(page, text, desc, default, cb)
+    local h = desc and 54 or 40
+    local row = new("TextButton", {
+        Size = UDim2.new(1, 0, 0, h), BackgroundColor3 = Theme.Item, Text = "",
+        AutoButtonColor = false, LayoutOrder = ord(),
+    }, page)
+    corner(row, UDim.new(0, 8))
+    lbl(row, {
+        Position = UDim2.fromOffset(12, desc and 7 or 0), Size = UDim2.new(1, -74, 0, desc and 18 or h),
+        Text = text, Font = Enum.Font.GothamSemibold, TextSize = 14,
+    })
+    if desc then
+        lbl(row, {
+            Position = UDim2.fromOffset(12, 26), Size = UDim2.new(1, -74, 0, 24), Text = desc,
+            TextColor3 = Theme.Sub, TextSize = 11, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top,
+        })
+    end
+    local track = new("Frame", {
+        AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -12, 0.5, 0),
+        Size = UDim2.fromOffset(42, 22), BackgroundColor3 = Theme.Off,
+    }, row)
+    corner(track, FULL)
+    local knob = new("Frame", {
+        AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 3, 0.5, 0),
+        Size = UDim2.fromOffset(16, 16), BackgroundColor3 = Color3.new(1, 1, 1),
+    }, track)
+    corner(knob, FULL)
 
-local body = Instance.new("Frame")
-body.Size = UDim2.new(1, 0, 1, -36)
-body.Position = UDim2.fromOffset(0, 36)
-body.BackgroundTransparency = 1
-body.Parent = main
+    local state = false
+    local obj = {}
+    local function render(animate)
+        local info = TI(animate and 0.18 or 0)
+        tween(knob, info, { Position = state and UDim2.new(1, -19, 0.5, 0) or UDim2.new(0, 3, 0.5, 0) })
+        tween(track, info, { BackgroundColor3 = state and Theme.Accent or Theme.Off })
+    end
+    function obj.Set(v, silent)
+        state = v and true or false
+        render(true)
+        if not silent and cb then cb(state) end
+    end
+    function obj.Get() return state end
+    onAccent(function() render(false) end)
 
-local layout = Instance.new("UIListLayout", body)
-layout.Padding = UDim.new(0, 8)
-layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-
-local ON = Color3.fromRGB(46, 160, 90)
-local OFF = Color3.fromRGB(60, 60, 70)
-
-local buttons = {}
-local function makeToggle(label, key)
-    local b = Instance.new("TextButton")
-    b.Size = UDim2.new(1, -20, 0, 36)
-    b.BackgroundColor3 = OFF
-    b.Text = label .. ": OFF"
-    b.TextColor3 = Color3.new(1, 1, 1)
-    b.Font = Enum.Font.GothamSemibold
-    b.TextSize = 14
-    b.BorderSizePixel = 0
-    b.Parent = body
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
-
-    buttons[key] = { btn = b, label = label }
-
-    b.MouseButton1Click:Connect(function()
-        state[key] = not state[key]
-        b.Text = label .. (state[key] and ": ON" or ": OFF")
-        b.BackgroundColor3 = state[key] and ON or OFF
-        refresh()
+    connect(row.MouseEnter, function() tween(row, TI(0.12), { BackgroundColor3 = Color3.fromRGB(40, 40, 55) }) end)
+    connect(row.MouseLeave, function() tween(row, TI(0.12), { BackgroundColor3 = Theme.Item }) end)
+    connect(row.MouseButton1Click, function()
+        playSound("Toggle")
+        obj.Set(not state)
     end)
+    obj.Set(default, true)
+    return obj
 end
 
-makeToggle("Anti Lag", "anti")
-makeToggle("Fast Mode", "fast")
-makeToggle("Super Fast Mode", "super")
+local function sliderRow(page, text, min, max, default, fmt, cb)
+    local row = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 54), BackgroundColor3 = Theme.Item, LayoutOrder = ord(),
+    }, page)
+    corner(row, UDim.new(0, 8))
+    lbl(row, {
+        Position = UDim2.fromOffset(12, 6), Size = UDim2.new(0.6, 0, 0, 18), Text = text,
+        Font = Enum.Font.GothamSemibold, TextSize = 13,
+    })
+    local valLbl = lbl(row, {
+        Position = UDim2.new(0.6, 0, 0, 6), Size = UDim2.new(0.4, -12, 0, 18),
+        TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = Theme.Sub, TextSize = 12,
+    })
+    local track = new("Frame", {
+        Position = UDim2.new(0, 12, 0, 36), Size = UDim2.new(1, -24, 0, 6), BackgroundColor3 = Theme.Off,
+    }, row)
+    corner(track, FULL)
+    local fill = new("Frame", { Size = UDim2.fromScale(0, 1), BackgroundColor3 = Theme.Accent }, track)
+    corner(fill, FULL)
+    local knob = new("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0, 0.5),
+        Size = UDim2.fromOffset(16, 16), BackgroundColor3 = Color3.new(1, 1, 1),
+    }, track)
+    corner(knob, FULL)
+    onAccent(function() fill.BackgroundColor3 = Theme.Accent end)
 
--- Minimize
-local minimized = false
-minBtn.MouseButton1Click:Connect(function()
-    minimized = not minimized
-    body.Visible = not minimized
-    main.Size = minimized and UDim2.fromOffset(210, 36) or UDim2.fromOffset(210, 190)
-end)
+    local function setAlpha(a)
+        a = math.clamp(a, 0, 1)
+        fill.Size = UDim2.fromScale(a, 1)
+        knob.Position = UDim2.fromScale(a, 0.5)
+        local value = min + (max - min) * a
+        valLbl.Text = fmt and fmt(value) or tostring(math.floor(value * 100) / 100)
+        return value
+    end
+    setAlpha((default - min) / (max - min))
 
--- Close (restores everything)
-closeBtn.MouseButton1Click:Connect(function()
-    state.anti, state.fast, state.super = false, false, false
-    refresh()
-    gui:Destroy()
-end)
-
--- Dragging (mouse + touch)
-do
-    local dragging, dragStart, startPos
-    main.InputBegan:Connect(function(input)
+    local hit = new("TextButton", {
+        Position = UDim2.fromOffset(0, 24), Size = UDim2.new(1, 0, 0, 30),
+        BackgroundTransparency = 1, Text = "", AutoButtonColor = false,
+    }, row)
+    local dragging = false
+    local function fromX(x)
+        local a = (x - track.AbsolutePosition.X) / math.max(1, track.AbsoluteSize.X)
+        local v = setAlpha(a)
+        if cb then cb(v) end
+    end
+    connect(hit.InputBegan, function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
             or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
-            dragStart = input.Position
-            startPos = main.Position
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
-            end)
+            page.ScrollingEnabled = false
+            fromX(input.Position.X)
         end
     end)
-    UIS.InputChanged:Connect(function(input)
+    connect(UIS.InputChanged, function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
             or input.UserInputType == Enum.UserInputType.Touch) then
-            local delta = input.Position - dragStart
-            main.Position = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset + delta.X,
-                startPos.Y.Scale, startPos.Y.Offset + delta.Y
-            )
+            fromX(input.Position.X)
+        end
+    end)
+    connect(UIS.InputEnded, function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch) then
+            dragging = false
+            page.ScrollingEnabled = true
         end
     end)
 end
+
+local function colorRow(page, text, colors, default, cb)
+    local row = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 62), BackgroundColor3 = Theme.Item, LayoutOrder = ord(),
+    }, page)
+    corner(row, UDim.new(0, 8))
+    lbl(row, {
+        Position = UDim2.fromOffset(12, 6), Size = UDim2.new(1, -24, 0, 18), Text = text,
+        Font = Enum.Font.GothamSemibold, TextSize = 13,
+    })
+    local holder = new("Frame", {
+        Position = UDim2.fromOffset(12, 28), Size = UDim2.new(1, -24, 0, 28), BackgroundTransparency = 1,
+    }, row)
+    new("UIListLayout", {
+        FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8),
+        VerticalAlignment = Enum.VerticalAlignment.Center,
+    }, holder)
+    local strokes = {}
+    for i, c in ipairs(colors) do
+        local b = new("TextButton", {
+            Size = UDim2.fromOffset(26, 26), BackgroundColor3 = c, Text = "",
+            AutoButtonColor = false, LayoutOrder = i,
+        }, holder)
+        corner(b, FULL)
+        local s = stroke(b, Color3.new(1, 1, 1), 2, (c == default) and 0 or 1)
+        strokes[i] = s
+        connect(b.MouseButton1Click, function()
+            for j, st in ipairs(strokes) do
+                tween(st, TI(0.15), { Transparency = (j == i) and 0 or 1 })
+            end
+            playSound("Click")
+            cb(c)
+        end)
+    end
+end
+
+----------------------------------------------------------------
+-- LIVE DATA
+----------------------------------------------------------------
+local fps, frames, lastT = 60, 0, os.clock()
+connect(RunService.Heartbeat, function()
+    frames = frames + 1
+    local now = os.clock()
+    if now - lastT >= 0.5 then
+        fps = math.floor(frames / (now - lastT) + 0.5)
+        frames = 0
+        lastT = now
+    end
+    if Settings.Rainbow then
+        rainbowGrad.Rotation = (rainbowGrad.Rotation + 2) % 360
+    end
+end)
+
+local function getPing()
+    local ok, v = pcall(function()
+        return Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+    end)
+    return ok and math.floor(v) or 0
+end
+
+local live = {}
+
+----------------------------------------------------------------
+-- ON-SCREEN OVERLAY (FPS + Ping, always visible, draggable)
+----------------------------------------------------------------
+local overlay = new("Frame", {
+    Name = "FF_Overlay", Size = UDim2.fromOffset(168, 32),
+    Position = UDim2.fromOffset(14, 14), BackgroundColor3 = Theme.Panel,
+    BackgroundTransparency = 0.08, ZIndex = 30,
+}, gui)
+corner(overlay, UDim.new(0, 9))
+local overlayStroke = stroke(overlay, Theme.Accent, 1.5, 0.35)
+onAccent(function() overlayStroke.Color = Theme.Accent end)
+local overlayLbl = lbl(overlay, {
+    Size = UDim2.fromScale(1, 1), Text = "", TextXAlignment = Enum.TextXAlignment.Center,
+    Font = Enum.Font.GothamBold, TextSize = 13, RichText = true, ZIndex = 31,
+})
+
+local function statColor(v, good, ok)
+    if v <= good then return Color3.fromRGB(80, 220, 120) end
+    if v <= ok then return Color3.fromRGB(255, 210, 70) end
+    return Color3.fromRGB(230, 80, 90)
+end
+
+table.insert(live, function()
+    local ping = getPing()
+    local fColor = statColor(60 - fps, 10, 30) -- lower is worse, so invert via 60-fps
+    local pColor = statColor(ping, 80, 150)
+    overlayLbl.Text = string.format(
+        '<font color="%s">● FPS %d</font>    <font color="%s">● %d ms</font>',
+        rgbStr(fColor), fps, rgbStr(pColor), ping
+    )
+end)
+
+makeDraggable(overlay, overlay, nil)
+
+----------------------------------------------------------------
+-- TAB 1: HOME
+----------------------------------------------------------------
+local home = addTab("Home", "🏠")
+
+local banner = new("Frame", {
+    Size = UDim2.new(1, 0, 0, 74), BackgroundColor3 = Theme.Accent, LayoutOrder = ord(),
+}, home)
+corner(banner, UDim.new(0, 10))
+new("UIGradient", {
+    Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(70, 70, 90)),
+    Rotation = 35,
+}, banner)
+onAccent(function() banner.BackgroundColor3 = Theme.Accent end)
+lbl(banner, {
+    Position = UDim2.fromOffset(14, 8), Size = UDim2.new(1, -28, 0, 30), Text = CONFIG.HubName,
+    Font = Enum.Font.GothamBlack, TextSize = 26, TextColor3 = Color3.new(1, 1, 1),
+})
+lbl(banner, {
+    Position = UDim2.fromOffset(14, 40), Size = UDim2.new(1, -28, 0, 22),
+    Text = "Smooth. Fast. Lag-free.  " .. CONFIG.Version, Font = Enum.Font.GothamSemibold,
+    TextSize = 12, TextColor3 = Color3.fromRGB(235, 235, 245),
+})
+
+section(home, "Creator")
+infoRow(home, "Made by", CONFIG.Creator)
+infoRow(home, "Discord", CONFIG.Discord)
+infoRow(home, "Version", CONFIG.Version)
+buttonRow(home, "Copy Discord Link", function()
+    if setclipboard then
+        pcall(setclipboard, CONFIG.Discord)
+        notify("Copied Discord link!")
+    else
+        notify("Clipboard not supported")
+    end
+end)
+
+section(home, "Date & Time")
+local setDate = infoRow(home, "Date", "")
+local setTime = infoRow(home, "Time", "")
+
+section(home, "Game")
+local setGame = infoRow(home, "Game", "Loading...")
+infoRow(home, "Place ID", game.PlaceId)
+local setPlayers = infoRow(home, "Players", "")
+local setFps = infoRow(home, "FPS", "")
+local setPing = infoRow(home, "Ping", "")
+
+task.spawn(function()
+    local ok, info = pcall(function() return MarketplaceService:GetProductInfo(game.PlaceId) end)
+    setGame((ok and info and info.Name) or "Unknown")
+end)
+
+table.insert(live, function()
+    setDate(os.date("%A, %B %d, %Y"))
+    setTime(os.date("%I:%M:%S %p"))
+    setPlayers(#Players:GetPlayers() .. " / " .. Players.MaxPlayers)
+    setFps(fps)
+    setPing(getPing() .. " ms")
+end)
+
+----------------------------------------------------------------
+-- TAB 2: PLAYER (info + ESP)
+----------------------------------------------------------------
+local playerPage = addTab("Player", "👤")
+
+section(playerPage, "Player Info")
+infoRow(playerPage, "Username", lp.Name)
+infoRow(playerPage, "Display Name", lp.DisplayName)
+infoRow(playerPage, "User ID", lp.UserId)
+infoRow(playerPage, "Account Age", lp.AccountAge .. " days")
+local setTeam = infoRow(playerPage, "Team", "")
+local setHealth = infoRow(playerPage, "Health", "")
+local setSpeed = infoRow(playerPage, "WalkSpeed", "")
+local setPos = infoRow(playerPage, "Position", "")
+
+table.insert(live, function()
+    local char = lp.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    setTeam(lp.Team and lp.Team.Name or "None")
+    if hum then
+        setHealth(math.floor(hum.Health) .. " / " .. math.floor(hum.MaxHealth))
+        setSpeed(math.floor(hum.WalkSpeed))
+    else
+        setHealth("N/A")
+        setSpeed("N/A")
+    end
+    if root then
+        local p = root.Position
+        setPos(math.floor(p.X) .. ", " .. math.floor(p.Y) .. ", " .. math.floor(p.Z))
+    else
+        setPos("N/A")
+    end
+end)
+
+section(playerPage, "ESP")
+toggleRow(playerPage, "ESP", "See players through walls", false, function(v)
+    ESP.Enabled = v
+    notify("ESP " .. (v and "<font color=\"rgb(80,220,120)\">ON</font>" or "<font color=\"rgb(230,80,90)\">OFF</font>"))
+end)
+toggleRow(playerPage, "Chams", "Highlight player body", true, function(v) ESP.Chams = v end)
+toggleRow(playerPage, "Names", nil, true, function(v) ESP.Names = v end)
+toggleRow(playerPage, "Distance", nil, true, function(v) ESP.Distance = v end)
+toggleRow(playerPage, "Health", nil, true, function(v) ESP.Health = v end)
+toggleRow(playerPage, "Team Check", "Hide teammates", false, function(v) ESP.TeamCheck = v end)
+colorRow(playerPage, "ESP Color", {
+    Color3.fromRGB(255, 70, 70), Color3.fromRGB(255, 160, 40), Color3.fromRGB(255, 230, 70),
+    Color3.fromRGB(70, 230, 120), Color3.fromRGB(70, 200, 255), Color3.fromRGB(160, 100, 255),
+    Color3.fromRGB(255, 255, 255),
+}, ESP.Color, function(c) ESP.Color = c end)
+
+section(playerPage, "Nearest Enemy")
+local setNear1 = infoRow(playerPage, "#1 Nearest", "-")
+local setNear2 = infoRow(playerPage, "#2 Nearest", "-")
+local setNear3 = infoRow(playerPage, "#3 Nearest", "-")
+
+table.insert(live, function()
+    local char = lp.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local list = {}
+    if root then
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= lp then
+                local oChar = plr.Character
+                local oHum = oChar and oChar:FindFirstChildOfClass("Humanoid")
+                local oRoot = oChar and oChar:FindFirstChild("HumanoidRootPart")
+                if oHum and oHum.Health > 0 and oRoot then
+                    table.insert(list, {
+                        name = plr.DisplayName,
+                        dist = (root.Position - oRoot.Position).Magnitude,
+                    })
+                end
+            end
+        end
+        table.sort(list, function(a, b) return a.dist < b.dist end)
+    end
+    local setters = { setNear1, setNear2, setNear3 }
+    for i, setter in ipairs(setters) do
+        local e = list[i]
+        setter(e and (e.name .. "  -  " .. math.floor(e.dist) .. "m") or "-")
+    end
+end)
+
+section(playerPage, "Visual Aid")
+local fovCircle = new("Frame", {
+    AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
+    Size = UDim2.fromOffset(300, 300), BackgroundTransparency = 1, Visible = false, ZIndex = 15,
+}, gui)
+corner(fovCircle, FULL)
+local fovStroke = stroke(fovCircle, Theme.Accent, 2, 0.2)
+onAccent(function() fovStroke.Color = Theme.Accent end)
+toggleRow(playerPage, "FOV Circle", "Draws a reference circle at screen center", false, function(v)
+    fovCircle.Visible = v
+end)
+sliderRow(playerPage, "FOV Size", 50, 500, 300, function(v) return math.floor(v) .. "px" end, function(v)
+    fovCircle.Size = UDim2.fromOffset(v, v)
+end)
+
+----------------------------------------------------------------
+-- CUSTOM SKYBOX (solid-color dome, no external image assets needed)
+----------------------------------------------------------------
+local skyState = { active = "Off" }
+local skyDome, skyRenderConn, skyFogBackup
+
+local SKY_PRESETS = {
+    Gray      = { color = Color3.fromRGB(150, 150, 150), fog = Color3.fromRGB(150, 150, 150) },
+    Black     = { color = Color3.fromRGB(0, 0, 0),       fog = Color3.fromRGB(0, 0, 0) },
+    -- Stylized recreation (not Mojang's actual textures) - flat Minecraft-like overworld blue
+    Minecraft = { color = Color3.fromRGB(125, 180, 255), fog = Color3.fromRGB(190, 220, 255) },
+}
+
+local function clearSky()
+    if skyRenderConn then skyRenderConn:Disconnect() skyRenderConn = nil end
+    if skyDome then pcall(function() skyDome:Destroy() end) skyDome = nil end
+    if skyFogBackup then
+        pcall(function()
+            Lighting.FogColor = skyFogBackup.FogColor
+        end)
+        skyFogBackup = nil
+    end
+end
+
+local function applySky(name)
+    clearSky()
+    skyState.active = name
+    local preset = SKY_PRESETS[name]
+    if not preset then return end
+
+    skyFogBackup = { FogColor = Lighting.FogColor }
+    Lighting.FogColor = preset.fog
+
+    local dome = new("Part", {
+        Name = "FF_SkyDome", Shape = Enum.PartType.Ball, Anchored = true, CanCollide = false,
+        CanQuery = false, CanTouch = false, CastShadow = false, Locked = true, Massless = true,
+        Material = Enum.Material.SmoothPlastic, Color = preset.color,
+    })
+    new("SpecialMesh", { MeshType = Enum.MeshType.Sphere, Scale = Vector3.new(-1, -1, -1) * 4000 }, dome)
+    dome.Parent = Workspace
+    skyDome = dome
+
+    skyRenderConn = connect(RunService.RenderStepped, function()
+        local cam = Workspace.CurrentCamera
+        if cam and skyDome then
+            skyDome.CFrame = cam.CFrame
+        end
+    end)
+end
+
+----------------------------------------------------------------
+-- TAB 3: MISC (Anti Lag / Fast / Ultra Fast)
+----------------------------------------------------------------
+local misc = addTab("FastFlags", "🛠")
+section(misc, "FPS Boosters")
+
+local tAnti, tFast, tUltra
+local function onOptChanged(key, label, color)
+    return function(v)
+        opt[key] = v
+        refreshOptimizer()
+        notify(label .. " " .. (v and "<font color=\"rgb(80,220,120)\">ON</font>" or "<font color=\"rgb(230,80,90)\">OFF</font>"))
+    end
+end
+tAnti = toggleRow(misc, "Anti Lag", "Removes particles, effects & shadows", false, onOptChanged("anti", "Anti Lag"))
+tFast = toggleRow(misc, "Fast Mode", "Anti Lag + smooth materials", false, onOptChanged("fast", "Fast Mode"))
+tUltra = toggleRow(misc, "Ultra Fast Mode", "Fast + no textures, lowest quality", false, onOptChanged("ultra", "Ultra Fast"))
+
+section(misc, "Custom Skybox")
+local skyRow = new("Frame", {
+    Size = UDim2.new(1, 0, 0, 80), BackgroundColor3 = Theme.Item, LayoutOrder = ord(),
+}, misc)
+corner(skyRow, UDim.new(0, 8))
+lbl(skyRow, {
+    Position = UDim2.fromOffset(12, 6), Size = UDim2.new(1, -24, 0, 18), Text = "Skybox Preset",
+    Font = Enum.Font.GothamSemibold, TextSize = 13,
+})
+local skyHolder = new("Frame", {
+    Position = UDim2.fromOffset(12, 30), Size = UDim2.new(1, -24, 0, 38), BackgroundTransparency = 1,
+}, skyRow)
+new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6) }, skyHolder)
+
+local SKY_OPTIONS = {
+    { label = "Off", value = "Off" }, { label = "Gray", value = "Gray" },
+    { label = "Black", value = "Black" }, { label = "Minecraft", value = "Minecraft" },
+}
+local skyBtns = {}
+for i, optDef in ipairs(SKY_OPTIONS) do
+    local b = new("TextButton", {
+        Size = UDim2.new(1 / #SKY_OPTIONS, -5, 1, 0), BackgroundColor3 = Theme.Off, Text = optDef.label,
+        Font = Enum.Font.GothamSemibold, TextSize = 12, TextColor3 = Theme.Sub,
+        AutoButtonColor = false, LayoutOrder = i,
+    }, skyHolder)
+    corner(b, UDim.new(0, 6))
+    skyBtns[i] = { btn = b, value = optDef.value }
+end
+local function highlightSky(value)
+    for _, e in ipairs(skyBtns) do
+        local on = (e.value == value)
+        tween(e.btn, TI(0.15), {
+            BackgroundColor3 = on and Theme.Accent or Theme.Off,
+            TextColor3 = on and Color3.new(1, 1, 1) or Theme.Sub,
+        })
+    end
+end
+onAccent(function() highlightSky(skyState.active) end)
+for _, e in ipairs(skyBtns) do
+    connect(e.btn.MouseButton1Click, function()
+        playSound("Click")
+        applySky(e.value)
+        highlightSky(e.value)
+        notify((e.value == "Off") and "Skybox reset to default" or (e.value .. " Skybox applied"))
+    end)
+end
+highlightSky("Off")
+lbl(misc, {
+    Size = UDim2.new(1, 0, 0, 16), Text = "More presets + custom image import coming soon",
+    TextColor3 = Theme.Sub, TextSize = 11, LayoutOrder = ord(),
+})
+
+section(misc, "Tools")
+local setMiscFps = infoRow(misc, "Current FPS", "")
+table.insert(live, function() setMiscFps(fps) end)
+buttonRow(misc, "Restore Everything", function()
+    tAnti.Set(false, true)
+    tFast.Set(false, true)
+    tUltra.Set(false, true)
+    opt.anti, opt.fast, opt.ultra = false, false, false
+    refreshOptimizer()
+    notify("Everything restored")
+end, Color3.fromRGB(120, 45, 55))
+
+----------------------------------------------------------------
+-- TAB 4: SETTINGS
+----------------------------------------------------------------
+local settingsPage = addTab("Settings", "⚙")
+
+section(settingsPage, "Appearance")
+colorRow(settingsPage, "Accent Color", {
+    Color3.fromRGB(140, 90, 255), Color3.fromRGB(70, 140, 255), Color3.fromRGB(40, 210, 230),
+    Color3.fromRGB(60, 210, 120), Color3.fromRGB(255, 90, 170), Color3.fromRGB(255, 80, 80),
+    Color3.fromRGB(255, 160, 50),
+}, Theme.Accent, function(c)
+    setAccent(c)
+end)
+toggleRow(settingsPage, "Rainbow Border", "Animated RGB window border", false, function(v)
+    Settings.Rainbow = v
+    rainbowGrad.Enabled = v
+end)
+sliderRow(settingsPage, "Window Transparency", 0, 0.6, Settings.BgTransparency,
+    function(v) return math.floor(v * 100) .. "%" end,
+    function(v) canvas.BackgroundTransparency = v end)
+
+section(settingsPage, "On-Screen Overlay")
+toggleRow(settingsPage, "FPS & Ping Overlay", "Always-visible stats, drag to move", true, function(v)
+    Settings.ShowOverlay = v
+    overlay.Visible = v
+end)
+
+section(settingsPage, "Sound")
+toggleRow(settingsPage, "UI Sounds", "Click & toggle sounds", true, function(v) Settings.Sounds = v end)
+sliderRow(settingsPage, "Volume", 0, 1, Settings.Volume,
+    function(v) return math.floor(v * 100) .. "%" end,
+    function(v) Settings.Volume = v end)
+
+section(settingsPage, "Controls")
+infoRow(settingsPage, "Toggle Key (PC)", CONFIG.ToggleKey.Name)
+infoRow(settingsPage, "Open / Close", "Tap circle icon")
+
+local layoutWindow
+buttonRow(settingsPage, "Reset UI Position", function()
+    local vp = viewport()
+    icon.Position = UDim2.fromOffset(14, vp.Y * 0.35)
+    clampFrame(icon)
+    layoutWindow(true)
+    notify("UI position reset")
+end)
+buttonRow(settingsPage, "Unload FastFlags", function()
+    if env.FastFlagsUnload then env.FastFlagsUnload() end
+end, Color3.fromRGB(120, 45, 55))
+
+----------------------------------------------------------------
+-- LIVE UPDATE LOOP
+----------------------------------------------------------------
+task.spawn(function()
+    while running do
+        for _, fn in ipairs(live) do pcall(fn) end
+        task.wait(0.25)
+    end
+end)
+
+----------------------------------------------------------------
+-- OPEN / CLOSE + LAYOUT
+----------------------------------------------------------------
+layoutWindow = function(center)
+    local vp = viewport()
+    shell.Size = UDim2.fromOffset(math.min(470, vp.X - 20), math.min(310, vp.Y - 20))
+    if center then
+        shell.Position = UDim2.fromOffset((vp.X - shell.Size.X.Offset) / 2, (vp.Y - shell.Size.Y.Offset) / 2)
+    end
+    clampFrame(shell)
+end
+
+local isOpen = false
+local openToken = 0
+local function setOpen(v)
+    if v == isOpen then return end
+    isOpen = v
+    openToken = openToken + 1
+    local my = openToken
+    if v then
+        layoutWindow(false)
+        shell.Visible = true
+        local p = shell.Position
+        shell.Position = UDim2.fromOffset(p.X.Offset, p.Y.Offset + 18)
+        tween(shell, TI(0.3, Enum.EasingStyle.Quint), { Position = p })
+        tween(canvas, TI(0.25), { GroupTransparency = 0 })
+        tween(shellStroke, TI(0.25), { Transparency = 0 })
+        playSound("Open")
+    else
+        tween(canvas, TI(0.2), { GroupTransparency = 1 })
+        tween(shellStroke, TI(0.2), { Transparency = 1 })
+        playSound("Close")
+        task.delay(0.22, function()
+            if openToken == my and running then shell.Visible = false end
+        end)
+    end
+end
+
+connect(closeBtn.MouseButton1Click, function() setOpen(false) end)
+makeDraggable(top, shell, nil)
+makeDraggable(icon, icon, function() setOpen(not isOpen) end)
+
+connect(UIS.InputBegan, function(input, gp)
+    if gp then return end
+    if input.KeyCode == CONFIG.ToggleKey then setOpen(not isOpen) end
+end)
+
+-- keep everything on screen if the viewport changes
+connect(gui:GetPropertyChangedSignal("AbsoluteSize"), function()
+    layoutWindow(false)
+    clampFrame(icon)
+    clampFrame(overlay)
+end)
+
+-- safety net: icon & overlay can never stay off-screen
+task.spawn(function()
+    while running do
+        clampFrame(icon)
+        clampFrame(overlay)
+        task.wait(1)
+    end
+end)
+
+----------------------------------------------------------------
+-- UNLOAD
+----------------------------------------------------------------
+local function unload()
+    if not running then return end
+    running = false
+    opt.anti, opt.fast, opt.ultra = false, false, false
+    pcall(refreshOptimizer)
+    pcall(clearESP)
+    pcall(clearSky)
+    for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+    pcall(function() gui:Destroy() end)
+    pcall(function() espFolder:Destroy() end)
+    env.FastFlagsUnload = nil
+end
+env.FastFlagsUnload = unload
+
+----------------------------------------------------------------
+-- START
+----------------------------------------------------------------
+do
+    local vp = viewport()
+    icon.Position = UDim2.fromOffset(14, vp.Y * 0.35)
+    clampFrame(icon)
+    overlay.Position = UDim2.fromOffset((vp.X - 168) / 2, 14)
+    clampFrame(overlay)
+end
+selectTab("Home", true)
+layoutWindow(true)
+task.wait(0.1)
+setOpen(true)
+notify("<font color=\"" .. rgbStr(Theme.Accent) .. "\">" .. CONFIG.HubName .. "</font> loaded")
