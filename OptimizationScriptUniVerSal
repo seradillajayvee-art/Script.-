@@ -1,0 +1,305 @@
+--[[
+    Anti Lag / Fast Mode / Super Fast Mode
+    Universal LocalScript - Delta Executor compatible
+    Toggles are cumulative:
+      Anti Lag   = remove effects/particles/shadows
+      Fast Mode  = Anti Lag + smooth materials, no part shadows
+      Super Fast = Fast + hide decals/textures, low quality, no water/fog stuff
+    Turning a toggle OFF restores original values.
+]]
+
+local Players = game:GetService("Players")
+local Lighting = game:GetService("Lighting")
+local UIS = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local Workspace = game:GetService("Workspace")
+
+local lp = Players.LocalPlayer
+
+-- Prevent duplicate GUI
+local GUI_NAME = "AntiLagDeltaUI"
+local function getParent()
+    local ok, p = pcall(function()
+        return (gethui and gethui()) or CoreGui
+    end)
+    if ok and p then return p end
+    return lp:WaitForChild("PlayerGui")
+end
+local parentGui = getParent()
+local old = parentGui:FindFirstChild(GUI_NAME)
+if old then old:Destroy() end
+
+----------------------------------------------------------------
+-- STATE + BACKUP
+----------------------------------------------------------------
+local state = { anti = false, fast = false, super = false }
+local backup = setmetatable({}, { __mode = "k" })
+local generation = 0
+local conn
+
+local function setProp(inst, prop, value)
+    local ok, cur = pcall(function() return inst[prop] end)
+    if not ok then return end
+    backup[inst] = backup[inst] or {}
+    if backup[inst][prop] == nil then
+        backup[inst][prop] = cur
+    end
+    pcall(function() inst[prop] = value end)
+end
+
+local function restoreAll()
+    for inst, props in pairs(backup) do
+        for prop, value in pairs(props) do
+            pcall(function() inst[prop] = value end)
+        end
+    end
+    table.clear(backup)
+end
+
+local function flags()
+    return {
+        anti = state.anti or state.fast or state.super,
+        fast = state.fast or state.super,
+        super = state.super,
+    }
+end
+
+local function isOwnCharacter(inst)
+    local char = lp.Character
+    return char and inst:IsDescendantOf(char)
+end
+
+----------------------------------------------------------------
+-- APPLY TO A SINGLE INSTANCE
+----------------------------------------------------------------
+local function applyInstance(inst, f)
+    if f.anti then
+        if inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam")
+            or inst:IsA("Smoke") or inst:IsA("Fire") or inst:IsA("Sparkles") then
+            setProp(inst, "Enabled", false)
+        elseif inst:IsA("BlurEffect") or inst:IsA("SunRaysEffect")
+            or inst:IsA("ColorCorrectionEffect") or inst:IsA("BloomEffect")
+            or inst:IsA("DepthOfFieldEffect") then
+            setProp(inst, "Enabled", false)
+        elseif inst:IsA("Explosion") then
+            setProp(inst, "Visible", false)
+        end
+    end
+
+    if f.fast and inst:IsA("BasePart") then
+        setProp(inst, "CastShadow", false)
+        if not isOwnCharacter(inst) then
+            setProp(inst, "Material", Enum.Material.SmoothPlastic)
+            setProp(inst, "Reflectance", 0)
+        end
+        if inst:IsA("MeshPart") then
+            setProp(inst, "RenderFidelity", Enum.RenderFidelity.Performance)
+        end
+    end
+
+    if f.super then
+        if (inst:IsA("Decal") or inst:IsA("Texture")) and not isOwnCharacter(inst) then
+            setProp(inst, "Transparency", 1)
+        elseif inst:IsA("Atmosphere") then
+            setProp(inst, "Density", 0)
+            setProp(inst, "Haze", 0)
+            setProp(inst, "Glare", 0)
+        elseif inst:IsA("Clouds") then
+            setProp(inst, "Enabled", false)
+        end
+    end
+end
+
+----------------------------------------------------------------
+-- APPLY GLOBAL SETTINGS
+----------------------------------------------------------------
+local function applyGlobal(f)
+    if f.anti then
+        setProp(Lighting, "GlobalShadows", false)
+        setProp(Lighting, "ShadowSoftness", 0)
+    end
+    if f.fast then
+        setProp(Lighting, "EnvironmentDiffuseScale", 0)
+        setProp(Lighting, "EnvironmentSpecularScale", 0)
+        pcall(function()
+            local t = Workspace.Terrain
+            setProp(t, "WaterWaveSize", 0)
+            setProp(t, "WaterWaveSpeed", 0)
+            setProp(t, "WaterReflectance", 0)
+            setProp(t, "WaterTransparency", 1)
+        end)
+    end
+    if f.super then
+        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
+        pcall(function() Workspace.Terrain.Decoration = false end)
+        if setfpscap then pcall(setfpscap, 999) end
+    end
+end
+
+----------------------------------------------------------------
+-- REFRESH (restore -> reapply based on toggles)
+----------------------------------------------------------------
+local function refresh()
+    generation += 1
+    local myGen = generation
+
+    if conn then conn:Disconnect() conn = nil end
+    restoreAll()
+
+    local f = flags()
+    if not (f.anti or f.fast or f.super) then return end
+
+    applyGlobal(f)
+
+    -- new objects that spawn later
+    conn = game.DescendantAdded:Connect(function(inst)
+        task.defer(function()
+            applyInstance(inst, flags())
+        end)
+    end)
+
+    -- existing objects (batched so it won't freeze)
+    task.spawn(function()
+        local count = 0
+        local function scan(root)
+            for _, inst in ipairs(root:GetDescendants()) do
+                if generation ~= myGen then return end
+                applyInstance(inst, f)
+                count += 1
+                if count % 250 == 0 then task.wait() end
+            end
+        end
+        scan(Workspace)
+        scan(Lighting)
+    end)
+end
+
+----------------------------------------------------------------
+-- UI
+----------------------------------------------------------------
+local gui = Instance.new("ScreenGui")
+gui.Name = GUI_NAME
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.Parent = parentGui
+
+local main = Instance.new("Frame")
+main.Size = UDim2.fromOffset(210, 190)
+main.Position = UDim2.new(0, 20, 0.5, -95)
+main.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+main.BorderSizePixel = 0
+main.Active = true
+main.Parent = gui
+Instance.new("UICorner", main).CornerRadius = UDim.new(0, 10)
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -60, 0, 32)
+title.Position = UDim2.fromOffset(10, 0)
+title.BackgroundTransparency = 1
+title.Text = "Anti Lag Hub"
+title.TextColor3 = Color3.new(1, 1, 1)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 16
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = main
+
+local function smallButton(text, xOffset, color)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.fromOffset(24, 24)
+    b.Position = UDim2.new(1, xOffset, 0, 4)
+    b.BackgroundColor3 = color
+    b.Text = text
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 14
+    b.BorderSizePixel = 0
+    b.Parent = main
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+    return b
+end
+
+local minBtn = smallButton("-", -56, Color3.fromRGB(70, 70, 80))
+local closeBtn = smallButton("X", -28, Color3.fromRGB(200, 60, 60))
+
+local body = Instance.new("Frame")
+body.Size = UDim2.new(1, 0, 1, -36)
+body.Position = UDim2.fromOffset(0, 36)
+body.BackgroundTransparency = 1
+body.Parent = main
+
+local layout = Instance.new("UIListLayout", body)
+layout.Padding = UDim.new(0, 8)
+layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+local ON = Color3.fromRGB(46, 160, 90)
+local OFF = Color3.fromRGB(60, 60, 70)
+
+local buttons = {}
+local function makeToggle(label, key)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -20, 0, 36)
+    b.BackgroundColor3 = OFF
+    b.Text = label .. ": OFF"
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.Font = Enum.Font.GothamSemibold
+    b.TextSize = 14
+    b.BorderSizePixel = 0
+    b.Parent = body
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+
+    buttons[key] = { btn = b, label = label }
+
+    b.MouseButton1Click:Connect(function()
+        state[key] = not state[key]
+        b.Text = label .. (state[key] and ": ON" or ": OFF")
+        b.BackgroundColor3 = state[key] and ON or OFF
+        refresh()
+    end)
+end
+
+makeToggle("Anti Lag", "anti")
+makeToggle("Fast Mode", "fast")
+makeToggle("Super Fast Mode", "super")
+
+-- Minimize
+local minimized = false
+minBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    body.Visible = not minimized
+    main.Size = minimized and UDim2.fromOffset(210, 36) or UDim2.fromOffset(210, 190)
+end)
+
+-- Close (restores everything)
+closeBtn.MouseButton1Click:Connect(function()
+    state.anti, state.fast, state.super = false, false, false
+    refresh()
+    gui:Destroy()
+end)
+
+-- Dragging (mouse + touch)
+do
+    local dragging, dragStart, startPos
+    main.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = main.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    UIS.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            main.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+end
