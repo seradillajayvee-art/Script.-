@@ -1,15 +1,23 @@
 --==================================================================
--- ABILITY MENU - JAYVEE  (v5.8)
+-- ABILITY MENU - JAYVEE  (v5.9)
 -- Own-game LocalScript
 -- Place in: StarterPlayer > StarterPlayerScripts
 --
--- Tabs:  HOME - ABILITY - PLAYER - SETTINGS
+-- Tabs:  HOME - ABILITY - PLAYER - MISC - SETTINGS
 --   HOME     : creator info, script description, live status
 --   ABILITY  : Ultra Instinct (ON/OFF), radius + circle, dodge, follow,
 --              THREAT SENSE (dodge projectiles / abilities / explosions / ranged)
 --   PLAYER   : player info, dodge counter (+reset), Player ESP
+--   MISC     : device info, sky box, anti lag, fast mode
 --   SETTINGS : theme, scale, sounds, animations, keybind, reset/unload
 --
+-- v5.9 CHANGES
+--   * NEW MISC TAB (after PLAYER): DEVICE INFO (device, screen, live FPS / ping, memory) and PERFORMANCE:
+--       SKY BOX  : BLACK / GRAY (no clouds, flat color) or MINECRAFT (blue sky + blocky drifting clouds)
+--       ANTI LAG : kills particles / trails / beams / shadows / bloom-blur-sunrays, lowers graphics quality
+--       FAST MODE (ULTRA): anti lag + lowest quality, no map lights, no decals / textures, no clouds
+--   * Everything is restored when you switch it off (or unload the script).
+
 -- v5.8 CHANGES
 --   * ADMIN DETECTION on the SECURITY screen: admins skip the access key (auto unlock). Everyone else still
 --     types the key. Admin = UserId list / username list / game owner / group rank -> edit U.ADMIN below PASSWORD.
@@ -70,7 +78,7 @@
 --   * Damage fallback dodges even when no enemy is inside the radius.
 --==================================================================
 
-print("[JAYVEE] Ability Menu v5.8 loading...")
+print("[JAYVEE] Ability Menu v5.9 loading...")
 
 -- On-screen status banner: shows "loading", "loaded" or the exact ERROR on your screen.
 local function JV_Banner(text, isError)
@@ -121,7 +129,7 @@ local U = {} -- helper functions live here (Luau allows only 200 locals per scop
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local SCRIPT_VERSION = "v5.8"
+local SCRIPT_VERSION = "v5.9"
 local VERSION_MAJOR = SCRIPT_VERSION:match("%d+") or "4"
 local PASSWORD_PREFIX = "ULTRAINSTINCTBYJAYVEE"
 local PASSWORD = PASSWORD_PREFIX .. "V" .. VERSION_MAJOR
@@ -305,6 +313,12 @@ local Settings = {
 	KeyDodge = "J",
 	KeyCamera = "K",
 	KeyESP = "P",
+
+	-- v5.9  MISC tab
+	SkyEnabled = false,
+	SkyStyle = "Black",           -- Black / Gray / Minecraft
+	AntiLag = false,
+	FastMode = false,
 }
 
 local Defaults = table.clone(Settings)
@@ -330,6 +344,7 @@ U.CHOICES = {
 	IconShape = {"Rounded", "Circle", "Square"},
 	IconDrag = {"Hold", "Instant", "Locked"},
 	ImageFit = {"Smart", "Fill", "Fit", "Stretch"},
+	SkyStyle = {"Black", "Gray", "Minecraft"},
 }
 
 function U.fsReady()
@@ -3191,7 +3206,7 @@ local searchEmpty = new("TextLabel", {
 }, main)
 
 local pages = {}
-local PAGE_NAMES = {"Home", "Ability", "Player", "Settings"}
+local PAGE_NAMES = {"Home", "Ability", "Player", "Misc", "Settings"}
 for _, name in ipairs(PAGE_NAMES) do
 	local p = new("Frame", {
 		Name = name, Size = UDim2.new(1, -8, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
@@ -3210,7 +3225,7 @@ local nav = new("Frame", {
 U.corner(nav, 16)
 stroke(nav, 1, 0.7)
 local indicator = new("Frame", {
-	Position = UDim2.new(0, 3, 0, 4), Size = UDim2.new(0.25, -6, 1, -8), BackgroundColor3 = THEMES[1].b,
+	Position = UDim2.new(0, 3, 0, 4), Size = UDim2.new(1 / #PAGE_NAMES, -6, 1, -8), BackgroundColor3 = THEMES[1].b,
 }, nav)
 U.corner(indicator, 13)
 local indicatorGradient = new("UIGradient", {Rotation = 90}, indicator)
@@ -3225,7 +3240,7 @@ function U.showPage(name)
 	U.tw(p, 0.28, {Position = UDim2.fromOffset(0, 0)})
 	content.CanvasPosition = Vector2.new(0, 0)
 	local idx = table.find(PAGE_NAMES, name) or 1
-	U.tw(indicator, 0.28, {Position = UDim2.new((idx - 1) * 0.25, 3, 0, 4)}, Enum.EasingStyle.Back)
+	U.tw(indicator, 0.28, {Position = UDim2.new((idx - 1) / #PAGE_NAMES, 3, 0, 4)}, Enum.EasingStyle.Back)
 	for n, b in pairs(tabButtons) do
 		U.tw(b, 0.2, {TextColor3 = (n == name) and Color3.new(1, 1, 1) or COL.sub})
 	end
@@ -3233,7 +3248,7 @@ end
 
 for i, name in ipairs(PAGE_NAMES) do
 	local b = new("TextButton", {
-		Position = UDim2.new((i - 1) * 0.25, 0, 0, 0), Size = UDim2.new(0.25, 0, 1, 0),
+		Position = UDim2.new((i - 1) / #PAGE_NAMES, 0, 0, 0), Size = UDim2.new(1 / #PAGE_NAMES, 0, 1, 0),
 		BackgroundTransparency = 1, Text = string.upper(name), Font = Enum.Font.GothamBlack,
 		TextSize = 12, TextColor3 = COL.sub, AutoButtonColor = false, ZIndex = 3,
 	}, nav)
@@ -3851,7 +3866,8 @@ do
 		return "1. Open ABILITY and switch ULTRA INSTINCT on.\n"
 			.. "2. Tune radius, dodge chance, threat sense and follow to your taste.\n"
 			.. "3. Use PLAYER for ESP and your dodge counter.\n"
-			.. "4. Use SETTINGS to change theme, size and sounds.\n"
+			.. "4. Use MISC for device info, sky box, anti lag and fast mode.\n"
+		.. "5. Use SETTINGS to change theme, size and sounds.\n"
 			.. "Tip: " .. U.keyLabel(Settings.KeyMenu) .. " (PC) or the UI bubble hides / shows the menu. Tap a card title to collapse it, tap the ULTRA pill for a quick ON / OFF."
 	end)
 
@@ -4730,6 +4746,418 @@ function U.runLoader(onCovered)
 end
 
 --==================================================
+-- PAGE: MISC  (device info + performance: sky box / anti lag / fast mode)
+--==================================================
+U.LS = game:GetService("Lighting")
+U.StatsSvc = game:GetService("Stats")
+U.GuiSvc = game:GetService("GuiService")
+
+function U.sp(obj, prop, value) pcall(function() obj[prop] = value end) end
+
+-- live FPS (smoothed)
+U.fps = 60
+bind(RunService.RenderStepped, function(dt)
+	if dt > 0 then U.fps = U.fps + (1 / dt - U.fps) * 0.08 end
+end)
+
+----------------------------------------------------- DEVICE INFO
+function U.pingMs()
+	local ms
+	pcall(function() ms = U.StatsSvc.Network.ServerStatsItem["Data Ping"]:GetValue() end)
+	if type(ms) ~= "number" or ms <= 0 then
+		pcall(function() ms = player:GetNetworkPing() * 1000 end)
+	end
+	if type(ms) ~= "number" then return nil end
+	return ms
+end
+
+function U.deviceKind()
+	local cam = workspace.CurrentCamera
+	local vp = cam and cam.ViewportSize or Vector2.new(1920, 1080)
+	local tenFoot = false
+	pcall(function() tenFoot = U.GuiSvc:IsTenFootInterface() end)
+	if UIS.VREnabled then return "VR HEADSET" end
+	if tenFoot then return "CONSOLE" end
+	if UIS.TouchEnabled and not UIS.KeyboardEnabled then
+		return (math.min(vp.X, vp.Y) >= 600) and "TABLET" or "PHONE"
+	end
+	if UIS.KeyboardEnabled and UIS.MouseEnabled then return "PC" end
+	if UIS.GamepadEnabled then return "GAMEPAD DEVICE" end
+	return "UNKNOWN"
+end
+
+function U.deviceText()
+	local cam = workspace.CurrentCamera
+	local vp = cam and cam.ViewportSize or Vector2.new(0, 0)
+	local platform = "UNKNOWN"
+	pcall(function() platform = string.upper(UIS:GetPlatform().Name) end)
+	local inputs = {}
+	if UIS.TouchEnabled then inputs[#inputs + 1] = "TOUCH" end
+	if UIS.KeyboardEnabled then inputs[#inputs + 1] = "KEYBOARD" end
+	if UIS.MouseEnabled then inputs[#inputs + 1] = "MOUSE" end
+	if UIS.GamepadEnabled then inputs[#inputs + 1] = "GAMEPAD" end
+	local mem
+	pcall(function() mem = U.StatsSvc:GetTotalMemoryUsageMb() end)
+	local quality = "N/A"
+	pcall(function() quality = string.upper(settings().Rendering.QualityLevel.Name) end)
+	local ping = U.pingMs()
+	return string.format(
+		"Device: %s (%s)\nInput: %s\nScreen: %d x %d\nFPS: %d\nPing: %s\nMemory: %s\nGraphics: %s\nServer: %d / %d players",
+		U.deviceKind(), platform, #inputs > 0 and table.concat(inputs, " + ") or "NONE",
+		math.floor(vp.X + 0.5), math.floor(vp.Y + 0.5), math.floor(U.fps + 0.5),
+		ping and (math.floor(ping + 0.5) .. " ms") or "N/A",
+		mem and (math.floor(mem + 0.5) .. " MB") or "N/A",
+		quality, #Players:GetPlayers(), Players.MaxPlayers)
+end
+
+----------------------------------------------------- PERFORMANCE ENGINE
+U.perf = {
+	l1 = false, l2 = false, token = 0, conn = nil, conn2 = nil, used = false, dk = "-1",
+	store = {setmetatable({}, {__mode = "k"}), setmetatable({}, {__mode = "k"})},
+	o = {}, -- original global values, captured the first time something is applied
+}
+U.PERF_FX = {ParticleEmitter = true, Trail = true, Beam = true, Smoke = true, Fire = true, Sparkles = true}
+U.PERF_LIGHT = {PointLight = true, SpotLight = true, SurfaceLight = true}
+U.PERF_POST = {BloomEffect = true, BlurEffect = true, SunRaysEffect = true, DepthOfFieldEffect = true}
+
+-- never touch our own effects / our own character
+function U.perfOurs(d)
+	if d:GetAttribute("JV_FX") then return true end
+	local par = d.Parent
+	if par and par:GetAttribute("JV_FX") then return true end
+	if character and d:IsDescendantOf(character) then return true end
+	return false
+end
+
+-- change a property and remember the original (lvl 1 = anti lag, 2 = fast mode)
+function U.perfSet(d, prop, value, lvl)
+	local store = U.perf.store[lvl]
+	local e = store[d]
+	if not e then e = {}; store[d] = e end
+	if e[prop] == nil then e[prop] = d[prop] end
+	d[prop] = value
+end
+
+function U.perfRestore(lvl)
+	local store = U.perf.store[lvl]
+	for d, e in pairs(store) do
+		if d.Parent then
+			for prop, v in pairs(e) do U.sp(d, prop, v) end
+		end
+	end
+	table.clear(store)
+end
+
+function U.perfInst(d, l1, l2)
+	local cn = d.ClassName
+	if l1 and U.PERF_FX[cn] then
+		if d.Enabled and not U.perfOurs(d) then U.perfSet(d, "Enabled", false, 1) end
+	elseif l2 and U.PERF_LIGHT[cn] then
+		if d.Enabled and not U.perfOurs(d) then U.perfSet(d, "Enabled", false, 2) end
+	elseif l2 and (cn == "Decal" or cn == "Texture") then
+		if d.Transparency < 1 and not U.perfOurs(d) then U.perfSet(d, "Transparency", 1, 2) end
+	end
+end
+
+function U.perfFx(c)
+	if U.PERF_POST[c.ClassName] and c.Enabled and not c:GetAttribute("JV_FX") then
+		U.perfSet(c, "Enabled", false, 1)
+	end
+end
+
+-- go through the whole map in small chunks so the game never freezes
+function U.perfScan(l1, l2)
+	local Pf = U.perf
+	Pf.token += 1
+	local my = Pf.token
+	task.spawn(function()
+		local n = 0
+		for _, d in ipairs(workspace:GetDescendants()) do
+			if my ~= Pf.token then return end
+			pcall(U.perfInst, d, l1, l2)
+			n += 1
+			if n % 400 == 0 then task.wait() end
+		end
+	end)
+end
+
+-- graphics quality, shadows, terrain water / grass
+function U.perfGlobals(l1, l2)
+	local o, LS = U.perf.o, U.LS
+	if not o.captured then
+		o.captured = true
+		pcall(function() o.quality = settings().Rendering.QualityLevel end)
+		o.shadows = LS.GlobalShadows
+		pcall(function() o.spec = LS.EnvironmentSpecularScale end)
+		pcall(function()
+			local t = workspace.Terrain
+			o.waveSize, o.waveSpeed, o.waveRefl, o.deco = t.WaterWaveSize, t.WaterWaveSpeed, t.WaterReflectance, t.Decoration
+		end)
+	end
+
+	pcall(function()
+		local r = settings().Rendering
+		if l1 then
+			local target = l2 and 1 or 5
+			-- never RAISE the quality if the player already runs lower than the target
+			if o.quality and o.quality.Value > 0 and o.quality.Value < target then target = o.quality.Value end
+			r.QualityLevel = Enum.QualityLevel:FromValue(target)
+		elseif o.quality then
+			r.QualityLevel = o.quality
+		end
+	end)
+
+	if l1 then U.sp(LS, "GlobalShadows", false) else U.sp(LS, "GlobalShadows", o.shadows) end
+	if o.spec ~= nil then U.sp(LS, "EnvironmentSpecularScale", l2 and 0 or o.spec) end
+
+	local t = workspace.Terrain
+	if o.waveSize ~= nil then
+		U.sp(t, "WaterWaveSize", l1 and 0 or o.waveSize)
+		U.sp(t, "WaterWaveSpeed", l1 and 0 or o.waveSpeed)
+		if l1 then U.sp(t, "Decoration", false) else U.sp(t, "Decoration", o.deco) end
+		U.sp(t, "WaterReflectance", l2 and 0 or o.waveRefl)
+	end
+end
+
+-- real (Terrain) clouds, atmosphere haze and fog colour
+function U.cloudSync(off)
+	local c = workspace.Terrain:FindFirstChildOfClass("Clouds")
+	if not c then return end
+	local o = U.perf.o
+	if o.clouds == nil then o.clouds = c.Enabled end
+	U.sp(c, "Enabled", o.clouds and not off)
+end
+
+function U.atmoSync(off)
+	local o = U.perf.o
+	o.atmo = o.atmo or setmetatable({}, {__mode = "k"})
+	for _, a in ipairs(U.LS:GetChildren()) do
+		if a:IsA("Atmosphere") then
+			if not o.atmo[a] then o.atmo[a] = {Density = a.Density, Haze = a.Haze, Glare = a.Glare} end
+			local v = o.atmo[a]
+			U.sp(a, "Density", off and 0 or v.Density)
+			U.sp(a, "Haze", off and 0 or v.Haze)
+			U.sp(a, "Glare", off and 0 or v.Glare)
+		end
+	end
+end
+
+function U.fogSync(color)
+	local o = U.perf.o
+	if o.fog == nil then o.fog = U.LS.FogColor end
+	U.sp(U.LS, "FogColor", color or o.fog)
+end
+
+----------------------------------------------------- SKY BOX
+-- A big solid-colour dome (6 thin slabs) follows your camera. Black / Gray are flat colours with no clouds,
+-- Minecraft adds a blue sky with blocky white clouds that drift slowly.
+U.SKY = {
+	folder = nil, items = {}, parts = {}, cfs = {}, key = nil, drift = 0,
+	HALF = 1000, CELL = 128, N = 15, CLOUD_Y = 420,
+}
+U.SKY_STYLES = {
+	Black = {color = Color3.fromRGB(0, 0, 0), fog = Color3.fromRGB(0, 0, 0)},
+	Gray = {color = Color3.fromRGB(112, 112, 118), fog = Color3.fromRGB(112, 112, 118)},
+	Minecraft = {color = Color3.fromRGB(120, 167, 255), fog = Color3.fromRGB(175, 205, 255), clouds = true},
+}
+
+function U.skyClear()
+	local S = U.SKY
+	pcall(function() RunService:UnbindFromRenderStep("JV_Sky") end)
+	if S.folder then pcall(function() S.folder:Destroy() end) end
+	S.folder, S.items, S.parts, S.cfs, S.key = nil, {}, {}, {}, nil
+end
+
+function U.skyStep(dt)
+	local S = U.SKY
+	local cam = workspace.CurrentCamera
+	if not cam or not S.folder then return end
+	if S.folder.Parent ~= cam then S.folder.Parent = cam end
+	local base = cam.CFrame.Position
+	local range = S.CELL * S.N
+	S.drift = (S.drift + (dt or 0) * 4) % range
+	for i, it in ipairs(S.items) do
+		local off = it.off
+		if it.cloud then
+			off = Vector3.new(
+				((it.ix * S.CELL + S.drift) % range) - range / 2 + S.CELL / 2,
+				S.CLOUD_Y,
+				it.iz * S.CELL - range / 2 + S.CELL / 2)
+		end
+		S.cfs[i] = CFrame.new(base + off)
+	end
+	pcall(workspace.BulkMoveTo, workspace, S.parts, S.cfs, Enum.BulkMoveMode.FireCFrameChanged)
+end
+
+function U.skyBuild(style)
+	local S = U.SKY
+	U.skyClear()
+	local def = U.SKY_STYLES[style] or U.SKY_STYLES.Black
+	S.folder = new("Folder", {Name = "JV_Sky"})
+
+	local H, B, Th = S.HALF, 2048, 8
+	local slabs = {
+		{Vector3.new(0, H, 0), Vector3.new(B, Th, B)}, {Vector3.new(0, -H, 0), Vector3.new(B, Th, B)},
+		{Vector3.new(H, 0, 0), Vector3.new(Th, B, B)}, {Vector3.new(-H, 0, 0), Vector3.new(Th, B, B)},
+		{Vector3.new(0, 0, H), Vector3.new(B, B, Th)}, {Vector3.new(0, 0, -H), Vector3.new(B, B, Th)},
+	}
+	for _, d in ipairs(slabs) do
+		local part = new("Part", {
+			Name = "SkySlab", Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false,
+			CastShadow = false, Locked = true, Material = Enum.Material.Neon, Color = def.color,
+			Size = d[2], TopSurface = Enum.SurfaceType.Smooth, BottomSurface = Enum.SurfaceType.Smooth,
+		}, S.folder)
+		S.items[#S.items + 1] = {off = d[1]}
+		S.parts[#S.parts + 1] = part
+		S.cfs[#S.cfs + 1] = CFrame.new()
+	end
+
+	if def.clouds then
+		for ix = 0, S.N - 1 do
+			for iz = 0, S.N - 1 do
+				if math.noise(ix * 0.31 + 0.17, iz * 0.31 + 0.43, 7.3) > 0.02 then
+					local part = new("Part", {
+						Name = "SkyCloud", Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false,
+						CastShadow = false, Locked = true, Material = Enum.Material.Neon,
+						Color = Color3.fromRGB(255, 255, 255), Transparency = 0.18,
+						Size = Vector3.new(S.CELL, 10, S.CELL),
+					}, S.folder)
+					S.items[#S.items + 1] = {cloud = true, ix = ix, iz = iz}
+					S.parts[#S.parts + 1] = part
+					S.cfs[#S.cfs + 1] = CFrame.new()
+				end
+			end
+		end
+	end
+
+	S.key = style
+	U.skyStep(0)
+	S.folder.Parent = workspace.CurrentCamera or workspace
+	RunService:BindToRenderStep("JV_Sky", Enum.RenderPriority.Camera.Value + 2, U.skyStep)
+end
+
+----------------------------------------------------- one place that applies / reverts everything
+function U.perfSync()
+	if not unlocked then return end
+	local Pf = U.perf
+	local l1 = Settings.AntiLag or Settings.FastMode
+	local l2 = Settings.FastMode
+	local skyKey = Settings.SkyEnabled and Settings.SkyStyle or nil
+
+	-- ANTI LAG / FAST MODE
+	if l1 ~= Pf.l1 or l2 ~= Pf.l2 then
+		Pf.l1, Pf.l2, Pf.used = l1, l2, true
+		U.perfGlobals(l1, l2)
+		if not l1 then U.perfRestore(1) end
+		if not l2 then U.perfRestore(2) end
+		if l1 then
+			for _, c in ipairs(U.LS:GetChildren()) do pcall(U.perfFx, c) end
+			local cam = workspace.CurrentCamera
+			if cam then for _, c in ipairs(cam:GetChildren()) do pcall(U.perfFx, c) end end
+			if not Pf.conn then
+				Pf.conn = workspace.DescendantAdded:Connect(function(d) pcall(U.perfInst, d, Pf.l1, Pf.l2) end)
+				Pf.conn2 = U.LS.ChildAdded:Connect(function(c) pcall(U.perfFx, c) end)
+			end
+			U.perfScan(l1, l2)
+		else
+			Pf.token += 1
+			if Pf.conn then Pf.conn:Disconnect(); Pf.conn = nil end
+			if Pf.conn2 then Pf.conn2:Disconnect(); Pf.conn2 = nil end
+		end
+	end
+
+	-- SKY BOX
+	if skyKey ~= U.SKY.key then
+		Pf.used = true
+		if skyKey then
+			local okS, errS = pcall(U.skyBuild, skyKey)
+			if not okS then
+				warn("[JAYVEE] Sky box error:", errS)
+				U.skyClear()
+			end
+		else
+			U.skyClear()
+		end
+	end
+
+	-- real clouds / atmosphere haze / fog colour follow the two features above
+	local skyOn = U.SKY.key ~= nil
+	local dk = (U.SKY.key or "-") .. (l2 and "2" or "1")
+	if dk ~= Pf.dk then
+		Pf.dk = dk
+		U.cloudSync(skyOn or l2)
+		U.atmoSync(skyOn)
+		local def = skyOn and U.SKY_STYLES[U.SKY.key]
+		U.fogSync(def and def.fog or nil)
+	end
+end
+
+function U.perfShutdown()
+	local Pf = U.perf
+	Pf.token += 1
+	if Pf.conn then Pf.conn:Disconnect(); Pf.conn = nil end
+	if Pf.conn2 then Pf.conn2:Disconnect(); Pf.conn2 = nil end
+	U.skyClear()
+	if not Pf.used then return end
+	pcall(U.perfGlobals, false, false)
+	U.perfRestore(1)
+	U.perfRestore(2)
+	pcall(U.cloudSync, false)
+	pcall(U.atmoSync, false)
+	pcall(U.fogSync, nil)
+	Pf.l1, Pf.l2, Pf.dk = false, false, "-1"
+end
+
+U.reg(function() U.perfSync() end)
+
+----------------------------------------------------- MISC page UI
+do
+	local p = pages.Misc
+
+	local dev = U.makeCard(p, "DEVICE INFO", "Your device + live FPS / ping")
+	U.infoText(dev, U.deviceText, true, 11)
+
+	local hdr = new("TextLabel", {
+		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 24), Text = "PERFORMANCE",
+		Font = Enum.Font.GothamBlack, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left,
+		TextColor3 = theme().a,
+	}, p)
+	U.reg(function() hdr.TextColor3 = theme().a end)
+
+	local sk = U.makeCard(p, "SKY BOX", "Black - Gray - Minecraft")
+	U.toggleRow(sk, "CUSTOM SKY BOX", function() return Settings.SkyEnabled end, function(v) Settings.SkyEnabled = v end)
+	U.choiceRow(sk, "STYLE", function() return Settings.SkyStyle end, function()
+		Settings.SkyStyle = U.cycleList(U.CHOICES.SkyStyle, Settings.SkyStyle)
+	end)
+	U.infoText(sk, function()
+		local st = Settings.SkyStyle
+		local line
+		if st == "Black" then
+			line = "BLACK: no clouds, no sun or moon - the whole sky is pure black."
+		elseif st == "Gray" then
+			line = "GRAY: no clouds - the whole sky is one flat gray."
+		else
+			line = "MINECRAFT: bright blue sky with blocky white clouds that slowly drift, like Minecraft."
+		end
+		return line .. "\nThe sky is a big dome around you, so things farther than about 1000 studs are hidden."
+	end, false, 10)
+
+	local al = U.makeCard(p, "ANTI LAG", "Less stutter - smoother game")
+	U.toggleRow(al, "ANTI LAG", function() return Settings.AntiLag end, function(v) Settings.AntiLag = v end)
+	U.infoText(al, function()
+		return "Turns off particles, trails, beams, shadows, bloom / blur / sun rays, grass and water waves, and lowers the graphics quality. "
+			.. "Your own aura stays.\nPing itself depends on your internet and the server - this removes CLIENT lag so the game feels smoother."
+	end, false, 10)
+
+	local fm = U.makeCard(p, "FAST MODE (ULTRA)", "Maximum FPS - the map looks plain")
+	U.toggleRow(fm, "FAST MODE (ULTRA)", function() return Settings.FastMode end, function(v) Settings.FastMode = v end)
+	U.infoText(fm, function()
+		return "Everything in ANTI LAG plus: lowest graphics quality, map lights off, decals / textures hidden, no real clouds and no reflections. "
+			.. "Best for weak phones and PCs. Switch it off and everything comes back."
+	end, false, 10)
+end
+
+--==================================================
 -- PAGE: SETTINGS
 --==================================================
 local unloadFn -- assigned below
@@ -5008,6 +5436,7 @@ end
 -- UNLOAD
 --==================================================
 unloadFn = function()
+	pcall(U.perfShutdown)
 	Settings.UltraActive = false
 	dodgeToken += 1
 	dodging = false
