@@ -1,5 +1,5 @@
 --==================================================================
--- ABILITY MENU - JAYVEE  (v5.7)
+-- ABILITY MENU - JAYVEE  (v5.8)
 -- Own-game LocalScript
 -- Place in: StarterPlayer > StarterPlayerScripts
 --
@@ -10,6 +10,13 @@
 --   PLAYER   : player info, dodge counter (+reset), Player ESP
 --   SETTINGS : theme, scale, sounds, animations, keybind, reset/unload
 --
+-- v5.8 CHANGES
+--   * ADMIN DETECTION on the SECURITY screen: admins skip the access key (auto unlock). Everyone else still
+--     types the key. Admin = UserId list / username list / game owner / group rank -> edit U.ADMIN below PASSWORD.
+--   * PC CONTROLS card (SETTINGS tab): rebindable hotkeys (menu, Ultra Instinct, Auto Dodge, Camera Lock,
+--     Player ESP), on-screen key hints, reset keys. Hotkeys are saved with SAVE.
+--   * LIVE STATUS shows how you got in (ADMIN / ACCESS KEY).
+
 -- v5.7 CHANGES
 --   * ICON UI settings card (size, shape, opacity, border, idle fade, move mode, hold time, snap, reset).
 --   * Icon / window drag only follows the finger that started it; ICON MOVE = HOLD means the joystick
@@ -63,7 +70,7 @@
 --   * Damage fallback dodges even when no enemy is inside the radius.
 --==================================================================
 
-print("[JAYVEE] Ability Menu v5.7 loading...")
+print("[JAYVEE] Ability Menu v5.8 loading...")
 
 -- On-screen status banner: shows "loading", "loaded" or the exact ERROR on your screen.
 local function JV_Banner(text, isError)
@@ -114,12 +121,50 @@ local U = {} -- helper functions live here (Luau allows only 200 locals per scop
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local SCRIPT_VERSION = "v5.7"
+local SCRIPT_VERSION = "v5.8"
 local VERSION_MAJOR = SCRIPT_VERSION:match("%d+") or "4"
 local PASSWORD_PREFIX = "ULTRAINSTINCTBYJAYVEE"
 local PASSWORD = PASSWORD_PREFIX .. "V" .. VERSION_MAJOR
 local function expectedPassword()
 	return PASSWORD_PREFIX .. "V" .. VERSION_MAJOR
+end
+
+--==================================================
+-- ADMIN DETECTION  (admins skip the access key)
+--==================================================
+U.ADMIN = {
+	UserIds = {
+		-- [123456789] = true,   -- <== PUT YOUR ROBLOX USERID HERE  (roblox.com/users/<THIS NUMBER>/profile)
+	},
+	Names = {
+		-- "YourUsername",       -- optional: matched with your Roblox USERNAME (UserId above is safer)
+	},
+	GameOwner = true,            -- the creator of this place counts as admin (user-owned games)
+	GroupId = 0,                 -- optional: group id, 0 = off
+	MinRank = 254,               -- rank needed inside that group (255 = owner)
+	AutoUnlock = true,           -- false = even admins must type the key (handy to test the key screen)
+	is = false, reason = "",     -- filled in at startup
+}
+
+function U.detectAdmin()
+	local A = U.ADMIN
+	local uid = player.UserId
+	if A.UserIds[uid] == true or table.find(A.UserIds, uid) then return true, "ADMIN LIST" end
+	local lname = string.lower(player.Name)
+	for _, n in ipairs(A.Names) do
+		if string.lower(tostring(n)) == lname then return true, "ADMIN NAME" end
+	end
+	if A.GameOwner and uid > 0 then
+		local ok, owner = pcall(function()
+			return game.CreatorType == Enum.CreatorType.User and game.CreatorId == uid
+		end)
+		if ok and owner then return true, "GAME OWNER" end
+	end
+	if A.GroupId > 0 then
+		local ok, rank = pcall(function() return player:GetRankInGroup(A.GroupId) end)
+		if ok and type(rank) == "number" and rank >= A.MinRank then return true, "GROUP RANK" end
+	end
+	return false, ""
 end
 
 --==================================================
@@ -251,6 +296,15 @@ local Settings = {
 	ImageFit = "Smart",           -- "Smart" / "Fill" / "Fit" / "Stretch"
 	ImageSmooth = true,           -- false = pixelated (pixel art)
 	PanelGlass = 0.5,             -- how see-through the cards are when a background image is used
+
+	-- v5.8  PC controls (keys are KeyCode names, "None" = unbound)
+	PCHotkeys = true,
+	PCHints = true,               -- small key-hint strip in the bottom-left corner (PC only)
+	KeyMenu = "RightShift",
+	KeyUltra = "U",
+	KeyDodge = "J",
+	KeyCamera = "K",
+	KeyESP = "P",
 }
 
 local Defaults = table.clone(Settings)
@@ -361,6 +415,11 @@ function U.applySnapshot(snap)
 	end
 	for key, list in pairs(U.CHOICES) do
 		if not table.find(list, Settings[key]) then Settings[key] = Defaults[key] end
+	end
+	-- hotkeys must be real KeyCode names (or "None")
+	for _, id in ipairs({"KeyMenu", "KeyUltra", "KeyDodge", "KeyCamera", "KeyESP"}) do
+		local v = Settings[id]
+		if v ~= "None" and not pcall(function() return Enum.KeyCode[v] end) then Settings[id] = Defaults[id] end
 	end
 end
 
@@ -2490,7 +2549,8 @@ bind(UIS.InputBegan, function(input, processed)
 	local t = input.UserInputType
 	if t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.MouseButton2 then
 		lastOwnAction = os.clock()
-	elseif t == Enum.UserInputType.Keyboard and not MOVE_KEYS[input.KeyCode] then
+	elseif t == Enum.UserInputType.Keyboard and not MOVE_KEYS[input.KeyCode]
+		and not (U.isHotkey and U.isHotkey(input.KeyCode)) then
 		lastOwnAction = os.clock()
 	elseif t == Enum.UserInputType.Gamepad1 and string.find(input.KeyCode.Name, "Button") then
 		lastOwnAction = os.clock()
@@ -3504,12 +3564,152 @@ minimized.Activated:Connect(function()
 	U.openMenu()
 end)
 
-bind(UIS.InputBegan, function(input, processed)
-	if processed or not unlocked then return end
-	if input.KeyCode == Enum.KeyCode.RightShift then
+--==================================================
+-- PC CONTROLS: rebindable hotkeys + on-screen key hints
+--==================================================
+function U.isPC()
+	return UIS.KeyboardEnabled and UIS.MouseEnabled
+end
+
+-- keys that can not be used as hotkeys (movement / chat / system)
+U.RESERVED = {}
+for _, kc in ipairs({
+	Enum.KeyCode.W, Enum.KeyCode.A, Enum.KeyCode.S, Enum.KeyCode.D, Enum.KeyCode.Space,
+	Enum.KeyCode.LeftShift, Enum.KeyCode.Up, Enum.KeyCode.Down, Enum.KeyCode.Left, Enum.KeyCode.Right,
+	Enum.KeyCode.Return, Enum.KeyCode.Slash, Enum.KeyCode.Tab,
+}) do U.RESERVED[kc] = true end
+
+U.HOTKEYS = {
+	{id = "KeyMenu", label = "SHOW / HIDE MENU", hint = "MENU", run = function()
 		if menuOpen then closeMenu() else U.openMenu() end
+	end},
+	{id = "KeyUltra", label = "ULTRA INSTINCT ON / OFF", hint = "ULTRA", state = function() return Settings.UltraActive end, run = function()
+		setUltra(not Settings.UltraActive)
+	end},
+	{id = "KeyDodge", label = "AUTO DODGE", hint = "DODGE", state = function() return Settings.AutoDodge end, run = function()
+		Settings.AutoDodge = not Settings.AutoDodge
+		U.play(Settings.AutoDodge and "toggleOn" or "toggleOff")
+	end},
+	{id = "KeyCamera", label = "CAMERA LOCK", hint = "CAM LOCK", state = function() return Settings.CameraLock end, run = function()
+		Settings.CameraLock = not Settings.CameraLock
+		if not Settings.CameraLock then U.cancelCameraLock() end
+		U.play(Settings.CameraLock and "toggleOn" or "toggleOff")
+	end},
+	{id = "KeyESP", label = "PLAYER ESP", hint = "ESP", state = function() return Settings.ESPEnabled end, run = function()
+		Settings.ESPEnabled = not Settings.ESPEnabled
+		U.play(Settings.ESPEnabled and "toggleOn" or "toggleOff")
+	end},
+}
+
+-- is this key one of our hotkeys? (used so your own hotkey press never counts as "my ability")
+function U.isHotkey(kc)
+	if kc.Name == Settings.KeyMenu then return true end
+	if not Settings.PCHotkeys then return false end
+	for _, h in ipairs(U.HOTKEYS) do
+		if Settings[h.id] == kc.Name then return true end
+	end
+	return false
+end
+
+U.KEY_SHORT = {
+	RightShift = "R-SHIFT", LeftShift = "L-SHIFT", RightControl = "R-CTRL", LeftControl = "L-CTRL",
+	RightAlt = "R-ALT", LeftAlt = "L-ALT",
+}
+function U.keyLabel(name)
+	if name == nil or name == "None" then return "NONE" end
+	if U.KEY_SHORT[name] then return U.KEY_SHORT[name] end
+	local ok, kc = pcall(function() return Enum.KeyCode[name] end)
+	if not ok or not kc then return "NONE" end
+	local str = ""
+	pcall(function() str = UIS:GetStringForKeyCode(kc) end)
+	if type(str) ~= "string" or str == "" then str = kc.Name end
+	return string.upper(str)
+end
+
+bind(UIS.InputBegan, function(input, processed)
+	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+
+	-- leave key-listening mode when the menu closes or you change tab
+	if U.listening and (not menuOpen or currentPage ~= "Settings") then
+		U.listening = nil
+		U.refreshAll()
+	end
+
+	-- rebinding: the next key you press becomes the new hotkey
+	if U.listening then
+		if processed then return end
+		local id, kc = U.listening, input.KeyCode
+		if kc == Enum.KeyCode.Escape then
+			U.listening = nil
+		elseif kc == Enum.KeyCode.Backspace or kc == Enum.KeyCode.Delete then
+			Settings[id] = "None"
+			U.listening = nil
+		elseif U.RESERVED[kc] or kc == Enum.KeyCode.Unknown then
+			U.play("error")
+			return -- reserved for movement: keep listening
+		else
+			for _, h in ipairs(U.HOTKEYS) do
+				if h.id ~= id and Settings[h.id] == kc.Name then Settings[h.id] = "None" end
+			end
+			Settings[id] = kc.Name
+			U.listening = nil
+			U.play("success")
+		end
+		U.refreshAll()
+		return
+	end
+
+	if processed or not unlocked then return end
+	local name = input.KeyCode.Name
+	for _, h in ipairs(U.HOTKEYS) do
+		-- the menu key always works so you can never lock yourself out
+		if Settings[h.id] == name and (h.id == "KeyMenu" or Settings.PCHotkeys) then
+			h.run()
+			U.refreshAll()
+			return
+		end
 	end
 end)
+
+-- small key-hint strip (bottom-left, PC only)
+U.HUD = {}
+U.HUD.frame = new("Frame", {
+	Name = "PCHints", AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 12, 1, -12),
+	Size = UDim2.fromOffset(0, 26), AutomaticSize = Enum.AutomaticSize.X,
+	BackgroundColor3 = COL.bg, BackgroundTransparency = 0.3, BorderSizePixel = 0, Visible = false,
+}, gui)
+U.corner(U.HUD.frame, 8)
+new("UIPadding", {PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10)}, U.HUD.frame)
+U.HUD.label = new("TextLabel", {
+	BackgroundTransparency = 1, Size = UDim2.fromOffset(0, 26), AutomaticSize = Enum.AutomaticSize.X,
+	RichText = true, Font = Enum.Font.GothamBold, TextSize = 11, TextColor3 = COL.text, Text = "",
+}, U.HUD.frame)
+
+U.reg(function()
+	local show = unlocked and U.isPC() and Settings.PCHotkeys and Settings.PCHints
+	U.HUD.frame.Visible = show and true or false
+	if not show then return end
+	local hex = theme().a:ToHex()
+	local parts = {}
+	for _, h in ipairs(U.HOTKEYS) do
+		if Settings[h.id] ~= "None" then
+			local str = string.format("<font color=\"#%s\">[%s]</font> %s", hex, U.keyLabel(Settings[h.id]), h.hint)
+			if h.state then
+				if h.state() then
+					str ..= string.format(" <font color=\"#%s\">ON</font>", hex)
+				else
+					str ..= " <font color=\"#8f89ac\">OFF</font>"
+				end
+			end
+			parts[#parts + 1] = str
+		end
+	end
+	local txt = table.concat(parts, "   ")
+	if U.HUD.label.Text ~= txt then U.HUD.label.Text = txt end
+end, true)
+
+bind(UIS:GetPropertyChangedSignal("KeyboardEnabled"), function() U.refreshAll() end)
+bind(UIS:GetPropertyChangedSignal("MouseEnabled"), function() U.refreshAll() end)
 
 applyScale = function()
 	if not animating then
@@ -3652,17 +3852,18 @@ do
 			.. "2. Tune radius, dodge chance, threat sense and follow to your taste.\n"
 			.. "3. Use PLAYER for ESP and your dodge counter.\n"
 			.. "4. Use SETTINGS to change theme, size and sounds.\n"
-			.. "Tip: RightShift (or the UI bubble) hides / shows the menu. Tap a card title to collapse it, tap the ULTRA pill for a quick ON / OFF."
+			.. "Tip: " .. U.keyLabel(Settings.KeyMenu) .. " (PC) or the UI bubble hides / shows the menu. Tap a card title to collapse it, tap the ULTRA pill for a quick ON / OFF."
 	end)
 
 	local status = U.makeCard(p, "LIVE STATUS", "Updates in real time")
 	U.infoText(status, function()
 		return string.format(
-			"System: %s\nUltra Instinct: %s\nRadius: %s studs\nThreat range: %s studs\nDodges: %d\nESP: %s\nTheme: %s",
+			"System: %s\nUltra Instinct: %s\nRadius: %s studs\nThreat range: %s studs\nDodges: %d\nESP: %s\nTheme: %s\nAccess: %s",
 			Settings.Enabled and "READY" or "OFF",
 			Settings.UltraActive and "ON" or "OFF",
 			U.fmt(Settings.Radius), U.fmt(Settings.ThreatRange), Settings.DodgeCount,
-			Settings.ESPEnabled and "ON" or "OFF", theme().name)
+			Settings.ESPEnabled and "ON" or "OFF", theme().name,
+			U.ADMIN.is and ("ADMIN - " .. U.ADMIN.reason) or "ACCESS KEY")
 	end, true, 12)
 
 	local credits = U.makeCard(p, "CREDITS", nil)
@@ -4569,8 +4770,33 @@ do
 
 	local c5 = U.makeCard(p, "CONTROLS", nil)
 	U.infoText(c5, function()
-		return "Hide / show menu: RightShift (PC) or tap the UI bubble.\nDrag the header (or hold MOVE) to move the menu.\nTap a card title to collapse it.\nThe menu auto-fits your screen size."
+		return "Hide / show menu: " .. U.keyLabel(Settings.KeyMenu) .. " (PC) or tap the UI bubble.\nDrag the header (or hold MOVE) to move the menu.\nTap a card title to collapse it.\nThe menu auto-fits your screen size."
 	end, false, 11)
+
+	-- PC CONTROLS: rebindable hotkeys for keyboard + mouse players
+	local cpc = U.makeCard(p, "PC CONTROLS", "Hotkeys for keyboard + mouse players")
+	U.infoText(cpc, function()
+		return U.isPC() and "PC DETECTED - hotkeys are active."
+			or "NO KEYBOARD / MOUSE DETECTED - hotkeys work as soon as a keyboard is connected."
+	end, false, 10)
+	U.toggleRow(cpc, "PC HOTKEYS", function() return Settings.PCHotkeys end, function(v) Settings.PCHotkeys = v end)
+	U.toggleRow(cpc, "ON-SCREEN KEY HINTS", function() return Settings.PCHints end, function(v) Settings.PCHints = v end)
+	for _, h in ipairs(U.HOTKEYS) do
+		U.choiceRow(cpc, h.label, function()
+			if U.listening == h.id then return "PRESS A KEY..." end
+			return U.keyLabel(Settings[h.id])
+		end, function()
+			U.listening = (U.listening ~= h.id) and h.id or nil
+		end)
+	end
+	U.actionRow(cpc, "RESET KEYS TO DEFAULT", function()
+		U.listening = nil
+		for _, h in ipairs(U.HOTKEYS) do Settings[h.id] = Defaults[h.id] end
+		U.refreshAll()
+	end)
+	U.infoText(cpc, function()
+		return "Click a key row, then press the new key.\nESC cancels - BACKSPACE clears the key.\nW A S D, SPACE, SHIFT and arrows are reserved for movement.\nHotkeys never fire while you type in chat or a text box.\nPress SAVE (DATA card) to keep your keys."
+	end, false, 10)
 
 	-- CUSTOMIZE: Background / Icon / Security -> IMPORT
 	local cI = U.makeCard(p, "CUSTOMIZE", "Import your own images (PNG / JPG / BMP)")
@@ -4818,32 +5044,46 @@ shared.JAYVEE_AbilityMenu_Destroy = unloadFn
 -- UNLOCK FLOW:  Security -> Password -> Loading -> Menu
 --==================================================
 local unlocking, shaking = false, false
+
+-- shared success path: correct key OR admin bypass
+function U.grantAccess(statusText)
+	if unlocking then return end
+	unlocking = true
+	secStatus.Text = statusText or "ACCESS GRANTED"
+	secStatus.TextColor3 = Color3.fromRGB(175, 255, 195)
+	U.play("success")
+	U.tw(loadBar, 0.7, {Size = UDim2.new(1, 0, 1, 0)}, Enum.EasingStyle.Quad)
+	task.wait(0.8)
+	-- full loading screen; the security panel is hidden once the loader covers the screen
+	local okL, errL = pcall(U.runLoader, function() security.Visible = false end)
+	if not okL then
+		warn("[JAYVEE] Loader error:", errL)
+		pcall(function() if U.LOAD and U.LOAD.root then U.LOAD.root:Destroy() end end)
+		U.LOAD = nil
+	end
+	security.Visible = false
+	for _, tw in ipairs(U.SEC.tweens) do pcall(function() tw:Cancel() end) end
+	unlocked = true
+	U.showPage("Home")
+	-- Re-fit and clamp after the security screen disappears, before the menu animation.
+	applyScale()
+	clampGuiToViewport(main, 8)
+	U.refreshAll()
+	U.openMenu()
+end
+
 local function tryUnlock()
 	if unlocking or shaking then return end
 	U.play(clickSound)
 
+	-- ADMIN: no key needed
+	if U.ADMIN.is and U.ADMIN.AutoUnlock then
+		U.grantAccess("ADMIN ACCESS GRANTED")
+		return
+	end
+
 	if string.upper((passBox.Text:gsub("%s+", ""))) == string.upper(expectedPassword()) then
-		unlocking = true
-		secStatus.Text = "ACCESS GRANTED"
-		secStatus.TextColor3 = Color3.fromRGB(175, 255, 195)
-		U.play("success")
-		U.tw(loadBar, 0.7, {Size = UDim2.new(1, 0, 1, 0)}, Enum.EasingStyle.Quad)
-		task.wait(0.8)
-		-- full loading screen; the security panel is hidden once the loader covers the screen
-		local okL, errL = pcall(U.runLoader, function() security.Visible = false end)
-		if not okL then
-			warn("[JAYVEE] Loader error:", errL)
-			pcall(function() if U.LOAD and U.LOAD.root then U.LOAD.root:Destroy() end end)
-			U.LOAD = nil
-		end
-		security.Visible = false
-		for _, tw in ipairs(U.SEC.tweens) do pcall(function() tw:Cancel() end) end
-		unlocked = true
-		U.showPage("Home")
-		-- Re-fit and clamp after the security screen disappears, before the menu animation.
-		applyScale()
-		clampGuiToViewport(main, 8)
-		U.openMenu()
+		U.grantAccess("ACCESS GRANTED")
 	else
 		U.play("error")
 		U.wrongKeys = (U.wrongKeys or 0) + 1
@@ -4881,6 +5121,28 @@ U.refreshBodyAura()
 security.Visible = true
 main.Visible = false
 minimized.Visible = false
+
+-- ADMIN DETECTION: runs once the security screen is up (a group rank check can yield)
+task.spawn(function()
+	local okA, isAdmin, why = pcall(U.detectAdmin)
+	if not okA then warn("[JAYVEE] Admin detection error:", isAdmin) return end
+	if not isAdmin then return end
+	U.ADMIN.is, U.ADMIN.reason = true, why
+	if unlocked or unlocking then return end
+	local who = string.upper(player.DisplayName ~= "" and player.DisplayName or player.Name)
+	secStatus.TextColor3 = Color3.fromRGB(175, 255, 195)
+	if not U.ADMIN.AutoUnlock then
+		secStatus.Text = "ADMIN DETECTED - " .. who .. " - ENTER KEY (AUTO-UNLOCK OFF)"
+		return
+	end
+	secStatus.Text = "ADMIN DETECTED - " .. who .. " (" .. why .. ")"
+	passBox.Text = ""
+	passBox.TextEditable = false
+	passBox.PlaceholderText = "ADMIN - NO KEY NEEDED"
+	unlockBtn.Text = "ENTER AS ADMIN"
+	task.wait(1.2)
+	if not unlocked and not unlocking then U.grantAccess("ADMIN ACCESS GRANTED - WELCOME") end
+end)
 
 print("[JAYVEE] Ability Menu " .. SCRIPT_VERSION .. " loaded - Security screen should be visible.")
 
