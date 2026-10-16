@@ -1,5 +1,5 @@
 --==================================================================
--- ABILITY MENU - JAYVEE  (v5.9)
+-- ABILITY MENU - JAYVEE  (v6.0)
 -- Own-game LocalScript
 -- Place in: StarterPlayer > StarterPlayerScripts
 --
@@ -11,6 +11,11 @@
 --   MISC     : device info, sky box, anti lag, fast mode
 --   SETTINGS : theme, scale, sounds, animations, keybind, reset/unload
 --
+-- v5.10 CHANGES
+--   * KEYBOARD OVERLAY (SETTINGS tab, OBS style): shows only the keys you use - W A S D, SPACE / SHIFT, mouse
+--     M1 / M2 and your own custom keys (1 2 3 4 Q E R F by default). Keys light up while pressed.
+--     Movable (drag it), resizable, adjustable opacity, ignores typing in chat.
+
 -- v5.9 CHANGES
 --   * NEW MISC TAB (after PLAYER): DEVICE INFO (device, screen, live FPS / ping, memory) and PERFORMANCE:
 --       SKY BOX  : BLACK / GRAY (no clouds, flat color) or MINECRAFT (blue sky + blocky drifting clouds)
@@ -78,7 +83,7 @@
 --   * Damage fallback dodges even when no enemy is inside the radius.
 --==================================================================
 
-print("[JAYVEE] Ability Menu v5.9 loading...")
+print("[JAYVEE] Ability Menu v5.10 loading...")
 
 -- On-screen status banner: shows "loading", "loaded" or the exact ERROR on your screen.
 local function JV_Banner(text, isError)
@@ -129,7 +134,7 @@ local U = {} -- helper functions live here (Luau allows only 200 locals per scop
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local SCRIPT_VERSION = "v5.9"
+local SCRIPT_VERSION = "v5.10"
 local VERSION_MAJOR = SCRIPT_VERSION:match("%d+") or "4"
 local PASSWORD_PREFIX = "ULTRAINSTINCTBYJAYVEE"
 local PASSWORD = PASSWORD_PREFIX .. "V" .. VERSION_MAJOR
@@ -319,6 +324,17 @@ local Settings = {
 	SkyStyle = "Black",           -- Black / Gray / Minecraft
 	AntiLag = false,
 	FastMode = false,
+
+	-- v5.10  keyboard overlay
+	KeyOverlay = false,
+	OvMove = true,                -- W A S D
+	OvJump = true,                -- SPACE + SHIFT
+	OvMouse = true,               -- M1 / M2
+	OvCustom = "One,Two,Three,Four,Q,E,R,F",   -- your own keys (KeyCode names, max 8)
+	OvScale = 1,
+	OvAlpha = 0.35,               -- transparency of keys that are not pressed
+	OvX = 0.86,                   -- overlay centre (fraction of the screen)
+	OvY = 0.72,
 }
 
 local Defaults = table.clone(Settings)
@@ -425,6 +441,11 @@ function U.applySnapshot(snap)
 	Settings.FollowDuration = math.clamp(Settings.FollowDuration, 1, 15)
 	Settings.FollowDistance = math.clamp(Settings.FollowDistance, 1, 10)
 	Settings.FollowSpeed = math.clamp(Settings.FollowSpeed, 0.06, 0.3)
+	Settings.OvScale = math.clamp(Settings.OvScale, 0.6, 1.8)
+	Settings.OvAlpha = math.clamp(Settings.OvAlpha, 0, 0.85)
+	Settings.OvX = math.clamp(Settings.OvX, 0.03, 0.97)
+	Settings.OvY = math.clamp(Settings.OvY, 0.03, 0.97)
+	Settings.OvCustom = string.sub(Settings.OvCustom, 1, 160)
 	for _, key in ipairs({"ThemeIndex", "AuraTintIndex", "ESPColorIndex"}) do
 		Settings[key] = math.max(1, math.floor(Settings[key]))
 	end
@@ -3654,6 +3675,16 @@ bind(UIS.InputBegan, function(input, processed)
 	if U.listening then
 		if processed then return end
 		local id, kc = U.listening, input.KeyCode
+		if id == "OvAdd" then
+			-- keyboard overlay: every key you press is added to / removed from the overlay, ESC = done
+			if kc == Enum.KeyCode.Escape then
+				U.listening = nil
+			elseif kc ~= Enum.KeyCode.Unknown then
+				U.koToggleCustom(kc.Name)
+			end
+			U.refreshAll()
+			return
+		end
 		if kc == Enum.KeyCode.Escape then
 			U.listening = nil
 		elseif kc == Enum.KeyCode.Backspace or kc == Enum.KeyCode.Delete then
@@ -5158,6 +5189,226 @@ do
 end
 
 --==================================================
+-- KEYBOARD OVERLAY  (OBS style: only the keys you pick)
+--==================================================
+U.KO = {on = false, sig = nil, cells = {}, moveMode = false, drag = nil}
+U.KO_DEFAULT = "One,Two,Three,Four,Q,E,R,F"
+U.KO_SHORT = {
+	LeftControl = "CTRL", RightControl = "CTRL", LeftAlt = "ALT", RightAlt = "ALT", Tab = "TAB",
+	CapsLock = "CAPS", Return = "ENTER", Backspace = "BKSP", LeftShift = "SHIFT", RightShift = "SHIFT",
+	Space = "SPACE", Backquote = "`", Escape = "ESC",
+}
+
+function U.koLabel(name)
+	if U.KO_SHORT[name] then return U.KO_SHORT[name] end
+	return U.keyLabel(name)
+end
+
+-- custom keys are stored as "One,Two,Q,E" (KeyCode names)
+function U.koParseCustom()
+	local list, seen = {}, {}
+	for name in string.gmatch(Settings.OvCustom or "", "[^,]+") do
+		if not seen[name] and #list < 8 and pcall(function() return Enum.KeyCode[name] end) then
+			seen[name] = true
+			list[#list + 1] = name
+		end
+	end
+	return list
+end
+
+-- press a key that is already in the list to remove it, otherwise it gets added (max 8)
+function U.koToggleCustom(name)
+	local list = U.koParseCustom()
+	local idx = table.find(list, name)
+	if idx then
+		table.remove(list, idx)
+	elseif #list >= 8 then
+		U.play("error")
+		return
+	else
+		list[#list + 1] = name
+	end
+	Settings.OvCustom = table.concat(list, ",")
+	U.play("click")
+end
+
+U.KO.root = new("Frame", {
+	Name = "KeyOverlay", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(Settings.OvX, Settings.OvY),
+	Size = UDim2.fromOffset(10, 10), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 1,
+	BorderSizePixel = 0, Visible = false, Active = false,
+}, gui)
+U.corner(U.KO.root, 10)
+U.KO.scale = new("UIScale", {Scale = 1}, U.KO.root)
+U.KO.rootStroke = stroke(U.KO.root, 1.5, 0.2, theme().a)
+U.KO.rootStroke.Enabled = false
+U.KO.holder = new("Frame", {BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1)}, U.KO.root)
+
+function U.koPaint(c)
+	if c.down then
+		c.frame.BackgroundColor3 = theme().a
+		c.frame.BackgroundTransparency = 0.05
+		c.label.TextColor3 = Color3.fromRGB(14, 12, 22)
+	else
+		c.frame.BackgroundColor3 = Color3.fromRGB(18, 16, 28)
+		c.frame.BackgroundTransparency = Settings.OvAlpha
+		c.label.TextColor3 = Color3.fromRGB(235, 232, 250)
+	end
+end
+
+function U.koBuild()
+	local K = U.KO
+	for _, c in ipairs(K.holder:GetChildren()) do c:Destroy() end
+	K.cells = {}
+	local KS, GAP = 38, 5
+	local bw = 3 * KS + 2 * GAP
+	local rows, fixed = {}, {}
+
+	if Settings.OvMove then
+		rows[#rows + 1] = {{name = "W", label = "W", w = KS}}
+		rows[#rows + 1] = {
+			{name = "A", label = "A", w = KS}, {name = "S", label = "S", w = KS}, {name = "D", label = "D", w = KS},
+		}
+		fixed.W, fixed.A, fixed.S, fixed.D = true, true, true, true
+	end
+	if Settings.OvJump then
+		local sw = math.floor(KS * 1.5)
+		rows[#rows + 1] = {
+			{name = "LeftShift", label = "SHIFT", w = sw},
+			{name = "Space", label = "SPACE", w = bw - sw - GAP},
+		}
+		fixed.LeftShift, fixed.Space = true, true
+	end
+	if Settings.OvMouse then
+		local mw = math.floor((bw - GAP) / 2)
+		rows[#rows + 1] = {
+			{mouse = Enum.UserInputType.MouseButton1, label = "M1", w = mw},
+			{mouse = Enum.UserInputType.MouseButton2, label = "M2", w = bw - mw - GAP},
+		}
+	end
+	local custom = {}
+	for _, n in ipairs(U.koParseCustom()) do
+		if not fixed[n] then custom[#custom + 1] = n end
+	end
+	for i = 1, #custom, 4 do
+		local row = {}
+		for j = i, math.min(i + 3, #custom) do
+			row[#row + 1] = {name = custom[j], label = U.koLabel(custom[j]), w = KS}
+		end
+		rows[#rows + 1] = row
+	end
+
+	-- size of the whole overlay (rows are centred)
+	local W, widths = 0, {}
+	for r, row in ipairs(rows) do
+		local rw = (#row - 1) * GAP
+		for _, k in ipairs(row) do rw += k.w end
+		widths[r] = rw
+		W = math.max(W, rw)
+	end
+	local H = math.max(0, #rows * KS + (#rows - 1) * GAP)
+	K.root.Size = UDim2.fromOffset(math.max(W, 1), math.max(H, 1))
+
+	for r, row in ipairs(rows) do
+		local x = (W - widths[r]) / 2
+		local y = (r - 1) * (KS + GAP)
+		for _, k in ipairs(row) do
+			local kc
+			if k.name then
+				local ok, v = pcall(function() return Enum.KeyCode[k.name] end)
+				if ok then kc = v end
+			end
+			if kc or k.mouse then
+				local f = new("Frame", {
+					Position = UDim2.fromOffset(x, y), Size = UDim2.fromOffset(k.w, KS),
+					BackgroundColor3 = Color3.fromRGB(18, 16, 28), BackgroundTransparency = Settings.OvAlpha,
+					BorderSizePixel = 0,
+				}, K.holder)
+				U.corner(f, 8)
+				stroke(f, 1, 0.7)
+				local l = new("TextLabel", {
+					BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Text = k.label, TextScaled = true,
+					Font = Enum.Font.GothamBlack, TextColor3 = Color3.fromRGB(235, 232, 250),
+				}, f)
+				new("UITextSizeConstraint", {MaxTextSize = 18, MinTextSize = 7}, l)
+				new("UIPadding", {
+					PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 5),
+					PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6),
+				}, l)
+				K.cells[#K.cells + 1] = {frame = f, label = l, kc = kc, mouse = k.mouse, down = false}
+			end
+			x += k.w + GAP
+		end
+	end
+	for _, c in ipairs(K.cells) do U.koPaint(c) end
+end
+
+-- live key state: polled every frame so it always matches what you really press
+function U.koStep()
+	local K = U.KO
+	if not K.on then return end
+	local typing = UIS:GetFocusedTextBox() ~= nil   -- typing in chat / a text box: do not light up keys
+	for _, c in ipairs(K.cells) do
+		local down
+		if c.mouse then
+			down = UIS:IsMouseButtonPressed(c.mouse)
+		elseif typing then
+			down = false
+		else
+			down = UIS:IsKeyDown(c.kc)
+		end
+		if down ~= c.down then
+			c.down = down
+			U.koPaint(c)
+		end
+	end
+end
+bind(RunService.RenderStepped, function() U.koStep() end)
+
+-- drag to move (only while MOVE OVERLAY is on, otherwise clicks go straight through to the game)
+U.KO.root.InputBegan:Connect(function(input)
+	local K = U.KO
+	if not K.moveMode then return end
+	local t = input.UserInputType
+	if t ~= Enum.UserInputType.MouseButton1 and t ~= Enum.UserInputType.Touch then return end
+	K.drag = {start = input.Position, ox = Settings.OvX, oy = Settings.OvY}
+end)
+bind(UIS.InputChanged, function(input)
+	local K = U.KO
+	local d = K.drag
+	if not d then return end
+	local t = input.UserInputType
+	if t ~= Enum.UserInputType.MouseMovement and t ~= Enum.UserInputType.Touch then return end
+	local size = gui.AbsoluteSize
+	if size.X < 1 or size.Y < 1 then return end
+	Settings.OvX = math.clamp(d.ox + (input.Position.X - d.start.X) / size.X, 0.03, 0.97)
+	Settings.OvY = math.clamp(d.oy + (input.Position.Y - d.start.Y) / size.Y, 0.03, 0.97)
+	K.root.Position = UDim2.fromScale(Settings.OvX, Settings.OvY)
+end)
+bind(UIS.InputEnded, function(input)
+	local t = input.UserInputType
+	if t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch then U.KO.drag = nil end
+end)
+
+U.reg(function()
+	local K = U.KO
+	K.on = (unlocked and Settings.KeyOverlay) and true or false
+	K.root.Visible = K.on
+	if not K.on then return end
+	local sig = table.concat({tostring(Settings.OvMove), tostring(Settings.OvJump), tostring(Settings.OvMouse), Settings.OvCustom}, "|")
+	if sig ~= K.sig then
+		K.sig = sig
+		U.koBuild()
+	end
+	K.root.Position = UDim2.fromScale(Settings.OvX, Settings.OvY)
+	K.scale.Scale = Settings.OvScale
+	K.root.Active = K.moveMode
+	K.root.BackgroundTransparency = K.moveMode and 0.65 or 1
+	K.rootStroke.Enabled = K.moveMode
+	K.rootStroke.Color = theme().a
+	for _, c in ipairs(K.cells) do U.koPaint(c) end
+end)
+
+--==================================================
 -- PAGE: SETTINGS
 --==================================================
 local unloadFn -- assigned below
@@ -5224,6 +5475,45 @@ do
 	end)
 	U.infoText(cpc, function()
 		return "Click a key row, then press the new key.\nESC cancels - BACKSPACE clears the key.\nW A S D, SPACE, SHIFT and arrows are reserved for movement.\nHotkeys never fire while you type in chat or a text box.\nPress SAVE (DATA card) to keep your keys."
+	end, false, 10)
+
+	-- KEYBOARD OVERLAY: OBS style key display with only the keys you pick
+	local cko = U.makeCard(p, "KEYBOARD OVERLAY", "OBS style - only the keys you use")
+	U.toggleRow(cko, "KEYBOARD OVERLAY", function() return Settings.KeyOverlay end, function(v) Settings.KeyOverlay = v end)
+	U.toggleRow(cko, "MOVEMENT  (W A S D)", function() return Settings.OvMove end, function(v) Settings.OvMove = v end)
+	U.toggleRow(cko, "SPACE + SHIFT", function() return Settings.OvJump end, function(v) Settings.OvJump = v end)
+	U.toggleRow(cko, "MOUSE  (M1 / M2)", function() return Settings.OvMouse end, function(v) Settings.OvMouse = v end)
+	U.choiceRow(cko, "CUSTOM KEYS", function()
+		return U.listening == "OvAdd" and "PRESS KEYS... ESC = DONE" or "ADD / REMOVE"
+	end, function()
+		U.listening = (U.listening ~= "OvAdd") and "OvAdd" or nil
+	end)
+	U.infoText(cko, function()
+		local names = {}
+		for _, n in ipairs(U.koParseCustom()) do names[#names + 1] = U.keyLabel(n) end
+		return "Custom keys: " .. (#names > 0 and table.concat(names, "  ") or "NONE") .. "   (max 8)"
+	end, false, 11)
+	U.actionRow(cko, "DEFAULT CUSTOM KEYS", function()
+		Settings.OvCustom = U.KO_DEFAULT
+		U.refreshAll()
+	end)
+	U.actionRow(cko, "CLEAR CUSTOM KEYS", function()
+		Settings.OvCustom = ""
+		U.refreshAll()
+	end)
+	U.stepperRow(cko, "SIZE", function() return string.format("%.1fx", Settings.OvScale) end,
+		U.adjust("OvScale", 0.1, 0.6, 1.8))
+	U.stepperRow(cko, "OPACITY", function() return math.floor((1 - Settings.OvAlpha) * 100 + 0.5) .. "%" end,
+		function(dir) Settings.OvAlpha = U.round2(math.clamp(Settings.OvAlpha - 0.1 * dir, 0, 0.85)) end)
+	U.toggleRow(cko, "MOVE OVERLAY (DRAG IT)", function() return U.KO.moveMode end, function(v) U.KO.moveMode = v end)
+	U.actionRow(cko, "RESET OVERLAY POSITION", function()
+		Settings.OvX, Settings.OvY = Defaults.OvX, Defaults.OvY
+		U.refreshAll()
+	end)
+	U.infoText(cko, function()
+		return "Keys light up while you hold them. Turn on MOVE OVERLAY and drag it where you want, then turn it off so clicks go through to the game.\n"
+			.. "CUSTOM KEYS: tap the row, press every key you want to show (press it again to remove), ESC when done.\n"
+			.. "Keys are ignored while you type in chat. Press SAVE (DATA card) to keep your overlay."
 	end, false, 10)
 
 	-- CUSTOMIZE: Background / Icon / Security -> IMPORT
