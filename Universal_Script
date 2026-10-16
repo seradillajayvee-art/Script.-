@@ -137,7 +137,7 @@ U.ADMIN = {
 		-- [123456789] = true,   -- <== PUT YOUR ROBLOX USERID HERE  (roblox.com/users/<THIS NUMBER>/profile)
 	},
 	Names = {
-		-- "YourUsername",       -- optional: matched with your Roblox USERNAME (UserId above is safer)
+		"BzQ71",                 -- matched with your Roblox USERNAME (UserId above is safer)
 	},
 	GameOwner = true,            -- the creator of this place counts as admin (user-owned games)
 	GroupId = 0,                 -- optional: group id, 0 = off
@@ -5125,8 +5125,19 @@ minimized.Visible = false
 -- ADMIN DETECTION: runs once the security screen is up (a group rank check can yield)
 task.spawn(function()
 	local okA, isAdmin, why = pcall(U.detectAdmin)
-	if not okA then warn("[JAYVEE] Admin detection error:", isAdmin) return end
-	if not isAdmin then return end
+	if not okA then
+		warn("[JAYVEE] Admin detection error:", isAdmin)
+		secStatus.Text = "ADMIN CHECK ERROR - TYPE THE KEY"
+		return
+	end
+	if not isAdmin then
+		-- not an admin: show your UserId so you can paste it into U.ADMIN.UserIds
+		print("[JAYVEE] Not admin. Your UserId = " .. tostring(player.UserId) .. "  (put it in U.ADMIN.UserIds)")
+		if not unlocked and not unlocking then
+			secStatus.Text = "KEY REQUIRED - YOUR USERID: " .. tostring(player.UserId)
+		end
+		return
+	end
 	U.ADMIN.is, U.ADMIN.reason = true, why
 	if unlocked or unlocking then return end
 	local who = string.upper(player.DisplayName ~= "" and player.DisplayName or player.Name)
