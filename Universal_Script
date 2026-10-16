@@ -11,7 +11,7 @@
 --   MISC     : device info, sky box, anti lag, fast mode
 --   SETTINGS : theme, scale, sounds, animations, keybind, reset/unload
 --
--- v5.10 CHANGES
+-- v6.0 CHANGES
 --   * KEYBOARD OVERLAY (SETTINGS tab, OBS style): shows only the keys you use - W A S D, SPACE / SHIFT, mouse
 --     M1 / M2 and your own custom keys (1 2 3 4 Q E R F by default). Keys light up while pressed.
 --     Movable (drag it), resizable, adjustable opacity, ignores typing in chat.
