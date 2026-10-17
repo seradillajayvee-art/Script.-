@@ -1,5 +1,5 @@
 --==================================================================
--- ABILITY MENU - JAYVEE  (v6.3)
+-- ABILITY MENU - JAYVEE  (v6.4)
 -- Own-game LocalScript
 -- Place in: StarterPlayer > StarterPlayerScripts
 --
@@ -11,6 +11,18 @@
 --   MISC     : device info, sky box, anti lag, fast mode
 --   SETTINGS : theme, scale, sounds, animations, keybind, reset/unload
 --
+-- v6.3 CHANGES
+--   * FRIENDLY / TARGET LOCK are leaderboard-style lists in the ABILITY tab (avatar, name, distance, HP and an
+--     UNFRIEND / UNTARGET button). Click a player with the MOUSE (button chosen in the FRIENDLY card, default
+--     MIDDLE) = friendly, double click = target lock; phones: tap / double tap. No more key binds for it.
+--   * Friends are SAVED (JAYVEE_Menu/friends.json) and come back blue every time they join. Several targets
+--     can be locked - you dash to the closest one.
+--   * New PLAYERS list: everyone in the server with FRIEND / TARGET buttons.
+--   * DODGE AI positioning keeps YOUR dodge style (side step / backstep / blink). It only checks the spot and
+--     swaps to the mirrored side when the spot is a wall, a pit, another enemy or still inside the swing.
+--   * SETTINGS: AUTO SCREEN ROTATE (games that lock the screen) and DRAG & DROP (pull any card out of its tab
+--     onto the screen and put it back - not saved).
+
 -- v6.2 CHANGES  (ABILITY tab: DODGE AI / ATTACK DASH)
 --   * TARGET LOCK / FINISHER now DASH to the enemy like a dodge (afterimage, smoke, trail) instead of a hard
 --     teleport. MOVE STYLE can switch back to INSTANT.
@@ -22,13 +34,13 @@
 --     / projectile line, away from walls, pits and other enemies, behind the attacker). REACTION = SMART learns
 --     when each attack really hits you and dodges just before it lands.
 
--- v6.1CHANGES  (ABILITY tab: FRIENDLY / TARGET LOCK / FINISHER)
+-- v6.1 CHANGES  (ABILITY tab: FRIENDLY / TARGET LOCK / FINISHER)
 --   * FRIENDLY: tap a player (PC: aim + H) -> turns BLUE. You never dodge their punches / abilities.
 --   * TARGET LOCK: double tap a player (PC: aim + T) -> turns GREY. Every hit / punch / skill you do teleports
 --     you to that player, wherever he is.
 --   * FINISHER: you hit someone, he drops to low HP and runs away -> your next hit / punch teleports you to him.
 
--- v6.0CHANGES
+-- v6.0 CHANGES
 --   * KEYBOARD OVERLAY (SETTINGS tab, OBS style): shows only the keys you use - W A S D, SPACE / SHIFT, mouse
 --     M1 / M2 and your own custom keys (1 2 3 4 Q E R F by default). Keys light up while pressed.
 --     Movable (drag it), resizable, adjustable opacity, ignores typing in chat.
@@ -100,7 +112,7 @@
 --   * Damage fallback dodges even when no enemy is inside the radius.
 --==================================================================
 
-print("[JAYVEE] Ability Menu v5.12 loading...")
+print("[JAYVEE] Ability Menu v5.13 loading...")
 
 -- On-screen status banner: shows "loading", "loaded" or the exact ERROR on your screen.
 local function JV_Banner(text, isError)
@@ -151,7 +163,7 @@ local U = {} -- helper functions live here (Luau allows only 200 locals per scop
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local SCRIPT_VERSION = "v5.12"
+local SCRIPT_VERSION = "v5.13"
 local VERSION_MAJOR = SCRIPT_VERSION:match("%d+") or "4"
 local PASSWORD_PREFIX = "ULTRAINSTINCTBYJAYVEE"
 local PASSWORD = PASSWORD_PREFIX .. "V" .. VERSION_MAJOR
@@ -361,8 +373,8 @@ local Settings = {
 	FinRange = 150,               -- farthest distance (studs) the finisher teleport works from
 	FinMemory = 8,                -- seconds you remember who you hit
 	TpGap = 4,                    -- studs between you and the player after a teleport
-	KeyFriendly = "H",            -- PC: aim at a player + press = friendly
-	KeyTarget = "T",              -- PC: aim at a player + press = target lock
+	SelectBtn = "Middle",         -- PC: mouse button that picks players (Middle / Right / Left / Off)
+	AutoRotate = "Off",           -- phones: Off / Landscape / All
 
 	-- v5.12  dodge AI / attack dash
 	DodgeAnyAttack = true,        -- enemy inside the circle starts an attack -> dodge, even if it would miss
@@ -399,6 +411,8 @@ U.CHOICES = {
 	SkyStyle = {"Black", "Gray", "Minecraft"},
 	AIReaction = {"Instant", "Smart"},
 	TpMode = {"Dash", "Instant"},
+	SelectBtn = {"Middle", "Right", "Left", "Off"},
+	AutoRotate = {"Off", "Landscape", "All"},
 }
 
 function U.fsReady()
@@ -495,7 +509,7 @@ function U.applySnapshot(snap)
 		if not table.find(list, Settings[key]) then Settings[key] = Defaults[key] end
 	end
 	-- hotkeys must be real KeyCode names (or "None")
-	for _, id in ipairs({"KeyMenu", "KeyUltra", "KeyDodge", "KeyCamera", "KeyESP", "KeyFriendly", "KeyTarget"}) do
+	for _, id in ipairs({"KeyMenu", "KeyUltra", "KeyDodge", "KeyCamera", "KeyESP"}) do
 		local v = Settings[id]
 		if v ~= "None" and not pcall(function() return Enum.KeyCode[v] end) then Settings[id] = Defaults[id] end
 	end
@@ -842,7 +856,8 @@ end
 
 -- FRIENDLY / TARGET LOCK data.  Keys are the Player (or the model for NPCs), so it survives a respawn.
 U.friendly = setmetatable({}, {__mode = "k"})    -- [Player or model] = true   (tap = friendly, BLUE)
-U.target = nil                                   -- Player or model             (double tap = target lock, GREY)
+U.targets = setmetatable({}, {__mode = "k"})     -- [Player or model] = true   (double tap = target lock, GREY)
+U.friendBook = {}                                -- [UserId] = name  (saved friends, loaded further down)
 U.friendBorn = setmetatable({}, {__mode = "k"})  -- effect parts that belong to a friendly player (never a threat)
 
 function U.keyOf(model) return Players:GetPlayerFromCharacter(model) or model end
@@ -853,8 +868,9 @@ function U.modelOfKey(key)
 end
 
 function U.isFriendly(model)
-	if next(U.friendly) == nil then return false end
-	return U.friendly[Players:GetPlayerFromCharacter(model) or model] == true
+	if not Settings.FriendlyOn or next(U.friendly) == nil then return false end
+	local key = Players:GetPlayerFromCharacter(model) or model
+	return U.friendly[key] == true and not U.targets[key]   -- a locked target is never "friendly"
 end
 
 -- a new effect part (hitbox / projectile) spawned right next to a friendly player = his attack, ignore it
@@ -1971,15 +1987,9 @@ end
 -- threat = {dir = Vector3, dist = number, away = bool}
 --   away = false : sidestep perpendicular to dir (projectiles / beams)
 --   away = true  : move along dir (explosions / hitboxes around you)
-function U.dodgeDestination(targetRoot, threat, profile)
+function U.dodgeDestinationClassic(targetRoot, threat, profile)
 	local origin = root.Position
 	profile = profile or U.dodgeProfile()
-
-	-- DODGE AI: pick the best spot (falls back to the classic logic below if it finds nothing)
-	if Settings.AIOn and Settings.AIPosition and U.aiDestination then
-		local okAI, aiDest = pcall(U.aiDestination, targetRoot, threat, profile)
-		if okAI and aiDest then return aiDest end
-	end
 
 	local ignore = {character, ringFolder}
 	if targetRoot and targetRoot.Parent then table.insert(ignore, targetRoot.Parent) end
@@ -2047,6 +2057,16 @@ function U.dodgeDestination(targetRoot, threat, profile)
 		dest = origin + root.CFrame.RightVector * side * 8
 	end
 	return clip(dest)
+end
+
+-- the dodge spot of YOUR dodge style; DODGE AI only swaps it for the mirrored side when it is clearly safer
+function U.dodgeDestination(targetRoot, threat, profile)
+	local dest = U.dodgeDestinationClassic(targetRoot, threat, profile)
+	if Settings.AIOn and Settings.AIPosition and U.aiRefine then
+		local okAI, better = pcall(U.aiRefine, dest, targetRoot, threat)
+		if okAI and better then return better end
+	end
+	return dest
 end
 
 local function runDodge(target, threat)
@@ -2822,6 +2842,7 @@ function U.makeCard(page, title, sub)
 		st.Color = theme().b
 		c.BackgroundTransparency = (U.IMG and U.IMG.hasBg) and Settings.PanelGlass or 0.05
 	end)
+	c:SetAttribute("JV_Card", true)
 	return c
 end
 
@@ -4024,7 +4045,7 @@ function U.friendDamage()
 	if #U.getAllNearbyTargets() > 0 then return false end
 	local reach = U.effReach() + 6
 	for key in pairs(U.friendly) do
-		local m = U.modelOfKey(key)
+		local m = (not U.targets[key]) and U.modelOfKey(key)
 		local tr = m and U.getRoot(m)
 		if tr and (tr.Position - root.Position).Magnitude <= reach then return true end
 	end
@@ -4035,8 +4056,8 @@ end
 function U.markSync()
 	local M = U.mark.hl
 	local want = {}
-	for key in pairs(U.friendly) do want[key] = "friendly" end
-	if U.target ~= nil then want[U.target] = "target" end
+	if Settings.FriendlyOn then for key in pairs(U.friendly) do want[key] = "friendly" end end
+	if Settings.TargetLockOn then for key in pairs(U.targets) do want[key] = "target" end end  -- grey wins over blue
 	for key, h in pairs(M) do
 		if not want[key] or not h.Parent then
 			pcall(function() h:Destroy() end)
@@ -4077,48 +4098,278 @@ function U.keyName(key)
 	return "?"
 end
 
-function U.markList(kind)
-	local names = {}
-	if kind == "target" then
-		if U.target ~= nil then names[1] = U.keyName(U.target) end
-	else
-		for key in pairs(U.friendly) do
-			if not (typeof(key) == "Instance" and key:IsA("Player") and not key.Parent) then
-				names[#names + 1] = U.keyName(key)
+----------------------------------------------------- saved friends (own file: never depends on the SAVE button)
+U.FRIEND_FILE = U.DIR .. "/friends.json"
+
+function U.loadFriends()
+	local data
+	if U.fsReady() then
+		pcall(function()
+			if isfile(U.FRIEND_FILE) then
+				data = game:GetService("HttpService"):JSONDecode(readfile(U.FRIEND_FILE))
 			end
+		end)
+	end
+	if type(data) ~= "table" then data = shared.JAYVEE_Friends end
+	local book = {}
+	if type(data) == "table" then
+		for k, v in pairs(data) do
+			local id = tonumber(k)
+			if id and id > 0 and type(v) == "string" then book[id] = string.sub(v, 1, 40) end
 		end
 	end
-	return #names > 0 and table.concat(names, ", ") or "NONE"
+	return book
+end
+
+function U.saveFriends()
+	local out = {}
+	for id, name in pairs(U.friendBook) do out[tostring(id)] = name end
+	shared.JAYVEE_Friends = out
+	if U.fsReady() then
+		U.ensureDir(U.DIR)
+		pcall(function()
+			writefile(U.FRIEND_FILE, game:GetService("HttpService"):JSONEncode(out))
+		end)
+	end
+end
+
+U.friendBook = U.loadFriends()
+
+-- a saved friend is in the server (now or later): mark him blue again
+function U.friendApply(plr)
+	if plr == player then return end
+	local saved = U.friendBook[plr.UserId]
+	if saved then
+		U.friendly[plr] = true
+		if saved ~= plr.Name then            -- he changed his name
+			U.friendBook[plr.UserId] = plr.Name
+			U.saveFriends()
+		end
+	end
+end
+for _, plr in ipairs(Players:GetPlayers()) do U.friendApply(plr) end
+bind(Players.PlayerAdded, U.friendApply)
+
+function U.addFriend(key)
+	U.friendly[key] = true
+	if typeof(key) == "Instance" and key:IsA("Player") then
+		U.friendBook[key.UserId] = key.Name
+		U.saveFriends()
+	end
+end
+
+function U.removeFriend(key)
+	U.friendly[key] = nil
+	if typeof(key) == "Instance" and key:IsA("Player") then
+		U.friendBook[key.UserId] = nil
+		U.saveFriends()
+	end
+end
+
+function U.setFriendly(key, on)
+	if on then U.addFriend(key) else U.removeFriend(key) end
+	U.play(on and "toggleOn" or "toggleOff")
+	U.markSync()
+	U.refreshAll()
+end
+
+function U.setTarget(key, on)
+	U.targets[key] = on and true or nil
+	U.play(on and "toggleOn" or "toggleOff")
+	U.markSync()
+	U.refreshAll()
 end
 
 function U.toggleFriendly(model)
 	if not Settings.FriendlyOn or not model then return end
 	local key = U.keyOf(model)
-	if U.friendly[key] then
-		U.friendly[key] = nil
-		U.play("toggleOff")
-	else
-		U.friendly[key] = true
-		if U.target == key then U.target = nil end
-		U.play("toggleOn")
-	end
-	U.markSync()
-	U.refreshAll()
+	U.setFriendly(key, not U.friendly[key])
 end
 
 function U.toggleTarget(model)
 	if not Settings.TargetLockOn or not model then return end
 	local key = U.keyOf(model)
-	if U.target == key then
-		U.target = nil
-		U.play("toggleOff")
-	else
-		U.target = key
-		U.friendly[key] = nil
-		U.play("toggleOn")
+	U.setTarget(key, not U.targets[key])
+end
+
+-- the closest alive locked target (you can lock several players)
+function U.nearestTargetModel()
+	local best, bestD
+	for key in pairs(U.targets) do
+		local m = U.modelOfKey(key)
+		local tr, hum = m and m.Parent and U.getRoot(m), m and U.getHum(m)
+		if tr and hum and hum.Health > 0 and root then
+			local d = (tr.Position - root.Position).Magnitude
+			if not bestD or d < bestD then best, bestD = m, d end
+		end
 	end
+	return best
+end
+
+----------------------------------------------------- leaderboard style lists
+function U.sortByName(list)
+	table.sort(list, function(a, b) return string.lower(a.name) < string.lower(b.name) end)
+	return list
+end
+
+function U.friendEntries()
+	local list = {}
+	for id, name in pairs(U.friendBook) do
+		local plr = Players:GetPlayerByUserId(id)
+		list[#list + 1] = {key = plr or id, id = id, name = name, plr = plr}
+	end
+	for key in pairs(U.friendly) do
+		if typeof(key) == "Instance" and not key:IsA("Player") and key.Parent then
+			list[#list + 1] = {key = key, name = key.Name, npc = true}
+		end
+	end
+	return U.sortByName(list)
+end
+
+function U.targetEntries()
+	local list = {}
+	for key in pairs(U.targets) do
+		local isPlr = typeof(key) == "Instance" and key:IsA("Player")
+		if not (isPlr and not key.Parent) then
+			list[#list + 1] = {
+				key = key, id = isPlr and key.UserId or nil, name = U.keyName(key),
+				plr = isPlr and key or nil, npc = not isPlr,
+			}
+		end
+	end
+	return U.sortByName(list)
+end
+
+function U.playerEntries()
+	local list = {}
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= player then list[#list + 1] = {key = plr, id = plr.UserId, name = plr.Name, plr = plr} end
+	end
+	return U.sortByName(list)
+end
+
+function U.unfriend(e)
+	if e.id then
+		U.friendBook[e.id] = nil
+		if e.plr then U.friendly[e.plr] = nil end
+		U.saveFriends()
+	else
+		U.friendly[e.key] = nil
+	end
+	U.play("toggleOff")
 	U.markSync()
 	U.refreshAll()
+end
+
+function U.untarget(e)
+	U.targets[e.key] = nil
+	U.play("toggleOff")
+	U.markSync()
+	U.refreshAll()
+end
+
+function U.listSub(e)
+	if not e.plr and not e.npc then return "OFFLINE  (saved)" end
+	local m = e.plr and e.plr.Character or e.key
+	local hum, tr = m and U.getHum(m), m and U.getRoot(m)
+	if hum and tr and root then
+		local hp = math.floor(hum.Health / math.max(hum.MaxHealth, 1) * 100 + 0.5)
+		local dist = math.floor((tr.Position - root.Position).Magnitude + 0.5)
+		return string.format("IN SERVER  -  %d studs  -  HP %d%%", dist, hp)
+	end
+	return "IN SERVER"
+end
+
+U.lists = {}
+
+-- one row: avatar, name, live info and 1-2 buttons on the right
+function U.makeListRow(box, e, accent, specs)
+	local row = new("Frame", {
+		Size = UDim2.new(1, 0, 0, 44), BackgroundColor3 = COL.row, BackgroundTransparency = 0.1, BorderSizePixel = 0,
+	}, box)
+	U.corner(row, 10)
+	new("Frame", {
+		Size = UDim2.new(0, 3, 1, -14), Position = UDim2.new(0, 4, 0, 7), BackgroundColor3 = accent, BorderSizePixel = 0,
+	}, row)
+	local av = new("ImageLabel", {
+		Size = UDim2.fromOffset(30, 30), Position = UDim2.fromOffset(14, 7), BackgroundColor3 = COL.off,
+		BorderSizePixel = 0, Image = e.id and ("rbxthumb://type=AvatarHeadShot&id=" .. e.id .. "&w=48&h=48") or "",
+	}, row)
+	U.corner(av, 15)
+	local btnW = 0
+	for _, sp in ipairs(specs) do btnW += sp.w + 6 end
+	local shown = e.name
+	if e.plr and e.plr.DisplayName ~= e.plr.Name then shown = e.plr.DisplayName .. "  @" .. e.plr.Name end
+	new("TextLabel", {
+		BackgroundTransparency = 1, Position = UDim2.fromOffset(52, 5), Size = UDim2.new(1, -(52 + btnW + 6), 0, 17),
+		Text = shown, Font = Enum.Font.GothamBold, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
+		TextColor3 = COL.text, TextTruncate = Enum.TextTruncate.AtEnd,
+	}, row)
+	local sub = new("TextLabel", {
+		BackgroundTransparency = 1, Position = UDim2.fromOffset(52, 23), Size = UDim2.new(1, -(52 + btnW + 6), 0, 14),
+		Text = "", Font = Enum.Font.Gotham, TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left,
+		TextColor3 = COL.sub, TextTruncate = Enum.TextTruncate.AtEnd,
+	}, row)
+	local btns = {}
+	local x = 6
+	for i = #specs, 1, -1 do
+		local sp = specs[i]
+		local b = new("TextButton", {
+			AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -x, 0.5, 0), Size = UDim2.fromOffset(sp.w, 26),
+			BackgroundColor3 = sp.color or COL.danger, Text = "", Font = Enum.Font.GothamBlack, TextSize = 10,
+			TextColor3 = Color3.new(1, 1, 1),
+		}, row)
+		U.corner(b, 8)
+		b.Activated:Connect(function()
+			U.play("click")
+			sp.click(e)
+		end)
+		btns[i] = b
+		x += sp.w + 6
+	end
+	return {row = row, sub = sub, btns = btns}
+end
+
+-- a list card body: rows are rebuilt when the entries change, the info text / button labels update live
+function U.buildList(card, kind, getEntries, accent, specs, emptyText)
+	local box = new("Frame", {BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y}, card)
+	new("UIListLayout", {Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder}, box)
+	local L = {box = box, sig = nil, rows = {}}
+	U.lists[kind] = L
+	U.reg(function()
+		local entries = getEntries()
+		local parts = {}
+		for _, e in ipairs(entries) do
+			parts[#parts + 1] = tostring(e.id or e.key) .. ((e.plr or e.npc) and "1" or "0")
+		end
+		local sig = table.concat(parts, ",")
+		if sig ~= L.sig then
+			L.sig = sig
+			for _, ch in ipairs(box:GetChildren()) do
+				if ch:IsA("GuiObject") then ch:Destroy() end
+			end
+			L.rows = {}
+			if #entries == 0 then
+				new("TextLabel", {
+					BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 22), Text = emptyText, Font = Enum.Font.Gotham,
+					TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = COL.sub,
+					TextWrapped = true,
+				}, box)
+			end
+			for i, e in ipairs(entries) do L.rows[i] = U.makeListRow(box, e, accent, specs) end
+		end
+		for i, e in ipairs(entries) do
+			local r = L.rows[i]
+			if r then
+				r.sub.Text = U.listSub(e)
+				for bi, sp in ipairs(specs) do
+					r.btns[bi].Text = sp.text(e)
+					if sp.colorFn then r.btns[bi].BackgroundColor3 = sp.colorFn(e) end
+				end
+			end
+		end
+	end, true)
+	return L
 end
 
 -- which player / NPC is under this ray?  (falls back to the closest one to the ray so small targets are easy to tap)
@@ -4155,57 +4406,69 @@ function U.pickUnderMouse()
 	return U.pickModel(cam:ViewportPointToRay(mp.X, mp.Y))
 end
 
--- PC hotkeys (they also show up in SETTINGS > PC CONTROLS so you can rebind them)
-U.HOTKEYS[#U.HOTKEYS + 1] = {id = "KeyFriendly", label = "FRIENDLY (AIM AT PLAYER)", hint = "FRIEND", run = function()
-	local m = U.pickUnderMouse()
-	if m then U.toggleFriendly(m) else U.play("error") end
-end}
-U.HOTKEYS[#U.HOTKEYS + 1] = {id = "KeyTarget", label = "TARGET LOCK (AIM AT PLAYER)", hint = "TARGET",
-	state = function() return U.target ~= nil end, run = function()
-		local m = U.pickUnderMouse()
-		if m then
-			U.toggleTarget(m)
-		elseif U.target ~= nil then
-			U.target = nil
-			U.markSync()
-			U.play("toggleOff")
-		else
-			U.play("error")
-		end
-	end}
-
--- touch: TAP = friendly, DOUBLE TAP = target lock  (TouchTapInWorld only fires for real taps, never camera drags)
+-- PICKING PLAYERS:  PC = click with the mouse button chosen in the FRIENDLY card (single = friendly,
+-- double = target lock).  Phone = tap / double tap.
 U.tap = {last = nil, token = 0}
-function U.handleTap(pos)
+U.SELECT_BTN = {
+	Middle = Enum.UserInputType.MouseButton3, Right = Enum.UserInputType.MouseButton2,
+	Left = Enum.UserInputType.MouseButton1,
+}
+
+function U.clickName()
+	local b = Settings.SelectBtn
+	if not U.SELECT_BTN[b] then return "(click select is OFF)" end
+	return string.upper(b) .. " CLICK"
+end
+
+function U.handleTap(pos, isMouse)
 	if not unlocked or not (Settings.FriendlyOn or Settings.TargetLockOn) then return end
 	local cam = workspace.CurrentCamera
 	if not cam then return end
-	local model = U.pickModel(cam:ScreenPointToRay(pos.X, pos.Y))
-	local T = U.tap
+	local ray = isMouse and cam:ViewportPointToRay(pos.X, pos.Y) or cam:ScreenPointToRay(pos.X, pos.Y)
+	local model = U.pickModel(ray)
+	local Tp = U.tap
 	if not model then
-		T.last = nil
-		T.token += 1
+		Tp.last = nil
+		Tp.token += 1
 		return
 	end
 	local now = os.clock()
-	if T.last and T.last.model == model and now - T.last.t <= 0.35 then
-		T.last = nil
-		T.token += 1                      -- cancels the pending single tap
-		U.toggleTarget(model)             -- DOUBLE TAP
+	if Tp.last and Tp.last.model == model and now - Tp.last.t <= 0.35 then
+		Tp.last = nil
+		Tp.token += 1                     -- cancels the pending single click
+		U.toggleTarget(model)             -- DOUBLE click / tap
 	else
-		T.last = {model = model, t = now}
-		T.token += 1
-		local my = T.token
-		task.delay(0.36, function()       -- no second tap came: it was a single tap
-			if my == T.token and T.last and T.last.model == model then
-				T.last = nil
+		Tp.last = {model = model, t = now}
+		Tp.token += 1
+		local my = Tp.token
+		task.delay(0.36, function()       -- no second click came: it was a single click
+			if my == Tp.token and Tp.last and Tp.last.model == model then
+				Tp.last = nil
 				U.toggleFriendly(model)
 			end
 		end)
 	end
 end
+
+-- phone: TouchTapInWorld only fires for real taps, never camera drags
 bind(UIS.TouchTapInWorld, function(pos, byUI)
-	if not byUI then U.handleTap(pos) end
+	if not byUI then U.handleTap(pos, false) end
+end)
+
+-- PC: a clean click (no camera drag) with the chosen mouse button
+U.click = {down = nil}
+bind(UIS.InputBegan, function(input, processed)
+	if processed or not unlocked then return end
+	local want = U.SELECT_BTN[Settings.SelectBtn]
+	if not want or input.UserInputType ~= want then return end
+	U.click.down = {pos = UIS:GetMouseLocation(), t = os.clock(), btn = want}
+end)
+bind(UIS.InputEnded, function(input)
+	local d = U.click.down
+	if not d or input.UserInputType ~= d.btn then return end
+	U.click.down = nil
+	local pos = UIS:GetMouseLocation()
+	if (pos - d.pos).Magnitude <= 8 and os.clock() - d.t <= 0.35 then U.handleTap(pos, true) end
 end)
 
 -- teleport next to a player (arrive on YOUR side of him, facing him)
@@ -4344,92 +4607,78 @@ function U.aiLearnHit()
 	U.ai.hits += 1
 end
 
--- choose the best dodge spot: out of the swing / projectile line, no walls, no pits, no other enemies
-function U.aiDestination(targetRoot, threat, profile)
-	if not root then return nil end
+-- DODGE AI checks the spot YOUR dodge style picked (side step / backstep / blink stay exactly as you set them).
+-- If that spot is a wall, a pit, next to another enemy or still inside the attacker's swing, it tries the
+-- mirrored spot (other side of the attacker / other side of the projectile line) and only uses it when it is
+-- clearly safer.  It never turns a side step into a back dash.
+function U.aiRefine(dest, targetRoot, threat)
+	if not root or not dest then return nil end
 	local origin = root.Position
-	profile = profile or U.dodgeProfile()
-
-	local ignore = {character, ringFolder}
-	if targetRoot and targetRoot.Parent then table.insert(ignore, targetRoot.Parent) end
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = ignore
-	params.RespectCanCollide = true
-
-	local D = math.clamp((threat and threat.dist or 9) * profile.distMul, 7, 22)
-
+	local attackerModel = targetRoot and targetRoot.Parent
 	local tp, look
-	if targetRoot and targetRoot.Parent then
+	if targetRoot and attackerModel then
 		tp = targetRoot.Position
 		look = Vector3.new(targetRoot.CFrame.LookVector.X, 0, targetRoot.CFrame.LookVector.Z)
 		look = look.Magnitude > 0.05 and look.Unit or Vector3.new(0, 0, -1)
 	end
-	local tdir
-	if threat and threat.dir then
-		tdir = Vector3.new(threat.dir.X, 0, threat.dir.Z)
-		tdir = tdir.Magnitude > 0.05 and tdir.Unit or nil
-	end
 
-	-- the other enemies around (do not dodge into them)
+	-- the mirrored spot (only for side-step kinds of dodge)
+	local alt
+	if threat and not threat.away then
+		alt = Vector3.new(2 * origin.X - dest.X, origin.Y, 2 * origin.Z - dest.Z)       -- other side of the projectile line
+	elseif not threat and tp and Settings.DodgeAnimation ~= "Backstep" and Settings.DodgeAnimation ~= "Blink" then
+		local v = Vector3.new(dest.X - tp.X, 0, dest.Z - tp.Z)
+		local right = Vector3.new(-look.Z, 0, look.X)
+		local flipped = look * v:Dot(look) - right * v:Dot(right)                        -- same spot, other side of him
+		alt = Vector3.new(tp.X + flipped.X, origin.Y, tp.Z + flipped.Z)
+	end
+	if not alt then return nil end
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = {character, ringFolder, attackerModel}
+	params.RespectCanCollide = true
+
 	local others = {}
-	local attackerModel = targetRoot and targetRoot.Parent
 	U.eachTarget(function(m)
 		if m ~= attackerModel and U.isValidTarget(m) then
 			local r = U.getRoot(m)
 			if r and (r.Position - origin).Magnitude < 45 then others[#others + 1] = r.Position end
 		end
 	end)
-
 	local reach = U.effReach() + 2
-	local best, bestScore = nil, -math.huge
-	for i = 0, 15 do
-		local ang = i * (math.pi / 8)
-		local dir = Vector3.new(math.cos(ang), 0, math.sin(ang))
-		local dist = D
-		local hit = workspace:Raycast(origin, dir * dist, params)
-		if hit then dist = math.max((hit.Position - origin).Magnitude - 2, 0) end   -- wall: stop before it
-		if dist >= D * 0.5 then
-			local dest = origin + dir * dist
-			local score = dist / D * 6
-			-- never dodge into a pit / off the map
-			if not workspace:Raycast(dest + Vector3.new(0, 2, 0), Vector3.new(0, -14, 0), params) then
-				score -= 100
-			end
-			-- projectile / beam / explosion: sidestep it (explosion: run away from it)
-			if tdir then
-				local c = dir:Dot(tdir)
-				if threat.away then score += 30 * c else score += 32 * (1 - math.abs(c)) end
-			end
-			-- melee / ability attacker: leave the swing and the cone in front of him
-			if tp then
-				local v = Vector3.new(dest.X - tp.X, 0, dest.Z - tp.Z)
-				local dd = v.Magnitude
-				local cosA = dd > 0.1 and look:Dot(v.Unit) or 1
-				if dd > reach then score += 22 end
-				score += 28 * (1 - math.max(cosA, 0))
-				if cosA < -0.2 then score += 10 end                      -- behind him = counter position
-				if dd > Settings.Radius * 1.5 then score -= 12 end       -- do not run out of the fight
-				local mode = Settings.DodgeAnimation
-				if mode == "Blink" and cosA < -0.4 and dd <= Settings.FollowDistance + 4 then score += 22 end
-				if mode == "Backstep" then
-					local away = Vector3.new(origin.X - tp.X, 0, origin.Z - tp.Z)
-					if away.Magnitude > 0.1 then score += 18 * dir:Dot(away.Unit) end
-				end
-			end
-			for _, op in ipairs(others) do
-				local od = Vector3.new(dest.X - op.X, 0, dest.Z - op.Z).Magnitude
-				if od < 25 then score -= 18 * (1 - od / 25) end
-			end
-			-- stay unpredictable: not the same direction twice in a row
-			if U.ai.lastDir and dir:Dot(U.ai.lastDir) > 0.9 then score -= 6 end
-			score += math.random() * 4
-			if score > bestScore then bestScore, best = score, {dest = dest, dir = dir} end
+
+	-- never through a wall (same idea as the classic dodge)
+	local function clip(pos)
+		local d = pos - origin
+		if d.Magnitude < 0.5 then return pos end
+		local hit = workspace:Raycast(origin, d, params)
+		if hit then
+			local back = hit.Position - d.Unit * 2
+			if (back - origin):Dot(d) < 0 then return origin end
+			return Vector3.new(back.X, origin.Y, back.Z)
 		end
+		return pos
 	end
-	if not best then return nil end
-	U.ai.lastDir = best.dir
-	return Vector3.new(best.dest.X, origin.Y, best.dest.Z)
+	local want = (dest - origin).Magnitude
+	local function score(pos)
+		local sc = 0
+		if not workspace:Raycast(pos + Vector3.new(0, 2, 0), Vector3.new(0, -14, 0), params) then sc -= 100 end   -- pit
+		sc -= 40 * (1 - math.clamp((pos - origin).Magnitude / math.max(want, 0.5), 0, 1))                        -- cut short
+		for _, op in ipairs(others) do
+			local od = Vector3.new(pos.X - op.X, 0, pos.Z - op.Z).Magnitude
+			if od < 25 then sc -= 18 * (1 - od / 25) end
+		end
+		if tp then
+			local v = Vector3.new(pos.X - tp.X, 0, pos.Z - tp.Z)
+			if v.Magnitude > 0.1 and v.Magnitude <= reach and look:Dot(v.Unit) > 0.5 then sc -= 20 end        -- in his swing
+		end
+		return sc
+	end
+
+	local alt2 = clip(alt)
+	if score(alt2) > score(dest) + 8 then return Vector3.new(alt2.X, origin.Y, alt2.Z) end
+	return nil
 end
 
 -- FINISHER: remember who you hit
@@ -4460,9 +4709,9 @@ function U.onOwnAction(now)
 	if now - U.tp.last < 0.45 or dodging then return end
 
 	-- 1) TARGET LOCK: go to the locked player, wherever you hit
-	if Settings.TargetLockOn and U.target ~= nil then
-		local m = U.modelOfKey(U.target)
-		if m and m.Parent and U.tpTo(m, now) then return end
+	if Settings.TargetLockOn and next(U.targets) ~= nil then
+		local m = U.nearestTargetModel()
+		if m and U.tpTo(m, now) then return end
 	end
 
 	-- 2) FINISHER: the one you hit is low on HP and ran away
@@ -4494,8 +4743,8 @@ bind(RunService.Heartbeat, function()
 end)
 
 bind(Players.PlayerRemoving, function(plr)
-	U.friendly[plr] = nil
-	if U.target == plr then U.target = nil end
+	U.friendly[plr] = nil     -- (a saved friend stays in the friend book and is marked again when he rejoins)
+	U.targets[plr] = nil
 	if U.fin.victim == plr then U.fin.victim = nil end
 	local h = U.mark.hl[plr]
 	if h then pcall(function() h:Destroy() end); U.mark.hl[plr] = nil end
@@ -4668,35 +4917,57 @@ do
 			.. "MOVE STYLE: DASH = fast dodge-style slide, INSTANT = jump straight to him."
 	end, false, 10)
 
-	-- FRIENDLY: tap = BLUE, their hits never make you dodge
-	local cfr = U.makeCard(p, "FRIENDLY", "Tap a player: BLUE - you never dodge their hits")
+	-- FRIENDLY: click / tap = BLUE, saved list, leaderboard style
+	local cfr = U.makeCard(p, "FRIENDLY", "Click / tap a player: BLUE - you never dodge his hits")
 	U.toggleRow(cfr, "FRIENDLY MODE", function() return Settings.FriendlyOn end, function(v) Settings.FriendlyOn = v end)
+	U.choiceRow(cfr, "PC CLICK BUTTON", function() return Settings.SelectBtn end, function()
+		Settings.SelectBtn = U.cycleList(U.CHOICES.SelectBtn, Settings.SelectBtn)
+	end)
 	U.infoText(cfr, function()
-		return "TAP a player (friend or enemy) = FRIENDLY: he turns BLUE and none of his punches / abilities make you dodge. Tap him again to remove it.\n"
-			.. "PC: aim at the player and press " .. U.keyLabel(Settings.KeyFriendly) .. "."
+		return "PC: " .. U.clickName() .. " on a player = FRIENDLY. He turns BLUE and none of his punches / abilities make you dodge. Click him again to remove him.\n"
+			.. "PHONE: tap a player.\n"
+			.. "Your friends are SAVED - they come back blue every time you join.\n"
+			.. "Left click is also your punch, so the default is MIDDLE click (change it with PC CLICK BUTTON)."
 	end, false, 10)
-	U.infoText(cfr, function() return "Friendly now: " .. U.markList("friendly") end, true, 11)
-	U.actionRow(cfr, "CLEAR ALL FRIENDLY", function()
+	U.buildList(cfr, "friend", U.friendEntries, Color3.fromRGB(70, 140, 255), {
+		{w = 84, color = COL.danger, text = function() return "UNFRIEND" end, click = function(e) U.unfriend(e) end},
+	}, "No friends yet - click / tap a player, or use the PLAYERS list below.")
+	U.actionRow(cfr, "CLEAR ALL FRIENDS", function()
+		for id in pairs(U.friendBook) do U.friendBook[id] = nil end
 		table.clear(U.friendly)
+		U.saveFriends()
 		U.markSync()
 		U.refreshAll()
 	end)
 
-	-- TARGET LOCK: double tap = GREY, every hit teleports you to him
-	local ctl = U.makeCard(p, "TARGET LOCK", "Double tap a player: GREY - your hits dash you to him")
+	-- TARGET LOCK: double click / tap = GREY, every hit dashes you to him
+	local ctl = U.makeCard(p, "TARGET LOCK", "Double click / tap a player: GREY - your hits dash you to him")
 	U.toggleRow(ctl, "TARGET LOCK", function() return Settings.TargetLockOn end, function(v) Settings.TargetLockOn = v end)
 	U.stepperRow(ctl, "STOP DISTANCE", function() return U.fmt(Settings.TpGap) .. " studs" end,
 		U.adjust("TpGap", 0.5, 2, 8))
 	U.infoText(ctl, function()
-		return "DOUBLE TAP a player (friend or enemy) = TARGET LOCK: he turns GREY. Every hit / punch / skill you do dodge-dashes you next to him, wherever you are. Double tap him again to unlock.\n"
-			.. "PC: aim at the player and press " .. U.keyLabel(Settings.KeyTarget) .. " (aim at nobody to unlock)."
+		return "PC: DOUBLE " .. U.clickName() .. " on a player = TARGET LOCK. PHONE: double tap. He turns GREY and every hit / punch / skill you do dodge-dashes you next to him, wherever you are. Do it again (or press UNTARGET) to unlock.\n"
+			.. "You can lock several players - you dash to the closest one."
 	end, false, 10)
-	U.infoText(ctl, function() return "Locked on: " .. U.markList("target") end, true, 11)
-	U.actionRow(ctl, "CLEAR TARGET LOCK", function()
-		U.target = nil
+	U.buildList(ctl, "target", U.targetEntries, Color3.fromRGB(165, 165, 170), {
+		{w = 84, color = COL.danger, text = function() return "UNTARGET" end, click = function(e) U.untarget(e) end},
+	}, "Nobody locked - double click / double tap a player, or use the PLAYERS list below.")
+	U.actionRow(ctl, "CLEAR ALL TARGETS", function()
+		table.clear(U.targets)
 		U.markSync()
 		U.refreshAll()
 	end)
+
+	-- PLAYERS: everyone in the server, FRIEND / TARGET in one tap
+	local cpl = U.makeCard(p, "PLAYERS", "Everyone in the server - tap FRIEND or TARGET")
+	U.buildList(cpl, "players", U.playerEntries, COL.off, {
+		{w = 72, text = function(e) return U.friendly[e.key] and "UNFRIEND" or "FRIEND" end,
+			colorFn = function(e) return U.friendly[e.key] and COL.danger or Color3.fromRGB(60, 110, 210) end,
+			click = function(e) U.setFriendly(e.key, not U.friendly[e.key]) end},
+		{w = 72, text = function(e) return U.targets[e.key] and "UNTARGET" or "TARGET" end,
+			colorFn = function(e) return U.targets[e.key] and COL.danger or Color3.fromRGB(105, 105, 118) end,
+			click = function(e) U.setTarget(e.key, not U.targets[e.key]) end},
+	}, "Nobody else is in the server.")
 
 	-- FINISHER: low HP enemy runs away, your next hit teleports you to him
 	local cfi = U.makeCard(p, "FINISHER", "Low HP enemy runs? Your next hit dashes you to him")
@@ -6068,6 +6339,160 @@ U.reg(function()
 end)
 
 --==================================================
+-- DRAG & DROP (pull cards out of the tabs - not saved)  +  AUTO SCREEN ROTATE
+--==================================================
+U.dd = {mode = false, home = setmetatable({}, {__mode = "k"}), cards = {}, drag = nil}
+U.dd.layer = new("Frame", {
+	Name = "FloatLayer", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Active = false, ZIndex = 20,
+}, gui)
+
+function U.ddAttach(card, title)
+	local h = new("TextButton", {
+		Name = "DDHandle", AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -24, 0.5, 0),
+		Size = UDim2.fromOffset(46, 16), BackgroundColor3 = theme().b, AutoButtonColor = false, Text = "DRAG",
+		Font = Enum.Font.GothamBlack, TextSize = 9, TextColor3 = Color3.new(1, 1, 1), Visible = false,
+	}, title)
+	U.corner(h, 6)
+	local back = new("TextButton", {
+		Name = "DDBack", AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -76, 0.5, 0),
+		Size = UDim2.fromOffset(40, 16), BackgroundColor3 = COL.danger, AutoButtonColor = false, Text = "BACK",
+		Font = Enum.Font.GothamBlack, TextSize = 9, TextColor3 = Color3.new(1, 1, 1), Visible = false,
+	}, title)
+	U.corner(back, 6)
+	h.InputBegan:Connect(function(input)
+		local t = input.UserInputType
+		if t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch then U.ddStart(card, input) end
+	end)
+	back.Activated:Connect(function()
+		U.play("click")
+		U.ddReturn(card)
+	end)
+	U.dd.cards[#U.dd.cards + 1] = {card = card, handle = h, back = back}
+end
+
+function U.ddInit()
+	for _, page in pairs(pages) do
+		for _, ch in ipairs(page:GetChildren()) do
+			if ch:IsA("Frame") and ch:GetAttribute("JV_Card") then
+				local title = ch:FindFirstChildWhichIsA("TextButton")
+				if title then U.ddAttach(ch, title) end
+			end
+		end
+	end
+	U.ddRefresh()
+end
+
+function U.ddRefresh()
+	local D = U.dd
+	for _, e in ipairs(D.cards) do
+		local floating = D.home[e.card] ~= nil
+		e.handle.Visible = D.mode or floating
+		e.back.Visible = floating
+		e.handle.BackgroundColor3 = theme().b
+		local sc = e.card:FindFirstChild("DDScale")
+		if sc then sc.Scale = U.targetScale() end
+	end
+end
+
+-- hold DRAG: the card leaves its tab and floats on the screen (it keeps working, even with the menu closed)
+function U.ddStart(card, input)
+	local D = U.dd
+	local pointer = Vector2.new(input.Position.X, input.Position.Y)
+	if not D.home[card] then
+		local abs, size = card.AbsolutePosition, card.AbsoluteSize
+		D.home[card] = card.Parent
+		local sc = new("UIScale", {Name = "DDScale", Scale = U.targetScale()}, card)
+		local width = 340
+		card.Size = UDim2.new(0, width, 0, 0)
+		card.Parent = D.layer
+		local lp = D.layer.AbsolutePosition
+		local startPos = Vector2.new(abs.X + size.X - width * sc.Scale - lp.X, abs.Y - lp.Y)
+		card.Position = UDim2.fromOffset(startPos.X, startPos.Y)
+		D.drag = {card = card, startPointer = pointer, startPos = startPos}
+	else
+		D.drag = {
+			card = card, startPointer = pointer,
+			startPos = Vector2.new(card.Position.X.Offset, card.Position.Y.Offset),
+		}
+	end
+	U.ddRefresh()
+end
+
+function U.ddReturn(card)
+	local D = U.dd
+	local home = D.home[card]
+	if not home then return end
+	D.home[card] = nil
+	if D.drag and D.drag.card == card then D.drag = nil end
+	local sc = card:FindFirstChild("DDScale")
+	if sc then sc:Destroy() end
+	card.Size = UDim2.new(1, 0, 0, 0)
+	card.Position = UDim2.new()
+	card.Parent = home
+	U.ddRefresh()
+end
+
+function U.ddReturnAll()
+	for _, e in ipairs(U.dd.cards) do U.ddReturn(e.card) end
+end
+
+bind(UIS.InputChanged, function(input)
+	local d = U.dd.drag
+	if not d then return end
+	local t = input.UserInputType
+	if t ~= Enum.UserInputType.MouseMovement and t ~= Enum.UserInputType.Touch then return end
+	local pos = d.startPos + (Vector2.new(input.Position.X, input.Position.Y) - d.startPointer)
+	local lsz, csz = U.dd.layer.AbsoluteSize, d.card.AbsoluteSize
+	pos = Vector2.new(
+		math.clamp(pos.X, 0, math.max(lsz.X - csz.X, 0)),
+		math.clamp(pos.Y, 0, math.max(lsz.Y - 30, 0)))
+	d.card.Position = UDim2.fromOffset(pos.X, pos.Y)
+end)
+
+bind(UIS.InputEnded, function(input)
+	local d = U.dd.drag
+	if not d then return end
+	local t = input.UserInputType
+	if t ~= Enum.UserInputType.MouseButton1 and t ~= Enum.UserInputType.Touch then return end
+	U.dd.drag = nil
+	-- dropped back over the open menu: it goes home
+	if main.Visible and U.dd.home[d.card] then
+		local mp, ms = main.AbsolutePosition, main.AbsoluteSize
+		local c = d.card.AbsolutePosition + Vector2.new(30, 10)
+		if c.X >= mp.X and c.X <= mp.X + ms.X and c.Y >= mp.Y and c.Y <= mp.Y + ms.Y then U.ddReturn(d.card) end
+	end
+end)
+
+U.reg(function() U.ddRefresh() end, true)
+
+----------------------------------------------------- AUTO SCREEN ROTATE (games that lock the orientation)
+U.ROT = {orig = nil}
+U.ROT_MAP = {Landscape = Enum.ScreenOrientation.LandscapeSensor, All = Enum.ScreenOrientation.Sensor}
+
+function U.rotateSync()
+	if not unlocked then return end
+	local want = U.ROT_MAP[Settings.AutoRotate]
+	if want then
+		if U.ROT.orig == nil then pcall(function() U.ROT.orig = playerGui.ScreenOrientation end) end
+		local okR, cur = pcall(function() return playerGui.ScreenOrientation end)
+		if okR and cur ~= want then U.sp(playerGui, "ScreenOrientation", want) end
+	elseif U.ROT.orig ~= nil then
+		U.sp(playerGui, "ScreenOrientation", U.ROT.orig)
+		U.ROT.orig = nil
+	end
+end
+
+function U.rotateRestore()
+	if U.ROT.orig ~= nil then
+		U.sp(playerGui, "ScreenOrientation", U.ROT.orig)
+		U.ROT.orig = nil
+	end
+end
+
+-- fast refresher: also fights games that force their orientation again
+U.reg(function() U.rotateSync() end, true)
+
+--==================================================
 -- PAGE: SETTINGS
 --==================================================
 local unloadFn -- assigned below
@@ -6134,6 +6559,26 @@ do
 	end)
 	U.infoText(cpc, function()
 		return "Click a key row, then press the new key.\nESC cancels - BACKSPACE clears the key.\nW A S D, SPACE, SHIFT and arrows are reserved for movement.\nHotkeys never fire while you type in chat or a text box.\nPress SAVE (DATA card) to keep your keys."
+	end, false, 10)
+
+	-- SCREEN ROTATE: for games that lock the screen orientation
+	local csr = U.makeCard(p, "SCREEN ROTATE", "Auto rotate for games that do not rotate")
+	U.choiceRow(csr, "AUTO ROTATE", function() return Settings.AutoRotate end, function()
+		Settings.AutoRotate = U.cycleList(U.CHOICES.AutoRotate, Settings.AutoRotate)
+	end)
+	U.infoText(csr, function()
+		return "OFF = leave the game alone.\nLANDSCAPE = the screen flips between left and right landscape when you turn your phone.\nALL = portrait too.\nKeep your phone's own auto-rotate ON. Going back to OFF restores the game's setting."
+	end, false, 10)
+
+	-- DRAG & DROP: pull any card out of its tab (not saved)
+	local cdd = U.makeCard(p, "DRAG & DROP", "Take any card out of its tab")
+	U.toggleRow(cdd, "DRAG & DROP MODE", function() return U.dd.mode end, function(v) U.dd.mode = v end)
+	U.actionRow(cdd, "PUT ALL CARDS BACK", function()
+		U.ddReturnAll()
+		U.refreshAll()
+	end)
+	U.infoText(cdd, function()
+		return "Turn it ON, then hold the DRAG button on any card and pull it out of the menu. It floats on your screen and keeps working, even when the menu is closed. Move it by its DRAG button.\nPut it back with BACK, or drop it over the open menu.\nNot saved: next time everything is in its tab again."
 	end, false, 10)
 
 	-- KEYBOARD OVERLAY: OBS style key display with only the keys you pick
@@ -6387,6 +6832,7 @@ end
 unloadFn = function()
 	pcall(U.perfShutdown)
 	pcall(U.markShutdown)
+	pcall(U.rotateRestore)
 	Settings.UltraActive = false
 	dodgeToken += 1
 	dodging = false
@@ -6497,6 +6943,7 @@ U.showPage("Home")
 pcall(U.applyImages)
 U.refreshAll()
 U.refreshBodyAura()
+U.ddInit()   -- DRAG & DROP handles on every card
 security.Visible = true
 main.Visible = false
 minimized.Visible = false
