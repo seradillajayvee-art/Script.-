@@ -31,6 +31,8 @@ local CONFIG = {
 	Slots = 7, -- default lang, pwede mo palitan sa UI (tap yung number after "/")
 	MaxSlots = 20,
 	Accent = Color3.fromRGB(10, 132, 255),
+	Accent2 = Color3.fromRGB(150, 80, 255),
+	IconImage = "", -- optional: "rbxassetid://ID" para sa sarili mong icon (kung blangko, default na hanger icon)
 	Volume = 0.6,
 	ToggleKey = Enum.KeyCode.RightShift,
 	Version = SCRIPT_VERSION,
@@ -161,8 +163,12 @@ local function glassFill(frame, transparency)
 	frame.BackgroundColor3 = WHITE
 	frame.BackgroundTransparency = transparency
 	new("UIGradient", {
-		Rotation = 60,
-		Color = ColorSequence.new(Color3.fromRGB(120, 130, 160), Color3.fromRGB(28, 31, 44)),
+		Rotation = 55,
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(92, 104, 200)),
+			ColorSequenceKeypoint.new(0.5, Color3.fromRGB(40, 32, 88)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(14, 16, 40)),
+		}),
 	}, frame)
 end
 
@@ -208,15 +214,15 @@ local function glassButton(parent, text, size, position, accent)
 		Size = size,
 		Position = position,
 		BorderSizePixel = 0,
-		BackgroundColor3 = accent and CONFIG.Accent or WHITE,
-		BackgroundTransparency = accent and 0.15 or 0.86,
+		BackgroundColor3 = WHITE,
+		BackgroundTransparency = accent and 0.08 or 0.86,
 	}, parent)
 	new("UICorner", { CornerRadius = UDim.new(0, 14) }, b)
 	addRim(b, 1, 0.3)
 	if accent then
 		new("UIGradient", {
-			Rotation = 90,
-			Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(165, 190, 255)),
+			Rotation = 20,
+			Color = ColorSequence.new(CONFIG.Accent, CONFIG.Accent2),
 		}, b)
 	end
 	pressFX(b)
@@ -317,6 +323,80 @@ local function makeSwitch(parent, initial, onChange)
 	return obj
 end
 
+-- custom icons (drawn from shapes, walang emoji / asset)
+local function iconLine(parent, x1, y1, x2, y2, th, color)
+	local dx, dy = x2 - x1, y2 - y1
+	local len = math.sqrt(dx * dx + dy * dy)
+	local f = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromOffset((x1 + x2) / 2, (y1 + y2) / 2),
+		Size = UDim2.fromOffset(len + th * 0.6, th),
+		Rotation = math.deg(math.atan2(dy, dx)),
+		BackgroundColor3 = color,
+		BorderSizePixel = 0,
+	}, parent)
+	new("UICorner", { CornerRadius = UDim.new(1, 0) }, f)
+	return f
+end
+
+-- kind: "home" | "hanger" | "person"  -> returns { box, setColor }
+local function makeIcon(kind, parent, size, color)
+	local k = size / 16
+	local th = 1.6 * k
+	local box = new("Frame", { Size = UDim2.fromOffset(size, size), BackgroundTransparency = 1 }, parent)
+	local fills, strokes = {}, {}
+	local function L(x1, y1, x2, y2)
+		table.insert(fills, iconLine(box, x1 * k, y1 * k, x2 * k, y2 * k, th, color))
+	end
+	if kind == "home" then
+		L(8, 1.8, 1.4, 7.6)
+		L(8, 1.8, 14.6, 7.6)
+		L(3, 7.2, 3, 14)
+		L(13, 7.2, 13, 14)
+		L(3, 14, 13, 14)
+	elseif kind == "hanger" then
+		local ring = new("Frame", {
+			Position = UDim2.fromOffset(5.6 * k, 0.4 * k),
+			Size = UDim2.fromOffset(4.8 * k, 4.8 * k),
+			BackgroundTransparency = 1,
+		}, box)
+		new("UICorner", { CornerRadius = UDim.new(1, 0) }, ring)
+		table.insert(strokes, new("UIStroke", { Color = color, Thickness = th }, ring))
+		L(8, 5.2, 8, 7.4)
+		L(8, 7.4, 1.2, 12.8)
+		L(8, 7.4, 14.8, 12.8)
+		L(1.2, 12.8, 14.8, 12.8)
+	else -- person
+		local head = new("Frame", {
+			Position = UDim2.fromOffset(4.6 * k, 0.8 * k),
+			Size = UDim2.fromOffset(6.8 * k, 6.8 * k),
+			BackgroundColor3 = color,
+			BorderSizePixel = 0,
+		}, box)
+		new("UICorner", { CornerRadius = UDim.new(1, 0) }, head)
+		table.insert(fills, head)
+		local body = new("Frame", {
+			Position = UDim2.fromOffset(2 * k, 9 * k),
+			Size = UDim2.fromOffset(12 * k, 6.2 * k),
+			BackgroundColor3 = color,
+			BorderSizePixel = 0,
+		}, box)
+		new("UICorner", { CornerRadius = UDim.new(0.5, 0) }, body)
+		table.insert(fills, body)
+	end
+	return {
+		box = box,
+		setColor = function(c)
+			for _, f in ipairs(fills) do
+				f.BackgroundColor3 = c
+			end
+			for _, st in ipairs(strokes) do
+				st.Color = c
+			end
+		end,
+	}
+end
+
 ------------------------------------------------------------
 -- UI
 ------------------------------------------------------------
@@ -349,7 +429,7 @@ local glass = new("Frame", {
 	Size = UDim2.new(1, -4, 1, -4),
 	BorderSizePixel = 0,
 }, window)
-glassFill(glass, 0.3)
+glassFill(glass, 0.2)
 new("UICorner", { CornerRadius = UDim.new(0, 28) }, glass)
 addRim(glass, 1.5, 0)
 
@@ -375,14 +455,36 @@ local dragZone = new("Frame", {
 	Active = true,
 }, header)
 
+local badge = new("Frame", {
+	Position = UDim2.fromOffset(14, 8),
+	Size = UDim2.fromOffset(30, 30),
+	BackgroundColor3 = WHITE,
+	BorderSizePixel = 0,
+}, dragZone)
+new("UIGradient", { Rotation = 45, Color = ColorSequence.new(CONFIG.Accent, CONFIG.Accent2) }, badge)
+new("UICorner", { CornerRadius = UDim.new(0, 10) }, badge)
+addRim(badge, 1, 0.3)
+local badgeIcon = makeIcon("hanger", badge, 20, WHITE)
+badgeIcon.box.AnchorPoint = Vector2.new(0.5, 0.5)
+badgeIcon.box.Position = UDim2.new(0.5, 0, 0.5, 1)
 new("TextLabel", {
 	BackgroundTransparency = 1,
-	Position = UDim2.fromOffset(18, 0),
-	Size = UDim2.new(1, -18, 1, 0),
+	Position = UDim2.fromOffset(52, 5),
+	Size = UDim2.new(1, -56, 0, 20),
 	Font = Enum.Font.GothamBold,
 	Text = CONFIG.Title,
-	TextSize = 17,
+	TextSize = 16,
 	TextColor3 = WHITE,
+	TextXAlignment = Enum.TextXAlignment.Left,
+}, dragZone)
+new("TextLabel", {
+	BackgroundTransparency = 1,
+	Position = UDim2.fromOffset(52, 24),
+	Size = UDim2.new(1, -56, 0, 14),
+	Font = Enum.Font.GothamMedium,
+	Text = "by JAYVEE  ·  v" .. CONFIG.Version,
+	TextSize = 10,
+	TextColor3 = MUTED,
 	TextXAlignment = Enum.TextXAlignment.Left,
 }, dragZone)
 
@@ -412,24 +514,44 @@ local indicator = new("Frame", {
 	Position = UDim2.new(0, 2, 0, 3),
 	Size = UDim2.new(1 / 3, -4, 1, -6),
 	BackgroundColor3 = WHITE,
-	BackgroundTransparency = 0.72,
+	BackgroundTransparency = 0.3,
 	BorderSizePixel = 0,
 }, tabs)
+new("UIGradient", { Rotation = 0, Color = ColorSequence.new(CONFIG.Accent, CONFIG.Accent2) }, indicator)
 new("UICorner", { CornerRadius = UDim.new(1, 0) }, indicator)
 addRim(indicator, 1, 0.4)
 
-local tabButtons = {}
+local tabButtons, tabLabels, tabIcons = {}, {}, {}
 for i, name in ipairs({ "Home", "Outfit", "Character" }) do
-	tabButtons[i] = new("TextButton", {
+	local btn = new("TextButton", {
 		Position = UDim2.new((i - 1) / 3, 0, 0, 0),
 		Size = UDim2.new(1 / 3, 0, 1, 0),
 		BackgroundTransparency = 1,
 		AutoButtonColor = false,
-		Text = name,
-		Font = Enum.Font.GothamBold,
-		TextSize = 13,
-		TextColor3 = WHITE,
+		Text = "",
 	}, tabs)
+	local row = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1 }, btn)
+	new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 5),
+	}, row)
+	local kind = (i == 1 and "home") or (i == 2 and "hanger") or "person"
+	local ic = makeIcon(kind, row, 13, WHITE)
+	ic.box.LayoutOrder = 1
+	local lab = new("TextLabel", {
+		LayoutOrder = 2,
+		AutomaticSize = Enum.AutomaticSize.X,
+		Size = UDim2.fromOffset(0, 16),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBold,
+		Text = name,
+		TextSize = 12,
+		TextColor3 = WHITE,
+	}, row)
+	tabButtons[i], tabLabels[i], tabIcons[i] = btn, lab, ic
 end
 
 -- Pages
@@ -560,7 +682,7 @@ end
 local function inputBox(parent, placeholder, order)
 	local box = new("TextBox", {
 		LayoutOrder = order,
-		Size = UDim2.new(1, 0, 0, 36),
+		Size = UDim2.new(1, 0, 0, 38),
 		BackgroundColor3 = WHITE,
 		BackgroundTransparency = 0.88,
 		BorderSizePixel = 0,
@@ -574,7 +696,7 @@ local function inputBox(parent, placeholder, order)
 		ClearTextOnFocus = false,
 		TextTruncate = Enum.TextTruncate.AtEnd,
 	}, parent)
-	new("UICorner", { CornerRadius = UDim.new(0, 12) }, box)
+	new("UICorner", { CornerRadius = UDim.new(0, 14) }, box)
 	new("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, box)
 	local stroke = addRim(box, 1, 0.35)
 	box.Focused:Connect(function()
@@ -1258,21 +1380,63 @@ local icon = new("TextButton", {
 	Name = "Icon",
 	Text = "",
 	AutoButtonColor = false,
-	Size = UDim2.fromOffset(54, 54),
-	Position = UDim2.new(0, 14, 0.5, -27),
+	Size = UDim2.fromOffset(56, 56),
+	Position = UDim2.new(0, 14, 0.5, -28),
 	BorderSizePixel = 0,
+	BackgroundColor3 = WHITE,
+	BackgroundTransparency = 0.05,
 }, gui)
-glassFill(icon, 0.25)
+new("UIGradient", { Rotation = 45, Color = ColorSequence.new(CONFIG.Accent, CONFIG.Accent2) }, icon)
 new("UICorner", { CornerRadius = UDim.new(1, 0) }, icon)
 addRim(icon, 1.5, 0)
-new("TextLabel", {
-	BackgroundTransparency = 1,
-	Size = UDim2.new(1, 0, 1, 0),
-	Font = Enum.Font.GothamBold,
-	Text = "👕",
-	TextSize = 26,
-	TextColor3 = WHITE,
+
+-- glossy highlight
+local iconGloss = new("Frame", {
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, 3),
+	Size = UDim2.new(0.78, 0, 0.45, 0),
+	BackgroundColor3 = WHITE,
+	BorderSizePixel = 0,
 }, icon)
+new("UICorner", { CornerRadius = UDim.new(1, 0) }, iconGloss)
+new("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(0.55, 1) }, iconGloss)
+
+-- pulsing glow ring
+local glowRing = new("Frame", {
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.new(0.5, 0, 0.5, 0),
+	Size = UDim2.new(1, 8, 1, 8),
+	BackgroundTransparency = 1,
+}, icon)
+new("UICorner", { CornerRadius = UDim.new(1, 0) }, glowRing)
+local glowStroke = new("UIStroke", { Color = CONFIG.Accent, Thickness = 2, Transparency = 0.4 }, glowRing)
+TweenService:Create(
+	glowStroke,
+	TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+	{ Transparency = 0.92 }
+):Play()
+TweenService:Create(
+	glowRing,
+	TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+	{ Size = UDim2.new(1, 18, 1, 18) }
+):Play()
+
+-- logo: sarili mong image (CONFIG.IconImage) o default na hanger icon
+if CONFIG.IconImage and CONFIG.IconImage ~= "" then
+	local img = new("ImageLabel", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		Size = UDim2.new(0.8, 0, 0.8, 0),
+		BackgroundTransparency = 1,
+		Image = CONFIG.IconImage,
+		ScaleType = Enum.ScaleType.Fit,
+	}, icon)
+	new("UICorner", { CornerRadius = UDim.new(1, 0) }, img)
+else
+	local iconLogo = makeIcon("hanger", icon, 30, WHITE)
+	iconLogo.box.AnchorPoint = Vector2.new(0.5, 0.5)
+	iconLogo.box.Position = UDim2.new(0.5, 0, 0.5, 1)
+end
 pressFX(icon)
 
 ------------------------------------------------------------
@@ -1286,8 +1450,10 @@ local function setTab(i, silent)
 	pageChar.Visible = (i == 3)
 	bar.Visible = (i ~= 1) -- Apply/Reset hindi kailangan sa Home
 	tween(indicator, { Position = UDim2.new((i - 1) / 3, 2, 0, 3) }, 0.3)
-	for j, b in ipairs(tabButtons) do
-		b.TextColor3 = (j == i) and WHITE or MUTED
+	for j = 1, #tabButtons do
+		local c = (j == i) and WHITE or MUTED
+		tabLabels[j].TextColor3 = c
+		tabIcons[j].setColor(c)
 	end
 	if i == 1 and home.update then
 		pcall(home.update)
@@ -2592,7 +2758,7 @@ do
 	end)
 
 	----------------------------------------------------------
-	-- Startup loading screen (liquid glass)
+	-- Startup loading screen (Watch Dogs style)
 	----------------------------------------------------------
 	runLoading = function(onDone)
 		task.spawn(function()
@@ -2604,22 +2770,25 @@ do
 				finished = true
 				onDone()
 			end
-			local orbitConn
+			local loopConn
 
 			local ok, err = pcall(function()
-				local Lighting = game:GetService("Lighting")
 				local cam = workspace.CurrentCamera
 				local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
-				local base = math.clamp(math.min((vp.Y - 16) / 250, (vp.X - 16) / 300, 1), 0.5, 1)
+				local DW, DH = 640, 340
+				local base = math.clamp(math.min((vp.X - 24) / DW, (vp.Y - 24) / DH, 1.25), 0.45, 1.25)
 				local function kp(t, val)
 					return NumberSequenceKeypoint.new(t, val)
 				end
-				local function ckp(t, c)
-					return ColorSequenceKeypoint.new(t, c)
-				end
-				local PINK = Color3.fromRGB(255, 110, 200)
-				local PURPLE = Color3.fromRGB(150, 80, 255)
-				local CYAN = Color3.fromRGB(60, 220, 255)
+				local BG = Color3.fromRGB(3, 6, 14)
+				local ICE = Color3.fromRGB(205, 235, 255)
+				local BLUE = Color3.fromRGB(70, 170, 255)
+				local DIM = Color3.fromRGB(110, 135, 165)
+				local RED = Color3.fromRGB(255, 45, 85)
+				local CYAN = Color3.fromRGB(0, 255, 240)
+				local GREEN = Color3.fromRGB(120, 255, 170)
+				local CODE = Enum.Font.Code
+				local LEFT, RIGHT, CENTER = Enum.TextXAlignment.Left, Enum.TextXAlignment.Right, Enum.TextXAlignment.Center
 
 				loadGui = new("ScreenGui", {
 					Name = "ClothingHubLoader",
@@ -2630,391 +2799,511 @@ do
 				})
 				loadGui.Parent = getGuiParent()
 
-				-- real blur sa likod habang naglo-load
-				pcall(function()
-					blurFx = new("BlurEffect", { Name = "ClothingHubBlur", Size = 0 }, Lighting)
-					tween(blurFx, { Size = 20 }, 0.9)
-				end)
-
-				local fade = {} -- {frame, finalTransparency} para ma-fade in/out
-				local backdrop = new("Frame", {
+				local fadeBg, fadeText = {}, {}
+				local bg = new("Frame", {
 					Size = UDim2.new(1, 0, 1, 0),
-					BackgroundColor3 = Color3.fromRGB(5, 7, 18),
+					BackgroundColor3 = BG,
 					BackgroundTransparency = 1,
 					BorderSizePixel = 0,
+					ClipsDescendants = true,
 				}, loadGui)
-				tween(backdrop, { BackgroundTransparency = 0.18 }, 0.8)
+				tween(bg, { BackgroundTransparency = 0.03 }, 0.3)
 
-				-- aurora blobs (layered circles = soft glow)
-				local function glow(color, size, xs, ys, dx, dy, dur)
-					local holder = new("Frame", {
-						AnchorPoint = Vector2.new(0.5, 0.5),
-						Position = UDim2.new(xs, 0, ys, 0),
-						Size = UDim2.fromOffset(size, size),
-						BackgroundTransparency = 1,
-					}, backdrop)
-					for i = 1, 6 do
-						local sc = 1 - (i - 1) * 0.17
-						local target = 0.94 - (i - 1) * 0.045
-						local layer = new("Frame", {
-							AnchorPoint = Vector2.new(0.5, 0.5),
-							Position = UDim2.new(0.5, 0, 0.5, 0),
-							Size = UDim2.new(sc, 0, sc, 0),
-							BackgroundColor3 = color,
-							BackgroundTransparency = 1,
-							BorderSizePixel = 0,
-						}, holder)
-						new("UICorner", { CornerRadius = UDim.new(1, 0) }, layer)
-						tween(layer, { BackgroundTransparency = target }, 1.2)
-						table.insert(fade, { layer, target })
+				-- grid
+				for i = 1, 15 do
+					table.insert(fadeBg, new("Frame", {
+						Position = UDim2.new(i / 16, 0, 0, 0),
+						Size = UDim2.new(0, 1, 1, 0),
+						BackgroundColor3 = BLUE,
+						BackgroundTransparency = 0.93,
+						BorderSizePixel = 0,
+					}, bg))
+				end
+				for i = 1, 9 do
+					table.insert(fadeBg, new("Frame", {
+						Position = UDim2.new(0, 0, i / 10, 0),
+						Size = UDim2.new(1, 0, 0, 1),
+						BackgroundColor3 = BLUE,
+						BackgroundTransparency = 0.93,
+						BorderSizePixel = 0,
+					}, bg))
+				end
+
+				-- sweeping scan bar
+				local scan = new("Frame", {
+					Position = UDim2.new(0, 0, 0, -90),
+					Size = UDim2.new(1, 0, 0, 90),
+					BackgroundColor3 = BLUE,
+					BorderSizePixel = 0,
+				}, bg)
+				new("UIGradient", {
+					Rotation = 90,
+					Transparency = NumberSequence.new({ kp(0, 1), kp(0.5, 0.88), kp(1, 1) }),
+				}, scan)
+				table.insert(fadeBg, scan)
+				TweenService:Create(
+					scan,
+					TweenInfo.new(2.6, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
+					{ Position = UDim2.new(0, 0, 1, 0) }
+				):Play()
+
+				-- vignette
+				for _, top in ipairs({ true, false }) do
+					local v = new("Frame", {
+						AnchorPoint = Vector2.new(0, top and 0 or 1),
+						Position = UDim2.new(0, 0, top and 0 or 1, 0),
+						Size = UDim2.new(1, 0, 0.3, 0),
+						BackgroundColor3 = Color3.new(0, 0, 0),
+						BorderSizePixel = 0,
+					}, bg)
+					new("UIGradient", { Rotation = top and 90 or -90, Transparency = NumberSequence.new(0.1, 1) }, v)
+					table.insert(fadeBg, v)
+				end
+
+				-- falling hex data columns
+				local function hexLine()
+					return string.format("%04X %02X %02X", math.random(0, 65535), math.random(0, 255), math.random(0, 255))
+				end
+				local colLabels, colLines = {}, {}
+				for i = 1, 7 do
+					local lines = {}
+					for _ = 1, 26 do
+						table.insert(lines, hexLine())
 					end
+					colLines[i] = lines
+					local xs = (i - 1) / 7 + 0.015
+					local lab = new("TextLabel", {
+						Position = UDim2.new(xs, 0, 0, -340),
+						Size = UDim2.fromOffset(90, 340),
+						BackgroundTransparency = 1,
+						Font = CODE,
+						Text = table.concat(lines, "\n"),
+						TextSize = 10,
+						TextColor3 = BLUE,
+						TextTransparency = 0.86,
+						TextXAlignment = LEFT,
+						TextYAlignment = Enum.TextYAlignment.Top,
+					}, bg)
+					colLabels[i] = lab
+					table.insert(fadeText, lab)
 					TweenService:Create(
-						holder,
-						TweenInfo.new(dur, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-						{ Position = UDim2.new(xs, dx, ys, dy) }
+						lab,
+						TweenInfo.new(7 + math.random() * 6, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1, false, math.random() * 3),
+						{ Position = UDim2.new(xs, 0, 1, 0) }
 					):Play()
 				end
-				glow(CONFIG.Accent, 360, 0.25, 0.3, 60, 40, 5)
-				glow(PURPLE, 340, 0.78, 0.32, -50, 50, 6)
-				glow(PINK, 320, 0.62, 0.82, -60, -40, 5.5)
-				glow(CYAN, 300, 0.2, 0.8, 50, -50, 6.5)
 
-				-- rising sparkles
-				for _ = 1, 18 do
-					local sz = math.random(2, 4)
-					local target = 0.4 + math.random() * 0.4
-					local sp = new("Frame", {
-						Position = UDim2.new(math.random(), 0, 1.05, 0),
-						Size = UDim2.fromOffset(sz, sz),
-						BackgroundColor3 = WHITE,
+				-- main layout (640 x 340 design space)
+				local root = new("Frame", {
+					AnchorPoint = Vector2.new(0.5, 0.5),
+					Position = UDim2.new(0.5, 0, 0.5, 0),
+					Size = UDim2.fromOffset(DW, DH),
+					BackgroundColor3 = ICE,
+					BackgroundTransparency = 1,
+					BorderSizePixel = 0,
+					ClipsDescendants = true,
+				}, loadGui)
+				new("UIScale", { Scale = base }, root)
+
+				local function lbl(parent, text, x, y, w, h, size, color, xalign, font)
+					return new("TextLabel", {
 						BackgroundTransparency = 1,
+						Position = UDim2.fromOffset(x, y),
+						Size = UDim2.fromOffset(w, h),
+						Font = font or CODE,
+						Text = text,
+						TextSize = size,
+						TextColor3 = color,
+						TextXAlignment = xalign or LEFT,
+					}, parent)
+				end
+				local function brackets(parent, w, h, len, th, color)
+					local function bar(x, y, bw, bh)
+						new("Frame", {
+							Position = UDim2.fromOffset(x, y),
+							Size = UDim2.fromOffset(bw, bh),
+							BackgroundColor3 = color,
+							BorderSizePixel = 0,
+							ZIndex = 4,
+						}, parent)
+					end
+					bar(0, 0, len, th)
+					bar(0, 0, th, len)
+					bar(w - len, 0, len, th)
+					bar(w - th, 0, th, len)
+					bar(0, h - th, len, th)
+					bar(0, h - len, th, len)
+					bar(w - len, h - th, len, th)
+					bar(w - th, h - len, th, len)
+				end
+
+				-- top bar
+				lbl(root, string.format("cHub OS // WARDROBE NODE 0x%04X", math.random(4096, 65535)), 0, 0, 320, 16, 11, BLUE)
+				local recDot = new("Frame", {
+					Position = UDim2.fromOffset(DW - 236, 4),
+					Size = UDim2.fromOffset(8, 8),
+					BackgroundColor3 = RED,
+					BorderSizePixel = 0,
+				}, root)
+				new("UICorner", { CornerRadius = UDim.new(1, 0) }, recDot)
+				TweenService:Create(
+					recDot,
+					TweenInfo.new(0.5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1, true),
+					{ BackgroundTransparency = 1 }
+				):Play()
+				lbl(root, "TRACKING USER", DW - 222, 0, 110, 16, 11, RED)
+				local clock = lbl(root, os.date("%H:%M:%S"), DW - 100, 0, 100, 16, 11, BLUE, RIGHT)
+				new("Frame", {
+					Position = UDim2.fromOffset(0, 22),
+					Size = UDim2.fromOffset(DW, 1),
+					BackgroundColor3 = BLUE,
+					BackgroundTransparency = 0.7,
+					BorderSizePixel = 0,
+				}, root)
+
+				-- profile scan panel (kaliwa)
+				local avatarBox = new("Frame", {
+					Position = UDim2.fromOffset(0, 40),
+					Size = UDim2.fromOffset(124, 124),
+					BackgroundColor3 = Color3.fromRGB(8, 18, 34),
+					BackgroundTransparency = 0.2,
+					BorderSizePixel = 0,
+				}, root)
+				local avatarImg = new("ImageLabel", {
+					Size = UDim2.new(1, 0, 1, 0),
+					BackgroundTransparency = 1,
+					Image = "",
+					ImageColor3 = Color3.fromRGB(170, 215, 255),
+					ImageTransparency = 0.1,
+					ScaleType = Enum.ScaleType.Crop,
+				}, avatarBox)
+				local avatarHint = lbl(avatarBox, "SCANNING...", 0, 52, 124, 18, 11, BLUE, CENTER)
+				brackets(avatarBox, 124, 124, 14, 2, CYAN)
+				local scanLine = new("Frame", {
+					Size = UDim2.new(1, 0, 0, 2),
+					BackgroundColor3 = CYAN,
+					BackgroundTransparency = 0.2,
+					BorderSizePixel = 0,
+					ZIndex = 3,
+				}, avatarBox)
+				TweenService:Create(
+					scanLine,
+					TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+					{ Position = UDim2.new(0, 0, 1, -2) }
+				):Play()
+
+				local profKeys = { "NAME", "USER", "ID", "AGE", "DEVICE" }
+				local profVals = {}
+				for i, key in ipairs(profKeys) do
+					local y = 176 + (i - 1) * 19
+					lbl(root, key, 0, y, 52, 16, 11, BLUE)
+					local v = lbl(root, "????", 54, y, 150, 16, 11, ICE)
+					v.TextTruncate = Enum.TextTruncate.AtEnd
+					profVals[i] = v
+				end
+
+				-- logo + glitch title
+				local logo = makeIcon("hanger", root, 46, ICE)
+				logo.box.Position = UDim2.fromOffset(230, 52)
+
+				local glitch = {}
+				local function makeGlitch(text, x, y, w, h, size, font)
+					local function mk(color, z, tr)
+						return new("TextLabel", {
+							BackgroundTransparency = 1,
+							Position = UDim2.fromOffset(x, y),
+							Size = UDim2.fromOffset(w, h),
+							Font = font,
+							Text = text,
+							TextSize = size,
+							TextColor3 = color,
+							TextTransparency = tr,
+							TextXAlignment = LEFT,
+							ZIndex = z,
+						}, root)
+					end
+					local g = { r = mk(RED, 1, 0.45), c = mk(CYAN, 2, 0.45), b = mk(ICE, 3, 0), text = text, x = x, y = y }
+					table.insert(glitch, g)
+					return g
+				end
+				local function setGlitch(g, text, color)
+					g.text = text
+					g.b.Text, g.r.Text, g.c.Text = text, text, text
+					g.b.TextColor3 = color
+				end
+				local titleG = makeGlitch("CLOTHINGHUB", 286, 50, 354, 48, 34, Enum.Font.GothamBlack)
+				lbl(root, "// by JAYVEE", 288, 100, 300, 16, 12, BLUE)
+				lbl(root, "everything is connected.", 288, 118, 300, 14, 11, DIM)
+
+				-- terminal log
+				new("Frame", {
+					Position = UDim2.fromOffset(224, 146),
+					Size = UDim2.fromOffset(1, 112),
+					BackgroundColor3 = BLUE,
+					BackgroundTransparency = 0.6,
+					BorderSizePixel = 0,
+				}, root)
+				local logLabel = new("TextLabel", {
+					Position = UDim2.fromOffset(232, 146),
+					Size = UDim2.fromOffset(408, 112),
+					BackgroundTransparency = 1,
+					Font = CODE,
+					Text = "",
+					RichText = true,
+					TextSize = 12,
+					TextColor3 = ICE,
+					TextXAlignment = LEFT,
+					TextYAlignment = Enum.TextYAlignment.Top,
+					LineHeight = 1.1,
+				}, root)
+				local logLines = {}
+				local function renderLog(extra)
+					local shown = {}
+					local startI = math.max(1, #logLines - 6)
+					for i = startI, #logLines do
+						table.insert(shown, logLines[i])
+					end
+					if extra then
+						table.insert(shown, extra)
+					end
+					logLabel.Text = table.concat(shown, "\n")
+				end
+
+				-- segmented progress
+				local ticks, TICKS = {}, 60
+				for i = 1, TICKS do
+					ticks[i] = new("Frame", {
+						Position = UDim2.fromOffset(232 + (i - 1) * (408 / TICKS), 270),
+						Size = UDim2.fromOffset(4, 12),
+						BackgroundColor3 = BLUE,
+						BackgroundTransparency = 0.86,
 						BorderSizePixel = 0,
-					}, backdrop)
-					new("UICorner", { CornerRadius = UDim.new(1, 0) }, sp)
-					table.insert(fade, { sp, target })
-					task.delay(math.random() * 4, function()
-						if sp.Parent then
-							sp.BackgroundTransparency = target
-							TweenService:Create(
-								sp,
-								TweenInfo.new(5 + math.random() * 5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
-								{ Position = UDim2.new(sp.Position.X.Scale, 0, -0.05, 0) }
-							):Play()
+					}, root)
+				end
+				local pct = lbl(root, "00%", DW - 150, 226, 150, 36, 28, ICE, RIGHT)
+				local stepLabel = lbl(root, "[0/6] STANDBY", 232, 288, 300, 16, 11, BLUE)
+				lbl(root, "v" .. CONFIG.Version, DW - 100, 288, 100, 16, 11, DIM, RIGHT)
+				lbl(root, "// all systems are being monitored", 0, 322, 400, 14, 10, DIM)
+
+				local pctValue = new("NumberValue", { Value = 0 }, loadGui)
+				local lastFilled = -1
+				pctValue.Changed:Connect(function(val)
+					pct.Text = string.format("%02d%%", math.floor(val + 0.5))
+					local filled = math.floor(val / 100 * TICKS + 0.5)
+					if filled ~= lastFilled then
+						lastFilled = filled
+						for i, tk in ipairs(ticks) do
+							if i <= filled then
+								tk.BackgroundColor3 = (i == filled) and WHITE or ICE
+								tk.BackgroundTransparency = (i == filled) and 0 or 0.1
+							else
+								tk.BackgroundColor3 = BLUE
+								tk.BackgroundTransparency = 0.86
+							end
+						end
+					end
+				end)
+
+				-- text scramble reveal (para sa profile info)
+				local function scramble(label, final)
+					local glyphs = {}
+					local okU = pcall(function()
+						for _, cp in utf8.codes(final) do
+							table.insert(glyphs, utf8.char(cp))
 						end
 					end)
-				end
-
-				-- glass card
-				local cardG = new("CanvasGroup", {
-					AnchorPoint = Vector2.new(0.5, 0.5),
-					Position = UDim2.new(0.5, 0, 0.5, 0),
-					Size = UDim2.fromOffset(300, 250),
-					BackgroundTransparency = 1,
-					GroupTransparency = 1,
-				}, loadGui)
-				local cardScale = new("UIScale", { Scale = base * 0.8 }, cardG)
-				local cg = new("Frame", {
-					Position = UDim2.fromOffset(2, 2),
-					Size = UDim2.new(1, -4, 1, -4),
-					BorderSizePixel = 0,
-				}, cardG)
-				glassFill(cg, 0.22)
-				new("UICorner", { CornerRadius = UDim.new(0, 30) }, cg)
-				addRim(cg, 1.5, 0)
-
-				local shineTop = new("Frame", {
-					Position = UDim2.fromOffset(6, 5),
-					Size = UDim2.new(1, -12, 0, 100),
-					BackgroundColor3 = WHITE,
-					BorderSizePixel = 0,
-				}, cg)
-				new("UICorner", { CornerRadius = UDim.new(0, 25) }, shineTop)
-				new("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(0.84, 1) }, shineTop)
-
-				-- diagonal shine sweep
-				local sweep = new("Frame", {
-					Size = UDim2.new(1, 0, 1, 0),
-					BackgroundColor3 = WHITE,
-					BorderSizePixel = 0,
-				}, cg)
-				new("UICorner", { CornerRadius = UDim.new(0, 30) }, sweep)
-				local sweepGrad = new("UIGradient", {
-					Rotation = 25,
-					Offset = Vector2.new(-1, 0),
-					Transparency = NumberSequence.new({
-						kp(0, 1), kp(0.42, 1), kp(0.5, 0.82), kp(0.58, 1), kp(1, 1),
-					}),
-				}, sweep)
-				TweenService:Create(
-					sweepGrad,
-					TweenInfo.new(1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, false, 0.9),
-					{ Offset = Vector2.new(1, 0) }
-				):Play()
-
-				-- logo orb: rotating gradient ring + orbiting dots
-				local logo = new("Frame", {
-					AnchorPoint = Vector2.new(0.5, 0),
-					Position = UDim2.new(0.5, 0, 0, 18),
-					Size = UDim2.fromOffset(90, 90),
-					BackgroundTransparency = 1,
-				}, cg)
-				local ring = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1 }, logo)
-				new("UICorner", { CornerRadius = UDim.new(1, 0) }, ring)
-				local ringStroke = new("UIStroke", { Color = WHITE, Thickness = 3, Transparency = 0 }, ring)
-				local ringGrad = new("UIGradient", {
-					Color = ColorSequence.new({ ckp(0, CYAN), ckp(0.5, CONFIG.Accent), ckp(1, PINK) }),
-					Transparency = NumberSequence.new({ kp(0, 0), kp(0.5, 1), kp(1, 1) }),
-				}, ringStroke)
-				TweenService:Create(
-					ringGrad,
-					TweenInfo.new(1.4, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
-					{ Rotation = 360 }
-				):Play()
-
-				local orb = new("Frame", {
-					AnchorPoint = Vector2.new(0.5, 0.5),
-					Position = UDim2.new(0.5, 0, 0.5, 0),
-					Size = UDim2.fromOffset(70, 70),
-					BorderSizePixel = 0,
-				}, logo)
-				glassFill(orb, 0.3)
-				new("UICorner", { CornerRadius = UDim.new(1, 0) }, orb)
-				addRim(orb, 1.5, 0)
-				local emoji = new("TextLabel", {
-					Size = UDim2.new(1, 0, 1, 0),
-					BackgroundTransparency = 1,
-					Font = Enum.Font.GothamBold,
-					Text = "👕",
-					TextSize = 32,
-					TextColor3 = WHITE,
-				}, orb)
-				local emojiScale = new("UIScale", { Scale = 1 }, emoji)
-				TweenService:Create(
-					emojiScale,
-					TweenInfo.new(0.9, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-					{ Scale = 1.12 }
-				):Play()
-
-				local dotColors = { WHITE, CONFIG.Accent, PINK }
-				local orbitDots = {}
-				for i = 1, 3 do
-					local dsz = (i == 1) and 7 or 5
-					local d = new("Frame", {
-						AnchorPoint = Vector2.new(0.5, 0.5),
-						Size = UDim2.fromOffset(dsz, dsz),
-						BackgroundColor3 = dotColors[i],
-						BorderSizePixel = 0,
-					}, logo)
-					new("UICorner", { CornerRadius = UDim.new(1, 0) }, d)
-					orbitDots[i] = d
-				end
-				local ang = 0
-				orbitConn = connect(RunService.Heartbeat, function(dt)
-					ang = ang + dt * 2.2
-					for i, d in ipairs(orbitDots) do
-						local a = ang + (i - 1) * (math.pi * 2 / 3)
-						d.Position = UDim2.new(0.5, math.cos(a) * 54, 0.5, math.sin(a) * 54)
+					if not okU or #glyphs == 0 then
+						label.Text = final
+						return
 					end
-				end)
-
-				-- title (typewriter) + shimmering author
-				local title = new("TextLabel", {
-					Position = UDim2.fromOffset(0, 114),
-					Size = UDim2.new(1, 0, 0, 34),
-					BackgroundTransparency = 1,
-					Font = Enum.Font.GothamBlack,
-					Text = "",
-					TextSize = 28,
-					TextColor3 = WHITE,
-				}, cg)
-				local fullTitle = CONFIG.Title
-				task.spawn(function()
-					task.wait(0.55)
-					for i = 1, #fullTitle do
-						if not title.Parent then
-							return
+					local pool = "01#%&@$?ABCDEF"
+					local n = #glyphs
+					for step = 1, 12 do
+						local out = {}
+						for i = 1, n do
+							if i <= n * step / 12 then
+								out[i] = glyphs[i]
+							else
+								local r = math.random(1, #pool)
+								out[i] = string.sub(pool, r, r)
+							end
 						end
-						title.Text = fullTitle:sub(1, i)
-						task.wait(0.06)
+						label.Text = table.concat(out)
+						task.wait(0.04)
+					end
+					label.Text = final
+				end
+				local function revealProfile()
+					if home.avatar and home.avatar.Image ~= "" then
+						avatarImg.Image = home.avatar.Image
+						avatarHint.Visible = false
+					else
+						avatarHint.Text = "NO IMAGE"
+					end
+					local vals = {
+						LocalPlayer.DisplayName,
+						"@" .. LocalPlayer.Name,
+						tostring(LocalPlayer.UserId),
+						LocalPlayer.AccountAge .. " days",
+						deviceType() .. " / " .. execName,
+					}
+					for i, v in ipairs(vals) do
+						task.spawn(scramble, profVals[i], v)
+					end
+				end
+
+				-- intro: flicker boot
+				play("Open")
+				for i = 1, 8 do
+					titleG.b.TextTransparency = (i % 2 == 0) and 0 or 0.85
+					task.wait(0.05)
+				end
+				titleG.b.TextTransparency = 0
+
+				-- glitch engine (RGB split + corrupt text) + hex rain + clock
+				local GLYPHS = "01#%&@$?/|<>"
+				local function corrupt(str)
+					local out = {}
+					for i = 1, #str do
+						local ch = string.sub(str, i, i)
+						if ch ~= " " and math.random() < 0.18 then
+							local r = math.random(1, #GLYPHS)
+							ch = string.sub(GLYPHS, r, r)
+						end
+						out[i] = ch
+					end
+					return table.concat(out)
+				end
+				local nextBurst, burstUntil, bursting = os.clock() + 0.8, 0, false
+				local lastCol, lastClock = 0, 0
+				loopConn = connect(RunService.Heartbeat, function()
+					local now = os.clock()
+					if not bursting and now >= nextBurst then
+						bursting = true
+						burstUntil = now + 0.1 + math.random() * 0.12
+						nextBurst = now + 0.8 + math.random() * 1.6
+						for _, g in ipairs(glitch) do
+							local txt = corrupt(g.text)
+							g.b.Text, g.r.Text, g.c.Text = txt, txt, txt
+						end
+					elseif bursting and now >= burstUntil then
+						bursting = false
+						for _, g in ipairs(glitch) do
+							g.b.Text, g.r.Text, g.c.Text = g.text, g.text, g.text
+						end
+					end
+					for _, g in ipairs(glitch) do
+						local ox = bursting and math.random(-7, 7) or 1
+						local oy = bursting and math.random(-2, 2) or 0
+						g.r.Position = UDim2.fromOffset(g.x + ox, g.y + oy)
+						g.c.Position = UDim2.fromOffset(g.x - ox, g.y - oy)
+						g.b.TextTransparency = bursting and (math.random() * 0.35) or 0
+					end
+					if now - lastCol > 0.12 then
+						lastCol = now
+						local ci = math.random(1, #colLabels)
+						local lines = colLines[ci]
+						lines[math.random(1, #lines)] = hexLine()
+						colLabels[ci].Text = table.concat(lines, "\n")
+					end
+					if now - lastClock > 0.5 then
+						lastClock = now
+						clock.Text = os.date("%H:%M:%S")
 					end
 				end)
 
-				local sub = new("TextLabel", {
-					Position = UDim2.fromOffset(0, 150),
-					Size = UDim2.new(1, 0, 0, 18),
-					BackgroundTransparency = 1,
-					Font = Enum.Font.GothamBold,
-					Text = "by JAYVEE",
-					TextSize = 14,
-					TextColor3 = WHITE,
-				}, cg)
-				local subGrad = new("UIGradient", {
-					Color = ColorSequence.new({ ckp(0, CONFIG.Accent), ckp(0.5, WHITE), ckp(1, PINK) }),
-					Offset = Vector2.new(-1, 0),
-				}, sub)
-				TweenService:Create(
-					subGrad,
-					TweenInfo.new(1.8, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
-					{ Offset = Vector2.new(1, 0) }
-				):Play()
-
-				-- progress bar
-				local track = new("Frame", {
-					Position = UDim2.new(0.5, -110, 0, 182),
-					Size = UDim2.fromOffset(220, 8),
-					BackgroundColor3 = WHITE,
-					BackgroundTransparency = 0.85,
-					BorderSizePixel = 0,
-				}, cg)
-				new("UICorner", { CornerRadius = UDim.new(1, 0) }, track)
-				addRim(track, 1, 0.5)
-				local fill = new("Frame", {
-					Size = UDim2.new(0, 0, 1, 0),
-					BackgroundColor3 = WHITE,
-					BorderSizePixel = 0,
-				}, track)
-				new("UICorner", { CornerRadius = UDim.new(1, 0) }, fill)
-				new("UIGradient", {
-					Color = ColorSequence.new({ ckp(0, CONFIG.Accent), ckp(0.6, CYAN), ckp(1, PURPLE) }),
-				}, fill)
-				local gloss = new("Frame", {
-					Size = UDim2.new(1, 0, 1, 0),
-					BackgroundColor3 = WHITE,
-					BorderSizePixel = 0,
-				}, fill)
-				new("UICorner", { CornerRadius = UDim.new(1, 0) }, gloss)
-				local glossGrad = new("UIGradient", {
-					Offset = Vector2.new(-1, 0),
-					Transparency = NumberSequence.new({ kp(0, 1), kp(0.4, 1), kp(0.5, 0.45), kp(0.6, 1), kp(1, 1) }),
-				}, gloss)
-				TweenService:Create(
-					glossGrad,
-					TweenInfo.new(0.9, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
-					{ Offset = Vector2.new(1, 0) }
-				):Play()
-
-				local stepLabel = new("TextLabel", {
-					Position = UDim2.new(0.5, -110, 0, 196),
-					Size = UDim2.fromOffset(170, 16),
-					BackgroundTransparency = 1,
-					Font = Enum.Font.GothamMedium,
-					Text = "Starting...",
-					TextSize = 12,
-					TextColor3 = MUTED,
-					TextXAlignment = Enum.TextXAlignment.Left,
-				}, cg)
-				local pctLabel = new("TextLabel", {
-					Position = UDim2.new(0.5, 60, 0, 196),
-					Size = UDim2.fromOffset(50, 16),
-					BackgroundTransparency = 1,
-					Font = Enum.Font.GothamBold,
-					Text = "0%",
-					TextSize = 12,
-					TextColor3 = WHITE,
-					TextXAlignment = Enum.TextXAlignment.Right,
-				}, cg)
-				local footer = new("TextLabel", {
-					Position = UDim2.new(0, 0, 1, -26),
-					Size = UDim2.new(1, 0, 0, 16),
-					BackgroundTransparency = 1,
-					Font = Enum.Font.GothamMedium,
-					Text = "Preparing...",
-					TextSize = 11,
-					TextColor3 = Color3.fromRGB(150, 158, 180),
-				}, cg)
-
-				local progress = new("NumberValue", { Value = 0 }, loadGui)
-				progress.Changed:Connect(function(val)
-					fill.Size = UDim2.new(math.clamp(val / 100, 0, 1), 0, 1, 0)
-					pctLabel.Text = math.floor(val + 0.5) .. "%"
-				end)
-
-				local function setStep(text)
-					stepLabel.Text = text
-					stepLabel.TextTransparency = 0.6
-					tween(stepLabel, { TextTransparency = 0 }, 0.25)
-				end
-				local function runStep(text, target, minT, work)
-					setStep(text)
+				-- steps
+				local TOTAL, stepNo = 6, 0
+				local OKTAG = ' <font color="#78ffaa">[OK]</font>'
+				table.insert(logLines, "cHub OS // secure boot")
+				table.insert(logLines, "link established" .. OKTAG)
+				renderLog()
+				local function runStep(title, target, minT, logText, work)
+					stepNo = stepNo + 1
+					stepLabel.Text = string.format("[%d/%d] %s", stepNo, TOTAL, title)
+					tween(pctValue, { Value = target }, minT + 0.3, Enum.EasingStyle.Quad)
 					local t0 = os.clock()
-					tween(progress, { Value = target }, minT, Enum.EasingStyle.Quad)
-					if work then
-						pcall(work)
+					local done = false
+					task.spawn(function()
+						if work then
+							pcall(work)
+						end
+						done = true
+					end)
+					local line = "> " .. logText
+					for i = 1, #line do
+						renderLog(string.sub(line, 1, i) .. "_")
+						task.wait(0.01)
+					end
+					local tw = os.clock()
+					while not done and os.clock() - tw < 6 do
+						task.wait(0.05)
 					end
 					local el = os.clock() - t0
 					if el < minT then
 						task.wait(minT - el)
 					end
+					table.insert(logLines, line .. " " .. string.rep(".", math.max(2, 40 - #line)) .. OKTAG)
+					renderLog()
 					play("Click")
 				end
 
-				-- intro
-				play("Open")
-				tween(cardG, { GroupTransparency = 0 }, 0.5)
-				tween(cardScale, { Scale = base }, 0.7, Enum.EasingStyle.Back)
-				task.wait(0.9)
-
-				runStep("Detecting device...", 20, 0.8, function()
-					footer.Text = string.format("%s  ·  %s  ·  %s", deviceType(), platformName, execName)
-				end)
-				runStep("Loading sounds...", 42, 0.8, function()
+				runStep("DETECTING DEVICE", 16, 0.4, "scan device: " .. deviceType() .. " / " .. execName, nil)
+				runStep("LOADING AUDIO MODULES", 34, 0.4, "load audio modules", function()
 					local list = {}
 					for _, snd in pairs(sounds) do
 						table.insert(list, snd)
 					end
 					game:GetService("ContentProvider"):PreloadAsync(list)
 				end)
-				runStep("Syncing character...", 64, 0.8, function()
+				runStep("SYNCING CHARACTER MODEL", 52, 0.4, "sync character model", function()
 					local t0 = os.clock()
 					while not (LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid"))
 						and os.clock() - t0 < 4 do
 						task.wait(0.1)
 					end
 				end)
-				runStep("Fetching profile...", 86, 0.8, function()
+				runStep("PROFILING USER", 74, 0.4, "profile user: @" .. LocalPlayer.Name, function()
 					home.loadProfile()
 				end)
-				runStep("Building interface...", 100, 0.7, function()
+				revealProfile()
+				runStep("DECRYPTING WARDROBE", 90, 0.5, "decrypt wardrobe database", nil)
+				runStep("BUILDING INTERFACE", 100, 0.4, "build interface", function()
 					home.heroName.Text = LocalPlayer.DisplayName
 					pcall(updateHome)
 				end)
 
-				-- finale
-				stepLabel.Text = "Welcome, " .. LocalPlayer.DisplayName
-				stepLabel.TextColor3 = Color3.fromRGB(150, 230, 175)
+				-- access granted
+				stepLabel.Text = "[6/6] ACCESS GRANTED"
+				table.insert(logLines, '<font color="#78ffaa">> ACCESS GRANTED // welcome @' .. LocalPlayer.Name .. "</font>")
+				renderLog()
+				setGlitch(titleG, "ACCESS GRANTED", GREEN)
 				play("Success")
-				task.wait(0.6)
+				task.wait(0.9)
 
-				local ripple = new("Frame", {
-					AnchorPoint = Vector2.new(0.5, 0.5),
-					Position = UDim2.new(0.5, 0, 0.5, 0),
-					Size = UDim2.fromOffset(40, 40),
-					BackgroundTransparency = 1,
-				}, loadGui)
-				new("UICorner", { CornerRadius = UDim.new(1, 0) }, ripple)
-				local rippleStroke = new("UIStroke", { Color = WHITE, Thickness = 3, Transparency = 0.1 }, ripple)
-				tween(ripple, { Size = UDim2.fromOffset(1400, 1400) }, 0.9, Enum.EasingStyle.Quad)
-				tween(rippleStroke, { Transparency = 1 }, 0.9)
-
-				tween(cardG, { GroupTransparency = 1 }, 0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-				tween(cardScale, { Scale = base * 1.15 }, 0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-				tween(backdrop, { BackgroundTransparency = 1 }, 0.7)
-				for _, item in ipairs(fade) do
-					tween(item[1], { BackgroundTransparency = 1 }, 0.6)
+				-- CRT shutdown -> main UI
+				tween(root, { Size = UDim2.fromOffset(DW, 3) }, 0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+				task.wait(0.22)
+				root.BackgroundTransparency = 0.1
+				tween(root, { Size = UDim2.fromOffset(0, 3) }, 0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+				tween(bg, { BackgroundTransparency = 1 }, 0.45)
+				for _, f in ipairs(fadeBg) do
+					tween(f, { BackgroundTransparency = 1 }, 0.4)
 				end
-				if blurFx then
-					tween(blurFx, { Size = 0 }, 0.7)
+				for _, t in ipairs(fadeText) do
+					tween(t, { TextTransparency = 1 }, 0.4)
 				end
-				task.wait(0.3)
+				task.wait(0.15)
 				finish() -- lalabas na yung main UI habang nagfe-fade yung loader
-				task.wait(0.7)
+				task.wait(0.5)
 			end)
 
 			if not ok then
 				warn("[ClothingHub] loader error: " .. tostring(err))
+				setStatus("Loader: " .. string.sub(tostring(err), 1, 44), "err")
 			end
-			if orbitConn then
-				orbitConn:Disconnect()
+			if loopConn then
+				loopConn:Disconnect()
 			end
 			if loadGui then
 				loadGui:Destroy()
