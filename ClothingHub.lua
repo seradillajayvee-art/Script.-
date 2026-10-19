@@ -112,6 +112,23 @@ local function digits(s)
 	return (tostring(s or ""):match("%d+")) or ""
 end
 
+-- yung character na talagang nakikita mo (minsan ibang model ang camera subject sa ibang games)
+local function getChar()
+	local own = LocalPlayer.Character
+	local cam = workspace.CurrentCamera
+	local subj = cam and cam.CameraSubject
+	if subj and subj:IsA("Humanoid") then
+		local m = subj.Parent
+		if m and m ~= own and m:IsA("Model") and m:FindFirstChild("Head") then
+			local pl = Players:GetPlayerFromCharacter(m)
+			if pl == nil or pl == LocalPlayer then
+				return m
+			end
+		end
+	end
+	return own
+end
+
 local function getGuiParent()
 	if gethui then
 		local ok, ui = pcall(gethui)
@@ -1042,7 +1059,7 @@ tNext.UICorner.CornerRadius = UDim.new(1, 0)
 -- Auto = hahanapin ng script ang buhok mo. Kung hindi nakita, pumili ka ng suot mong accessory.
 local function cycleTarget(dir)
 	local list, seen = { "Auto" }, {}
-	local char = LocalPlayer.Character
+	local char = getChar()
 	if char then
 		for _, d in ipairs(char:GetChildren()) do
 			if (d:IsA("Accessory") or d:IsA("Model")) and not d:GetAttribute("ClothingHub") and not seen[d.Name] then
@@ -1371,6 +1388,22 @@ do
 			addA("author" .. idx, tostring(r[1])).Text = tostring(r[2])
 		end
 	end
+
+	-- debug scan (para makita kung ano talaga ang nakikita ng script)
+	local dbg = newCard(7, "Debug scan")
+	home.v.scan = new("TextLabel", {
+		LayoutOrder = 1,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		Font = Enum.Font.Code,
+		Text = "...",
+		TextSize = 11,
+		TextColor3 = Color3.fromRGB(205, 235, 255),
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+	}, dbg)
 end
 
 ------------------------------------------------------------
@@ -2000,11 +2033,19 @@ local function setHairHidden(char, hidden)
 	end
 end
 
+local hairInfo = { names = {}, parts = 0 } -- huling paint info (para sa status at Debug scan)
+
 local function restoreHairColors(char)
 	local b = getBk(char)
 	for p, o in pairs(b.hairColor) do
+		if o.conn then
+			o.conn:Disconnect()
+		end
 		pcall(function()
 			p.Color = o.Color
+			if o.Material then
+				p.Material = o.Material
+			end
 			if o.TextureID ~= nil then
 				p.TextureID = o.TextureID
 			end
@@ -2034,18 +2075,32 @@ local function colorAccessory(char, obj, color, solid)
 	end
 	for _, p in ipairs(parts) do
 		local sm = p:FindFirstChildOfClass("SpecialMesh")
-		if not b.hairColor[p] then
-			b.hairColor[p] = {
+		local rec = b.hairColor[p]
+		if not rec then
+			rec = {
 				Color = p.Color,
+				Material = p.Material,
 				TextureID = p:IsA("MeshPart") and p.TextureID or nil,
 				SA = p:FindFirstChildOfClass("SurfaceAppearance"),
 				SM = sm,
 				SMTex = sm and sm.TextureId or nil,
 				SMVC = sm and sm.VertexColor or nil,
 			}
+			b.hairColor[p] = rec
+			-- kung ibalik ng game yung kulay, ibabalik natin agad
+			rec.conn = p:GetPropertyChangedSignal("Color"):Connect(function()
+				if state.hairOn and b.hairColor[p] and (state.solid or not sm) and p.Color ~= state.hairColor then
+					p.Color = state.hairColor
+				end
+			end)
 		end
-		p.Color = color
+		if solid or not sm then
+			p.Color = color
+		end
 		if solid then
+			pcall(function()
+				p.Material = Enum.Material.SmoothPlastic
+			end)
 			if p:IsA("MeshPart") then
 				pcall(function()
 					p.TextureID = ""
@@ -2060,7 +2115,8 @@ local function colorAccessory(char, obj, color, solid)
 			end
 		end
 		if sm then
-			sm.VertexColor = Vector3.new(color.R, color.G, color.B)
+			-- solid: Part color lang ang gagamitin (white vertex color) para hindi mag-double ang dilim
+			sm.VertexColor = solid and Vector3.new(1, 1, 1) or Vector3.new(color.R, color.G, color.B)
 		end
 	end
 	return #parts
@@ -2090,13 +2146,16 @@ local function applyHairColor(char, light)
 	if not light then
 		restoreHairColors(char)
 	end
+	hairInfo.names, hairInfo.parts = {}, 0
 	if not state.hairOn then
 		return 0
 	end
 	local count = 0
 	for _, obj in ipairs(hairTargets(char)) do
 		count = count + colorAccessory(char, obj, state.hairColor, state.solid)
+		table.insert(hairInfo.names, obj.Name)
 	end
+	hairInfo.parts = count
 	return count
 end
 
@@ -2336,7 +2395,7 @@ local function applyToCharacter(char)
 	end
 	local okp, painted = pcall(applyHairColor, char)
 	if state.hairOn then
-		tally(okp and painted and painted > 0, "No hair found - set Hair target")
+		tally(okp and painted and painted > 0, okp and "No hair found - set Hair target" or ("Hair error: " .. string.sub(tostring(painted), 1, 30)))
 	end
 	pcall(applySkin, char)
 	if state.skinOn then
@@ -2394,7 +2453,7 @@ local function applyAll()
 	if busy then
 		return
 	end
-	local char = LocalPlayer.Character
+	local char = getChar()
 	if not (char and char:FindFirstChildOfClass("Humanoid")) then
 		setStatus("No character found", "err")
 		play("Error")
@@ -2459,7 +2518,7 @@ local function resetAll()
 		equippedHair:Destroy()
 		equippedHair = nil
 	end
-	local char = LocalPlayer.Character
+	local char = getChar()
 	local b = char and bk[char]
 	if char and b then
 		b.shirtTpl = nil
@@ -2532,7 +2591,7 @@ hooks.live = function(kind)
 		liveQueued = false
 		local full = (liveKind == "full")
 		liveKind = "color"
-		local char = LocalPlayer.Character
+		local char = getChar()
 		if not (char and char:FindFirstChildOfClass("Humanoid")) then
 			return
 		end
@@ -2549,8 +2608,12 @@ hooks.live = function(kind)
 		pcall(applySkin, char)
 		if state.hairOn then
 			startEnforcer(char)
-			if ok and count == 0 then
+			if not ok then
+				setStatus("Hair error: " .. string.sub(tostring(count), 1, 40), "err")
+			elseif count == 0 then
 				setStatus("No hair found - set Hair target", "err")
+			else
+				setStatus("Hair color: " .. (hairInfo.names[1] or "hair") .. " (" .. count .. " parts)", "ok")
 			end
 		end
 	end)
@@ -2726,6 +2789,27 @@ do
 		end)
 		v.mem.Text = okm and string.format("%d MB", math.floor(mem)) or "-"
 		v.gfx.Text = graphicsText
+
+		-- debug scan
+		local dchar = getChar()
+		local dl = {}
+		if dchar then
+			local dh = dchar:FindFirstChildOfClass("Humanoid")
+			table.insert(dl, "Char: " .. dchar.Name .. " (" .. (dh and dh.RigType.Name or "?") .. ")"
+				.. (dchar == LocalPlayer.Character and "" or " [camera subject]"))
+			local names = {}
+			for _, d in ipairs(dchar:GetChildren()) do
+				if d:IsA("Accessory") then
+					table.insert(names, d.Name .. (isHairAccessory(d) and " [hair]" or ""))
+				end
+			end
+			table.insert(dl, "Acc (" .. #names .. "): " .. (#names > 0 and table.concat(names, ", ") or "none"))
+		else
+			table.insert(dl, "Char: not found")
+		end
+		table.insert(dl, "Hair paint: " .. (state.hairOn
+			and (hairInfo.parts .. " parts / " .. #hairInfo.names .. " obj") or "off"))
+		v.scan.Text = table.concat(dl, "\n")
 	end
 	home.update = updateHome
 
