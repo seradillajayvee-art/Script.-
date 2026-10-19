@@ -895,13 +895,69 @@ local solidSw = makeSwitch(solidRow, true, function()
 	end
 end)
 
-local skinHdr = sectionRow(pageChar, "Skin Color", 8, 24)
+local targetRow = sectionRow(pageChar, "Hair target", 8, 28)
+local tPager = new("Frame", {
+	AnchorPoint = Vector2.new(1, 0.5),
+	Position = UDim2.new(1, 0, 0.5, 0),
+	Size = UDim2.fromOffset(160, 28),
+	BackgroundTransparency = 1,
+}, targetRow)
+local tPrev = glassButton(tPager, "<", UDim2.fromOffset(28, 28), UDim2.fromOffset(0, 0), false)
+local tLabel = new("TextLabel", {
+	Position = UDim2.fromOffset(30, 0),
+	Size = UDim2.fromOffset(100, 28),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	Text = "Auto",
+	TextSize = 12,
+	TextColor3 = WHITE,
+	TextTruncate = Enum.TextTruncate.AtEnd,
+}, tPager)
+local tNext = glassButton(tPager, ">", UDim2.fromOffset(28, 28), UDim2.fromOffset(132, 0), false)
+tPrev.UICorner.CornerRadius = UDim.new(1, 0)
+tNext.UICorner.CornerRadius = UDim.new(1, 0)
+
+-- Auto = hahanapin ng script ang buhok mo. Kung hindi nakita, pumili ka ng suot mong accessory.
+local function cycleTarget(dir)
+	local list, seen = { "Auto" }, {}
+	local char = LocalPlayer.Character
+	if char then
+		for _, d in ipairs(char:GetChildren()) do
+			if (d:IsA("Accessory") or d:IsA("Model")) and not d:GetAttribute("ClothingHub") and not seen[d.Name] then
+				seen[d.Name] = true
+				table.insert(list, d.Name)
+			end
+		end
+	end
+	local cur = 1
+	for i, n in ipairs(list) do
+		if n == (hooks.target or "Auto") then
+			cur = i
+		end
+	end
+	cur = ((cur - 1 + dir) % #list) + 1
+	local name = list[cur]
+	hooks.target = (name ~= "Auto") and name or nil
+	tLabel.Text = name
+	play("Click")
+	if hooks.live then
+		hooks.live("full")
+	end
+end
+tPrev.MouseButton1Click:Connect(function()
+	cycleTarget(-1)
+end)
+tNext.MouseButton1Click:Connect(function()
+	cycleTarget(1)
+end)
+
+local skinHdr = sectionRow(pageChar, "Skin Color", 9, 24)
 local skinSw = makeSwitch(skinHdr, false, function()
 	if hooks.live then
 		hooks.live("full")
 	end
 end)
-local skinPicker = colorPicker(pageChar, 9, CONFIG.SkinPresets, Color3.fromRGB(255, 224, 189), pageChar, function()
+local skinPicker = colorPicker(pageChar, 10, CONFIG.SkinPresets, Color3.fromRGB(255, 224, 189), pageChar, function()
 	skinSw.Set(true)
 	if hooks.live then
 		hooks.live("color")
@@ -1337,18 +1393,27 @@ local function getBk(char)
 	return bk[char]
 end
 
+local lastLoadErr = nil
+
 local function loadAsset(id)
+	lastLoadErr = nil
 	local ok, res = pcall(function()
 		return game:GetObjects("rbxassetid://" .. id)
 	end)
 	if ok and type(res) == "table" and res[1] then
 		return res[1]
 	end
+	if not ok then
+		lastLoadErr = tostring(res)
+	end
 	ok, res = pcall(function()
 		return game:GetService("InsertService"):LoadAsset(tonumber(id))
 	end)
 	if ok and res then
 		return res
+	end
+	if not ok and not lastLoadErr then
+		lastLoadErr = tostring(res)
 	end
 	return nil
 end
@@ -1414,26 +1479,116 @@ local function resolveTemplate(id, className, prop, descProp)
 	return "rbxassetid://" .. id, false
 end
 
-local function loadAccessory(id)
-	local obj = loadAsset(id)
-	if not obj then
-		return nil
-	end
-	local acc = (obj:IsA("Accessory") and obj) or obj:FindFirstChildWhichIsA("Accessory", true)
-	if not acc then
-		obj:Destroy()
-		return nil
-	end
+local function cleanAccessory(acc)
+	acc:SetAttribute("ClothingHub", true) -- marka na galing sa script (hindi kasama sa Hair target list)
 	for _, d in ipairs(acc:GetDescendants()) do
 		if d:IsA("LuaSourceContainer") then
 			d:Destroy()
 		end
 	end
-	if obj ~= acc then
-		acc.Parent = nil
-		obj:Destroy()
+	local handle = acc:FindFirstChild("Handle")
+	if handle and handle:IsA("BasePart") then
+		for _, c in ipairs(handle:GetChildren()) do
+			if c:IsA("JointInstance") or c:IsA("WeldConstraint") then
+				c:Destroy() -- weld galing sa ibang rig, aayusin pagka-attach
+			end
+		end
+		handle.Anchored = false
+		handle.CanCollide = false
+		handle.Massless = true
 	end
 	return acc
+end
+
+local function loadAccessory(id)
+	-- 1) GetObjects / LoadAsset
+	local obj = loadAsset(id)
+	if obj then
+		local acc = (obj:IsA("Accessory") and obj) or obj:FindFirstChildWhichIsA("Accessory", true)
+		if acc then
+			if obj ~= acc then
+				acc.Parent = nil
+				obj:Destroy()
+			end
+			return cleanAccessory(acc)
+		end
+		obj:Destroy()
+		lastLoadErr = "not an accessory ID"
+	end
+	-- 2) HumanoidDescription dummy (kung hindi gumana ang GetObjects)
+	local ok, acc = pcall(function()
+		local desc = Instance.new("HumanoidDescription")
+		desc.HatAccessory = tostring(id)
+		local model = Players:CreateHumanoidModelFromDescription(desc, Enum.HumanoidRigType.R15)
+		local a = model:FindFirstChildOfClass("Accessory")
+		if a then
+			a.Parent = nil
+		end
+		model:Destroy()
+		desc:Destroy()
+		return a
+	end)
+	if ok and acc then
+		return cleanAccessory(acc)
+	end
+	return nil
+end
+
+-- siguraduhing naka-weld yung accessory sa katawan (kahit local lang)
+local function ensureWeld(char, acc)
+	local handle = acc:FindFirstChild("Handle")
+	if not (handle and handle:IsA("BasePart")) then
+		return
+	end
+	for _, c in ipairs(handle:GetChildren()) do
+		if c:IsA("JointInstance") or c:IsA("WeldConstraint") then
+			local p0 = c.Part0
+			if p0 and p0:IsDescendantOf(char) then
+				return -- may valid weld na
+			end
+			c:Destroy()
+		end
+	end
+	for _, att in ipairs(handle:GetChildren()) do
+		if att:IsA("Attachment") then
+			for _, part in ipairs(char:GetChildren()) do
+				if part:IsA("BasePart") then
+					local target = part:FindFirstChild(att.Name)
+					if target and target:IsA("Attachment") then
+						new("Weld", {
+							Name = "AccessoryWeld",
+							Part0 = part,
+							Part1 = handle,
+							C0 = target.CFrame,
+							C1 = att.CFrame,
+						}, handle)
+						return
+					end
+				end
+			end
+		end
+	end
+	-- legacy hat (walang attachment)
+	local head = char:FindFirstChild("Head")
+	if head and head:IsA("BasePart") then
+		new("Weld", {
+			Name = "AccessoryWeld",
+			Part0 = head,
+			Part1 = handle,
+			C0 = CFrame.new(0, head.Size.Y / 2, 0),
+			C1 = acc.AttachmentPoint,
+		}, handle)
+	end
+end
+
+local function attachAccessory(char, hum, acc)
+	pcall(function()
+		hum:AddAccessory(acc)
+	end)
+	if acc.Parent ~= char then
+		acc.Parent = char
+	end
+	pcall(ensureWeld, char, acc)
 end
 
 local function isOurAccessory(acc)
@@ -1633,6 +1788,17 @@ local function hairTargets(char)
 		add(equippedHair)
 		return list
 	end
+	if state.hairTarget then
+		for _, d in ipairs(char:GetChildren()) do
+			if d.Name == state.hairTarget and not isOurAccessory(d)
+				and (d:IsA("Accessory") or d:IsA("Model") or d:IsA("BasePart")) then
+				add(d)
+			end
+		end
+		if #list > 0 then
+			return list
+		end
+	end
 	for _, d in ipairs(char:GetDescendants()) do
 		if d:IsA("Accessory") then
 			if not isOurAccessory(d) and isHairAccessory(d) then
@@ -1748,7 +1914,7 @@ local function applyHair(char, hum)
 		return false
 	end
 	setHairHidden(char, true) -- itago muna yung original hair
-	hum:AddAccessory(acc)
+	attachAccessory(char, hum, acc)
 	equippedHair = acc
 	return true
 end
@@ -1892,6 +2058,22 @@ local function startEnforcer(char)
 				if state.hairOn then
 					applyHairColor(char, true)
 				end
+				-- accessories na natanggal ng game, ibalik
+				local hum = char:FindFirstChildOfClass("Humanoid")
+				if hum then
+					b.retry = b.retry or {}
+					for i, a in pairs(equipped) do
+						local id = state.acc[i]
+						if a.Parent ~= char and id and id ~= "" and (b.retry[i] or 0) < 3 then
+							b.retry[i] = (b.retry[i] or 0) + 1
+							local fresh = loadAccessory(id)
+							if fresh then
+								attachAccessory(char, hum, fresh)
+								equipped[i] = fresh
+							end
+						end
+					end
+				end
 			end)
 		end
 		b.enforcer = nil
@@ -1905,6 +2087,7 @@ local function applyToCharacter(char)
 	end
 	local b = getBk(char)
 	local okCount, failCount, notes = 0, 0, {}
+	b.retry = {}
 	local function tally(ok, note)
 		if ok then
 			okCount = okCount + 1
@@ -1960,11 +2143,11 @@ local function applyToCharacter(char)
 		if id and id ~= "" then
 			local acc = loadAccessory(id)
 			if acc then
-				hum:AddAccessory(acc)
+				attachAccessory(char, hum, acc)
 				equipped[i] = acc
 				tally(true)
 			else
-				tally(false, "Accessory " .. i .. " can't load")
+				tally(false, "Acc " .. i .. ": " .. string.sub(lastLoadErr or "can't load ID", 1, 36))
 			end
 		end
 	end
@@ -1981,13 +2164,13 @@ local function applyToCharacter(char)
 		pcall(restoreFace, char)
 	end
 	if state.hair ~= "" then
-		tally(try(applyHair, char, hum), "Hair ID can't load")
+		tally(try(applyHair, char, hum), "Hair: " .. string.sub(lastLoadErr or "can't load ID", 1, 36))
 	else
 		pcall(applyHair, char, hum)
 	end
 	local okp, painted = pcall(applyHairColor, char)
 	if state.hairOn then
-		tally(okp and painted and painted > 0, "Hair color: no hair found")
+		tally(okp and painted and painted > 0, "No hair found - set Hair target")
 	end
 	pcall(applySkin, char)
 	if state.skinOn then
@@ -2063,6 +2246,7 @@ local function applyAll()
 	state.solid = solidSw.Get()
 	state.skinOn = skinSw.Get()
 	state.skinColor = skinPicker.Get()
+	state.hairTarget = hooks.target
 	state.acc = {}
 
 	local any = state.shirt ~= "" or state.pants ~= "" or state.head ~= ""
@@ -2191,6 +2375,7 @@ hooks.live = function(kind)
 		state.solid = solidSw.Get()
 		state.skinOn = skinSw.Get()
 		state.skinColor = skinPicker.Get()
+		state.hairTarget = hooks.target
 		if state.hairOn or state.skinOn then
 			state.applied = true
 		end
@@ -2199,7 +2384,7 @@ hooks.live = function(kind)
 		if state.hairOn then
 			startEnforcer(char)
 			if ok and count == 0 then
-				setStatus("Hair color: no hair found", "err")
+				setStatus("No hair found - set Hair target", "err")
 			end
 		end
 	end)
