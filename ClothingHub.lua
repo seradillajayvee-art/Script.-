@@ -75,6 +75,96 @@ if env.ClothingHub and env.ClothingHub.Destroy then
 end
 
 ------------------------------------------------------------
+-- Saved settings (UI customization) + theme registry
+------------------------------------------------------------
+local SET = {
+	file = "ClothingHub_settings.json",
+	themes = {
+		{ "Ocean", Color3.fromRGB(10, 132, 255), Color3.fromRGB(150, 80, 255) },
+		{ "Sunset", Color3.fromRGB(255, 120, 60), Color3.fromRGB(255, 60, 150) },
+		{ "Mint", Color3.fromRGB(30, 215, 150), Color3.fromRGB(20, 150, 255) },
+		{ "Rose", Color3.fromRGB(255, 80, 140), Color3.fromRGB(170, 80, 255) },
+		{ "Gold", Color3.fromRGB(255, 190, 50), Color3.fromRGB(255, 110, 60) },
+		{ "Crimson", Color3.fromRGB(255, 60, 80), Color3.fromRGB(150, 30, 90) },
+	},
+	keys = { "RightShift", "RightControl", "LeftAlt", "Insert", "Home", "K", "M" },
+}
+
+local S = {
+	theme = 1,
+	glass = 0.12,
+	scale = 1,
+	sounds = true,
+	volume = 0.6,
+	menuKey = "RightShift",
+	showIcon = true,
+	iconSize = 56,
+	iconDocked = false,
+	loading = true,
+	autoReapply = true,
+	autoApplySaved = false,
+}
+SET.defaults = {}
+for k, v in pairs(S) do
+	SET.defaults[k] = v
+end
+
+local savedData = nil
+pcall(function()
+	if isfile and readfile and isfile(SET.file) then
+		savedData = game:GetService("HttpService"):JSONDecode(readfile(SET.file))
+	end
+end)
+if type(savedData) == "table" and type(savedData.settings) == "table" then
+	for k, v in pairs(savedData.settings) do
+		if S[k] ~= nil and type(v) == type(S[k]) then
+			S[k] = v
+		end
+	end
+end
+S.theme = math.clamp(math.floor(S.theme), 1, #SET.themes)
+S.glass = math.clamp(S.glass, 0, 0.6)
+S.scale = math.clamp(S.scale, 0.7, 1.2)
+S.volume = math.clamp(S.volume, 0, 1)
+S.iconSize = math.clamp(math.floor(S.iconSize), 40, 72)
+
+CONFIG.Accent, CONFIG.Accent2 = SET.themes[S.theme][2], SET.themes[S.theme][3]
+CONFIG.Volume = S.volume
+CONFIG.ShowLoading = S.loading
+pcall(function()
+	CONFIG.ToggleKey = Enum.KeyCode[S.menuKey]
+end)
+
+-- lahat ng elements na gumagamit ng accent color (para sa live theme change)
+local theme = { grads = {}, fills = {}, fills2 = {}, strokes = {}, switches = {} }
+theme.apply = function()
+	local seq = ColorSequence.new(CONFIG.Accent, CONFIG.Accent2)
+	for _, g in ipairs(theme.grads) do
+		if g.Parent then
+			g.Color = seq
+		end
+	end
+	for _, f in ipairs(theme.fills) do
+		if f.Parent then
+			f.BackgroundColor3 = CONFIG.Accent
+		end
+	end
+	for _, f in ipairs(theme.fills2) do
+		if f.Parent then
+			f.BackgroundColor3 = CONFIG.Accent2
+		end
+	end
+	for _, st in ipairs(theme.strokes) do
+		if st.Parent then
+			st.Color = CONFIG.Accent
+		end
+	end
+	for _, sw in ipairs(theme.switches) do
+		sw.refresh()
+	end
+end
+
+------------------------------------------------------------
 -- Helpers
 ------------------------------------------------------------
 local WHITE = Color3.new(1, 1, 1)
@@ -167,7 +257,7 @@ end
 
 local function play(name)
 	local s = sounds[name]
-	if s then
+	if s and S.sounds then
 		s.TimePosition = 0
 		s:Play()
 	end
@@ -237,30 +327,48 @@ local function glassButton(parent, text, size, position, accent)
 	new("UICorner", { CornerRadius = UDim.new(0, 14) }, b)
 	addRim(b, 1, 0.3)
 	if accent then
-		new("UIGradient", {
+		table.insert(theme.grads, new("UIGradient", {
 			Rotation = 20,
 			Color = ColorSequence.new(CONFIG.Accent, CONFIG.Accent2),
-		}, b)
+		}, b))
 	end
 	pressFX(b)
 	return b
 end
 
-local function makeDraggable(handle, target, onTap)
-	local dragging, moved, dragStart, startPos = false, false, nil, nil
+local function makeDraggable(handle, target, onTap, onDrop, onHold)
+	local dragging, moved, held, dragStart, startPos, token = false, false, false, nil, nil, 0
 	connect(handle.InputBegan, function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = true
 			moved = false
+			held = false
+			token = token + 1
+			local myToken = token
 			dragStart = input.Position
 			startPos = target.Position
+			if onHold then
+				task.delay(0.5, function()
+					if dragging and not moved and not held and token == myToken then
+						held = true
+						onHold()
+					end
+				end)
+			end
 			local con
 			con = input.Changed:Connect(function()
 				if input.UserInputState == Enum.UserInputState.End then
 					dragging = false
 					con:Disconnect()
-					if not moved and onTap then
+					if held then
+						return
+					end
+					if moved then
+						if onDrop then
+							onDrop()
+						end
+					elseif onTap then
 						onTap()
 					end
 				end
@@ -337,6 +445,10 @@ local function makeSwitch(parent, initial, onChange)
 		end
 	end)
 	render(false)
+	obj.refresh = function()
+		render(false)
+	end
+	table.insert(theme.switches, obj)
 	return obj
 end
 
@@ -383,6 +495,21 @@ local function makeIcon(kind, parent, size, color)
 		L(8, 7.4, 1.2, 12.8)
 		L(8, 7.4, 14.8, 12.8)
 		L(1.2, 12.8, 14.8, 12.8)
+	elseif kind == "sliders" then
+		L(1.5, 3.5, 14.5, 3.5)
+		L(1.5, 8, 14.5, 8)
+		L(1.5, 12.5, 14.5, 12.5)
+		for _, kn in ipairs({ { 10.5, 3.5 }, { 5, 8 }, { 11.5, 12.5 } }) do
+			local dot = new("Frame", {
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				Position = UDim2.fromOffset(kn[1] * k, kn[2] * k),
+				Size = UDim2.fromOffset(4.6 * k, 4.6 * k),
+				BackgroundColor3 = color,
+				BorderSizePixel = 0,
+			}, box)
+			new("UICorner", { CornerRadius = UDim.new(1, 0) }, dot)
+			table.insert(fills, dot)
+		end
 	else -- person
 		local head = new("Frame", {
 			Position = UDim2.fromOffset(4.6 * k, 0.8 * k),
@@ -417,255 +544,340 @@ end
 ------------------------------------------------------------
 -- UI
 ------------------------------------------------------------
-local WIN_W, WIN_H = 300, 362
+local WIN_W, WIN_H = 470, 336
+local CONTENT_W = WIN_W - 72 - 28 -- usable width ng page content
 
-local gui = new("ScreenGui", {
-	Name = "ClothingHub",
-	ResetOnSpawn = false,
-	IgnoreGuiInset = true,
-	DisplayOrder = 999,
-	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-})
-gui.Parent = getGuiParent()
-
--- Window (CanvasGroup so the whole thing can fade)
-local window = new("CanvasGroup", {
-	Name = "Window",
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.new(0.5, 0, 0.5, 0),
-	Size = UDim2.fromOffset(WIN_W, WIN_H),
-	BackgroundTransparency = 1,
-	GroupTransparency = 1,
-	Visible = false,
-}, gui)
-local winScale = new("UIScale", { Scale = 1 }, window)
-
-local glass = new("Frame", {
-	Name = "Glass",
-	Position = UDim2.fromOffset(2, 2),
-	Size = UDim2.new(1, -4, 1, -4),
-	BorderSizePixel = 0,
-}, window)
-glassFill(glass, 0.2)
-new("UICorner", { CornerRadius = UDim.new(0, 28) }, glass)
-addRim(glass, 1.5, 0)
-
--- specular shine on top
-local shine = new("Frame", {
-	Position = UDim2.fromOffset(6, 5),
-	Size = UDim2.new(1, -12, 0, 90),
-	BackgroundColor3 = WHITE,
-	BorderSizePixel = 0,
-}, glass)
-new("UICorner", { CornerRadius = UDim.new(0, 23) }, shine)
-new("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(0.86, 1) }, shine)
-
--- Header
-local header = new("Frame", {
-	Size = UDim2.new(1, 0, 0, 46),
-	BackgroundTransparency = 1,
-}, glass)
-
-local dragZone = new("Frame", {
-	Size = UDim2.new(1, -56, 1, 0),
-	BackgroundTransparency = 1,
-	Active = true,
-}, header)
-
-local badge = new("Frame", {
-	Position = UDim2.fromOffset(14, 8),
-	Size = UDim2.fromOffset(30, 30),
-	BackgroundColor3 = WHITE,
-	BorderSizePixel = 0,
-}, dragZone)
-new("UIGradient", { Rotation = 45, Color = ColorSequence.new(CONFIG.Accent, CONFIG.Accent2) }, badge)
-new("UICorner", { CornerRadius = UDim.new(0, 10) }, badge)
-addRim(badge, 1, 0.3)
-local badgeIcon = makeIcon("hanger", badge, 20, WHITE)
-badgeIcon.box.AnchorPoint = Vector2.new(0.5, 0.5)
-badgeIcon.box.Position = UDim2.new(0.5, 0, 0.5, 1)
-new("TextLabel", {
-	BackgroundTransparency = 1,
-	Position = UDim2.fromOffset(52, 5),
-	Size = UDim2.new(1, -56, 0, 20),
-	Font = Enum.Font.GothamBold,
-	Text = CONFIG.Title,
-	TextSize = 16,
-	TextColor3 = WHITE,
-	TextXAlignment = Enum.TextXAlignment.Left,
-}, dragZone)
-new("TextLabel", {
-	BackgroundTransparency = 1,
-	Position = UDim2.fromOffset(52, 24),
-	Size = UDim2.new(1, -56, 0, 14),
-	Font = Enum.Font.GothamMedium,
-	Text = "by JAYVEE  ·  v" .. CONFIG.Version,
-	TextSize = 10,
-	TextColor3 = MUTED,
-	TextXAlignment = Enum.TextXAlignment.Left,
-}, dragZone)
-
-local minBtn = glassButton(header, "", UDim2.fromOffset(28, 28), UDim2.new(1, -42, 0, 9), false)
-minBtn.UICorner.CornerRadius = UDim.new(1, 0)
-local glyph = new("Frame", {
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.new(0.5, 0, 0.5, 0),
-	Size = UDim2.fromOffset(12, 2),
-	BackgroundColor3 = WHITE,
-	BorderSizePixel = 0,
-}, minBtn)
-new("UICorner", { CornerRadius = UDim.new(1, 0) }, glyph)
-
--- Tabs (segmented control)
-local tabs = new("Frame", {
-	Position = UDim2.fromOffset(16, 46),
-	Size = UDim2.fromOffset(264, 30),
-	BackgroundColor3 = WHITE,
-	BackgroundTransparency = 0.88,
-	BorderSizePixel = 0,
-}, glass)
-new("UICorner", { CornerRadius = UDim.new(1, 0) }, tabs)
-addRim(tabs, 1, 0.35)
-
-local indicator = new("Frame", {
-	Position = UDim2.new(0, 2, 0, 3),
-	Size = UDim2.new(1 / 3, -4, 1, -6),
-	BackgroundColor3 = WHITE,
-	BackgroundTransparency = 0.3,
-	BorderSizePixel = 0,
-}, tabs)
-new("UIGradient", { Rotation = 0, Color = ColorSequence.new(CONFIG.Accent, CONFIG.Accent2) }, indicator)
-new("UICorner", { CornerRadius = UDim.new(1, 0) }, indicator)
-addRim(indicator, 1, 0.4)
-
+local gui, window, winScale, glass, glassBg
+local dragZone, minBtn, indicator
 local tabButtons, tabLabels, tabIcons = {}, {}, {}
-for i, name in ipairs({ "Home", "Outfit", "Character" }) do
-	local btn = new("TextButton", {
-		Position = UDim2.new((i - 1) / 3, 0, 0, 0),
-		Size = UDim2.new(1 / 3, 0, 1, 0),
+local pageHome, pageOutfit, pageChar, pageSet
+local bar, status, applyBtn, resetBtn
+local settingsBar, sStatus, saveBtn, unloadBtn
+local statDot, statLabel
+
+do
+	local RAIL_W, BAR_H, PAGE_TOP, SHADOW = 72, 64, 56, 14
+
+	gui = new("ScreenGui", {
+		Name = "ClothingHub",
+		ResetOnSpawn = false,
+		IgnoreGuiInset = true,
+		DisplayOrder = 999,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	})
+	gui.Parent = getGuiParent()
+
+	-- Window: CanvasGroup (fade) -> shadow + glass (rounded clip)
+	window = new("CanvasGroup", {
+		Name = "Window",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		Size = UDim2.fromOffset(WIN_W + SHADOW * 2, WIN_H + SHADOW * 2),
 		BackgroundTransparency = 1,
-		AutoButtonColor = false,
-		Text = "",
-	}, tabs)
-	local row = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1 }, btn)
-	new("UIListLayout", {
-		FillDirection = Enum.FillDirection.Horizontal,
-		HorizontalAlignment = Enum.HorizontalAlignment.Center,
-		VerticalAlignment = Enum.VerticalAlignment.Center,
-		SortOrder = Enum.SortOrder.LayoutOrder,
-		Padding = UDim.new(0, 5),
-	}, row)
-	local kind = (i == 1 and "home") or (i == 2 and "hanger") or "person"
-	local ic = makeIcon(kind, row, 13, WHITE)
-	ic.box.LayoutOrder = 1
-	local lab = new("TextLabel", {
-		LayoutOrder = 2,
-		AutomaticSize = Enum.AutomaticSize.X,
-		Size = UDim2.fromOffset(0, 16),
+		GroupTransparency = 1,
+		Visible = false,
+	}, gui)
+	winScale = new("UIScale", { Scale = 1 }, window)
+
+	-- soft shadow
+	for i = 1, 6 do
+		local g = i * 3
+		local sh = new("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.new(0.5, 0, 0.5, 5),
+			Size = UDim2.fromOffset(WIN_W + g, WIN_H + g),
+			BackgroundColor3 = Color3.new(0, 0, 0),
+			BackgroundTransparency = 0.84 + i * 0.025,
+			BorderSizePixel = 0,
+		}, window)
+		new("UICorner", { CornerRadius = UDim.new(0, 30 + math.floor(g / 2)) }, sh)
+	end
+
+	glass = new("CanvasGroup", {
+		Name = "Glass",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		Size = UDim2.fromOffset(WIN_W, WIN_H),
 		BackgroundTransparency = 1,
-		Font = Enum.Font.GothamBold,
-		Text = name,
-		TextSize = 12,
+	}, window)
+	new("UICorner", { CornerRadius = UDim.new(0, 30) }, glass)
+
+	glassBg = new("Frame", { Size = UDim2.new(1, 0, 1, 0), BorderSizePixel = 0 }, glass)
+	glassFill(glassBg, S.glass)
+
+	-- aurora glows (theme colors)
+	local function aurora(second, size, cx, cy)
+		local holder = new("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromOffset(cx, cy),
+			Size = UDim2.fromOffset(size, size),
+			BackgroundTransparency = 1,
+		}, glass)
+		for i = 1, 6 do
+			local sc = 1 - (i - 1) * 0.17
+			local layer = new("Frame", {
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				Position = UDim2.new(0.5, 0, 0.5, 0),
+				Size = UDim2.new(sc, 0, sc, 0),
+				BackgroundColor3 = second and CONFIG.Accent2 or CONFIG.Accent,
+				BackgroundTransparency = 0.95 - (i - 1) * 0.03,
+				BorderSizePixel = 0,
+			}, holder)
+			new("UICorner", { CornerRadius = UDim.new(1, 0) }, layer)
+			table.insert(second and theme.fills2 or theme.fills, layer)
+		end
+	end
+	aurora(false, 300, 80, 30)
+	aurora(true, 340, WIN_W - 50, WIN_H - 10)
+
+	-- top shine
+	local shine = new("Frame", {
+		Position = UDim2.fromOffset(RAIL_W + 6, 4),
+		Size = UDim2.new(1, -RAIL_W - 12, 0, 60),
+		BackgroundColor3 = WHITE,
+		BorderSizePixel = 0,
+	}, glass)
+	new("UICorner", { CornerRadius = UDim.new(0, 22) }, shine)
+	new("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(0.9, 1) }, shine)
+
+	-- rim light (hiwalay na frame para hindi ma-clip ng canvas)
+	local rim = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		Size = UDim2.fromOffset(WIN_W, WIN_H),
+		BackgroundTransparency = 1,
+	}, window)
+	new("UICorner", { CornerRadius = UDim.new(0, 30) }, rim)
+	addRim(rim, 1.5, 0)
+
+	-- Rail (kaliwa): logo + tabs
+	local rail = new("Frame", {
+		Position = UDim2.fromOffset(8, 8),
+		Size = UDim2.new(0, RAIL_W - 8, 1, -16),
+		BackgroundColor3 = WHITE,
+		BackgroundTransparency = 0.92,
+		BorderSizePixel = 0,
+	}, glass)
+	new("UICorner", { CornerRadius = UDim.new(0, 22) }, rail)
+	addRim(rail, 1, 0.5)
+
+	local badge = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 12),
+		Size = UDim2.fromOffset(38, 38),
+		BackgroundColor3 = WHITE,
+		BorderSizePixel = 0,
+	}, rail)
+	table.insert(theme.grads, new("UIGradient", {
+		Rotation = 45,
+		Color = ColorSequence.new(CONFIG.Accent, CONFIG.Accent2),
+	}, badge))
+	new("UICorner", { CornerRadius = UDim.new(0, 13) }, badge)
+	addRim(badge, 1, 0.3)
+	local badgeIcon = makeIcon("hanger", badge, 22, WHITE)
+	badgeIcon.box.AnchorPoint = Vector2.new(0.5, 0.5)
+	badgeIcon.box.Position = UDim2.new(0.5, 0, 0.5, 1)
+
+	indicator = new("Frame", {
+		Position = UDim2.fromOffset(6, 64),
+		Size = UDim2.fromOffset(52, 50),
+		BackgroundColor3 = WHITE,
+		BackgroundTransparency = 0.25,
+		BorderSizePixel = 0,
+	}, rail)
+	table.insert(theme.grads, new("UIGradient", {
+		Rotation = 35,
+		Color = ColorSequence.new(CONFIG.Accent, CONFIG.Accent2),
+	}, indicator))
+	new("UICorner", { CornerRadius = UDim.new(0, 16) }, indicator)
+	addRim(indicator, 1, 0.35)
+
+	for i, def in ipairs({ { "Home", "home" }, { "Outfit", "hanger" }, { "Character", "person" }, { "Settings", "sliders" } }) do
+		local btn = new("TextButton", {
+			Position = UDim2.fromOffset(6, 64 + (i - 1) * 56),
+			Size = UDim2.fromOffset(52, 50),
+			BackgroundTransparency = 1,
+			AutoButtonColor = false,
+			Text = "",
+		}, rail)
+		local ic = makeIcon(def[2], btn, 20, WHITE)
+		ic.box.Position = UDim2.fromOffset(16, 6)
+		local lab = new("TextLabel", {
+			Position = UDim2.fromOffset(0, 30),
+			Size = UDim2.fromOffset(52, 14),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Text = def[1],
+			TextSize = 9,
+			TextColor3 = WHITE,
+		}, btn)
+		tabButtons[i], tabLabels[i], tabIcons[i] = btn, lab, ic
+	end
+
+	-- Header (title + live stats + minimize)
+	local header = new("Frame", {
+		Position = UDim2.fromOffset(RAIL_W, 0),
+		Size = UDim2.new(1, -RAIL_W, 0, 54),
+		BackgroundTransparency = 1,
+	}, glass)
+	dragZone = new("Frame", {
+		Size = UDim2.new(1, -170, 1, 0),
+		BackgroundTransparency = 1,
+		Active = true,
+	}, header)
+	new("TextLabel", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(6, 8),
+		Size = UDim2.new(1, -6, 0, 22),
+		Font = Enum.Font.GothamBlack,
+		Text = CONFIG.Title,
+		TextSize = 18,
 		TextColor3 = WHITE,
-	}, row)
-	tabButtons[i], tabLabels[i], tabIcons[i] = btn, lab, ic
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, dragZone)
+	new("TextLabel", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(6, 30),
+		Size = UDim2.new(1, -6, 0, 14),
+		Font = Enum.Font.GothamMedium,
+		Text = "Wardrobe hub  ·  v" .. CONFIG.Version .. "  ·  by JAYVEE",
+		TextSize = 10,
+		TextColor3 = MUTED,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, dragZone)
+
+	local pill = new("Frame", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -50, 0.5, 0),
+		Size = UDim2.fromOffset(118, 24),
+		BackgroundColor3 = WHITE,
+		BackgroundTransparency = 0.9,
+		BorderSizePixel = 0,
+	}, header)
+	new("UICorner", { CornerRadius = UDim.new(1, 0) }, pill)
+	addRim(pill, 1, 0.5)
+	statDot = new("Frame", {
+		Position = UDim2.fromOffset(10, 8),
+		Size = UDim2.fromOffset(8, 8),
+		BackgroundColor3 = Color3.fromRGB(120, 230, 150),
+		BorderSizePixel = 0,
+	}, pill)
+	new("UICorner", { CornerRadius = UDim.new(1, 0) }, statDot)
+	statLabel = new("TextLabel", {
+		Position = UDim2.fromOffset(24, 0),
+		Size = UDim2.new(1, -28, 1, 0),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamMedium,
+		Text = "-- fps  ·  -- ms",
+		TextSize = 10,
+		TextColor3 = WHITE,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, pill)
+
+	minBtn = glassButton(header, "", UDim2.fromOffset(28, 28), UDim2.new(1, -40, 0.5, -14), false)
+	minBtn.UICorner.CornerRadius = UDim.new(1, 0)
+	local glyph = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		Size = UDim2.fromOffset(12, 2),
+		BackgroundColor3 = WHITE,
+		BorderSizePixel = 0,
+	}, minBtn)
+	new("UICorner", { CornerRadius = UDim.new(1, 0) }, glyph)
+
+	-- Pages
+	local function makePage(reserve)
+		local pg = new("ScrollingFrame", {
+			Position = UDim2.new(0, RAIL_W, 0, PAGE_TOP),
+			Size = UDim2.new(1, -RAIL_W, 1, -(PAGE_TOP + reserve)),
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			CanvasSize = UDim2.new(0, 0, 0, 0),
+			AutomaticCanvasSize = Enum.AutomaticSize.Y,
+			ScrollingDirection = Enum.ScrollingDirection.Y,
+			ScrollBarThickness = 3,
+			ScrollBarImageColor3 = WHITE,
+			ScrollBarImageTransparency = 0.5,
+			Visible = false,
+		}, glass)
+		new("UIPadding", {
+			PaddingLeft = UDim.new(0, 12),
+			PaddingRight = UDim.new(0, 16),
+			PaddingTop = UDim.new(0, 2),
+			PaddingBottom = UDim.new(0, 10),
+		}, pg)
+		new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 10) }, pg)
+		return pg
+	end
+	pageHome = makePage(8)
+	pageOutfit = makePage(BAR_H)
+	pageChar = makePage(BAR_H)
+	pageSet = makePage(BAR_H)
+
+	-- Action bars (Apply/Reset at Save/Unload)
+	local function makeBar()
+		local b = new("Frame", {
+			Position = UDim2.new(0, RAIL_W, 1, -BAR_H),
+			Size = UDim2.new(1, -RAIL_W, 0, BAR_H),
+			BackgroundTransparency = 1,
+			Visible = false,
+		}, glass)
+		new("Frame", {
+			Position = UDim2.fromOffset(12, 0),
+			Size = UDim2.new(1, -28, 0, 1),
+			BackgroundColor3 = WHITE,
+			BackgroundTransparency = 0.86,
+			BorderSizePixel = 0,
+		}, b)
+		local row = new("Frame", {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -16, 0.5, 1),
+			Size = UDim2.fromOffset(240, 40),
+			BackgroundTransparency = 1,
+		}, b)
+		local msg = new("TextLabel", {
+			Position = UDim2.fromOffset(12, 0),
+			Size = UDim2.new(1, -272, 1, 0),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamMedium,
+			Text = "Ready",
+			TextSize = 11,
+			TextColor3 = MUTED,
+			TextWrapped = true,
+			TextXAlignment = Enum.TextXAlignment.Left,
+		}, b)
+		return b, row, msg
+	end
+	local barRow, sBarRow
+	bar, barRow, status = makeBar()
+	applyBtn = glassButton(barRow, "Apply", UDim2.new(0.62, -4, 1, 0), UDim2.new(0.38, 4, 0, 0), true)
+	resetBtn = glassButton(barRow, "Reset", UDim2.new(0.38, -4, 1, 0), UDim2.new(0, 0, 0, 0), false)
+
+	settingsBar, sBarRow, sStatus = makeBar()
+	saveBtn = glassButton(sBarRow, "Save", UDim2.new(0.5, -4, 1, 0), UDim2.new(0.5, 4, 0, 0), true)
+	unloadBtn = glassButton(sBarRow, "Unload", UDim2.new(0.5, -4, 1, 0), UDim2.new(0, 0, 0, 0), false)
+	unloadBtn.BackgroundColor3 = Color3.fromRGB(255, 90, 105)
+	unloadBtn.BackgroundTransparency = 0.78
+	unloadBtn.TextColor3 = Color3.fromRGB(255, 160, 170)
 end
 
--- Pages
-local pageOutfit = new("Frame", {
-	Position = UDim2.fromOffset(0, 84),
-	Size = UDim2.new(1, 0, 1, -156),
-	BackgroundTransparency = 1,
-}, glass)
-new("UIPadding", {
-	PaddingLeft = UDim.new(0, 16),
-	PaddingRight = UDim.new(0, 16),
-	PaddingTop = UDim.new(0, 4),
-}, pageOutfit)
-new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8) }, pageOutfit)
-
-local pageChar = new("ScrollingFrame", {
-	Position = UDim2.fromOffset(0, 84),
-	Size = UDim2.new(1, 0, 1, -156),
-	BackgroundTransparency = 1,
-	BorderSizePixel = 0,
-	CanvasSize = UDim2.new(0, 0, 0, 0),
-	AutomaticCanvasSize = Enum.AutomaticSize.Y,
-	ScrollingDirection = Enum.ScrollingDirection.Y,
-	ScrollBarThickness = 3,
-	ScrollBarImageColor3 = WHITE,
-	ScrollBarImageTransparency = 0.5,
-	Visible = false,
-}, glass)
-new("UIPadding", {
-	PaddingLeft = UDim.new(0, 16),
-	PaddingRight = UDim.new(0, 16),
-	PaddingTop = UDim.new(0, 4),
-	PaddingBottom = UDim.new(0, 10),
-}, pageChar)
-new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8) }, pageChar)
-
-local pageHome = new("ScrollingFrame", {
-	Position = UDim2.fromOffset(0, 84),
-	Size = UDim2.new(1, 0, 1, -92),
-	BackgroundTransparency = 1,
-	BorderSizePixel = 0,
-	CanvasSize = UDim2.new(0, 0, 0, 0),
-	AutomaticCanvasSize = Enum.AutomaticSize.Y,
-	ScrollingDirection = Enum.ScrollingDirection.Y,
-	ScrollBarThickness = 3,
-	ScrollBarImageColor3 = WHITE,
-	ScrollBarImageTransparency = 0.5,
-}, glass)
-new("UIPadding", {
-	PaddingLeft = UDim.new(0, 16),
-	PaddingRight = UDim.new(0, 16),
-	PaddingTop = UDim.new(0, 4),
-	PaddingBottom = UDim.new(0, 10),
-}, pageHome)
-new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8) }, pageHome)
-
--- Bottom bar (shared by both tabs)
-local bar = new("Frame", {
-	Position = UDim2.new(0, 0, 1, -72),
-	Size = UDim2.new(1, 0, 0, 72),
-	BackgroundTransparency = 1,
-}, glass)
-new("Frame", {
-	Position = UDim2.fromOffset(16, 0),
-	Size = UDim2.new(1, -32, 0, 1),
-	BackgroundColor3 = WHITE,
-	BackgroundTransparency = 0.86,
-	BorderSizePixel = 0,
-}, bar)
-
-local btnRow = new("Frame", {
-	Position = UDim2.fromOffset(16, 8),
-	Size = UDim2.new(1, -32, 0, 38),
-	BackgroundTransparency = 1,
-}, bar)
-local applyBtn = glassButton(btnRow, "Apply", UDim2.new(0.62, -4, 1, 0), UDim2.new(0, 0, 0, 0), true)
-local resetBtn = glassButton(btnRow, "Reset", UDim2.new(0.38, -4, 1, 0), UDim2.new(0.62, 4, 0, 0), false)
-
-local status = new("TextLabel", {
-	Position = UDim2.fromOffset(16, 50),
-	Size = UDim2.new(1, -32, 0, 14),
-	BackgroundTransparency = 1,
-	Font = Enum.Font.GothamMedium,
-	Text = "Ready",
-	TextSize = 12,
-	TextColor3 = MUTED,
-}, bar)
+local function statusColor(kind)
+	if kind == "ok" then
+		return Color3.fromRGB(150, 230, 175)
+	elseif kind == "err" then
+		return Color3.fromRGB(255, 125, 125)
+	end
+	return MUTED
+end
 
 local function setStatus(text, kind)
 	status.Text = text
-	if kind == "ok" then
-		status.TextColor3 = Color3.fromRGB(150, 230, 175)
-	elseif kind == "err" then
-		status.TextColor3 = Color3.fromRGB(255, 125, 125)
-	else
-		status.TextColor3 = MUTED
-	end
+	status.TextColor3 = statusColor(kind)
+end
+
+local function setSetStatus(text, kind)
+	sStatus.Text = text
+	sStatus.TextColor3 = statusColor(kind)
 end
 
 -- Row builders
@@ -682,6 +894,7 @@ local function sectionRow(parent, text, order, height)
 		BackgroundColor3 = CONFIG.Accent,
 		BorderSizePixel = 0,
 	}, row)
+	table.insert(theme.fills, barMark)
 	new("UICorner", { CornerRadius = UDim.new(1, 0) }, barMark)
 	new("TextLabel", {
 		BackgroundTransparency = 1,
@@ -863,7 +1076,7 @@ local function colorPicker(parent, order, presets, initial, scroller, onUserChan
 	-- preset swatches
 	for i, c in ipairs(presets) do
 		local sw = new("TextButton", {
-			Position = UDim2.fromOffset(math.floor((i - 1) * (264 - 24) / (#presets - 1)), 0),
+			Position = UDim2.fromOffset(math.floor((i - 1) * (CONTENT_W - 24 - 24) / (#presets - 1)), 0),
 			Size = UDim2.fromOffset(24, 24),
 			Text = "",
 			AutoButtonColor = false,
@@ -953,13 +1166,36 @@ end
 ------------------------------------------------------------
 -- OUTFIT page
 ------------------------------------------------------------
-local hooks = {} -- (live color preview, nilalagay sa baba)
+local function groupCard(parent, order)
+	local c = new("Frame", {
+		LayoutOrder = order,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundColor3 = WHITE,
+		BackgroundTransparency = 0.92,
+		BorderSizePixel = 0,
+	}, parent)
+	new("UICorner", { CornerRadius = UDim.new(0, 18) }, c)
+	addRim(c, 1, 0.5)
+	new("UIPadding", {
+		PaddingLeft = UDim.new(0, 12),
+		PaddingRight = UDim.new(0, 12),
+		PaddingTop = UDim.new(0, 12),
+		PaddingBottom = UDim.new(0, 12),
+	}, c)
+	new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8) }, c)
+	return c
+end
+local cards = {}
+local hooks = {} -- (live color preview, hooks para sa icon / settings)
 
-sectionRow(pageOutfit, "Clothing", 1, 16)
-local shirtBox = inputBox(pageOutfit, "Shirt Id", 2)
-local pantsBox = inputBox(pageOutfit, "Pants Id", 3)
+cards.clothing = groupCard(pageOutfit, 1)
+sectionRow(cards.clothing, "Clothing", 1, 16)
+local shirtBox = inputBox(cards.clothing, "Shirt Id", 2)
+local pantsBox = inputBox(cards.clothing, "Pants Id", 3)
 
-local accRow = sectionRow(pageOutfit, "Accessory", 4, 28)
+cards.acc = groupCard(pageOutfit, 2)
+local accRow = sectionRow(cards.acc, "Accessory", 1, 28)
 local pager = new("Frame", {
 	AnchorPoint = Vector2.new(1, 0.5),
 	Position = UDim2.new(1, 0, 0.5, 0),
@@ -1004,37 +1240,40 @@ local nextBtn = glassButton(pager, ">", UDim2.fromOffset(28, 28), UDim2.fromOffs
 prevBtn.UICorner.CornerRadius = UDim.new(1, 0)
 nextBtn.UICorner.CornerRadius = UDim.new(1, 0)
 
-local accBox = inputBox(pageOutfit, "Accessory Id", 5)
+local accBox = inputBox(cards.acc, "Accessory Id", 2)
 
 ------------------------------------------------------------
 -- CHARACTER page
 ------------------------------------------------------------
-sectionRow(pageChar, "Character", 1, 16)
-local headBox = inputBox(pageChar, "Head Id", 2)
-local faceBox = inputBox(pageChar, "Face Id", 3)
-local hairBox = inputBox(pageChar, "Hair Id", 4)
+cards.identity = groupCard(pageChar, 1)
+cards.hair = groupCard(pageChar, 2)
+cards.skin = groupCard(pageChar, 3)
+sectionRow(cards.identity, "Character", 1, 16)
+local headBox = inputBox(cards.identity, "Head Id", 2)
+local faceBox = inputBox(cards.identity, "Face Id", 3)
+local hairBox = inputBox(cards.identity, "Hair Id", 4)
 
-local hairHdr = sectionRow(pageChar, "Hair Color", 5, 24)
+local hairHdr = sectionRow(cards.hair, "Hair Color", 5, 24)
 local hairSw = makeSwitch(hairHdr, false, function()
 	if hooks.live then
 		hooks.live("full")
 	end
 end)
-local hairPicker = colorPicker(pageChar, 6, CONFIG.HairPresets, Color3.fromRGB(74, 48, 32), pageChar, function()
+local hairPicker = colorPicker(cards.hair, 6, CONFIG.HairPresets, Color3.fromRGB(74, 48, 32), pageChar, function()
 	hairSw.Set(true) -- auto-on pag nag-edit ng kulay
 	if hooks.live then
 		hooks.live("color")
 	end
 end)
 
-local solidRow = sectionRow(pageChar, "Solid color", 7, 24)
+local solidRow = sectionRow(cards.hair, "Solid color", 7, 24)
 local solidSw = makeSwitch(solidRow, true, function()
 	if hooks.live then
 		hooks.live("full")
 	end
 end)
 
-local targetRow = sectionRow(pageChar, "Hair target", 8, 28)
+local targetRow = sectionRow(cards.hair, "Hair target", 8, 28)
 local tPager = new("Frame", {
 	AnchorPoint = Vector2.new(1, 0.5),
 	Position = UDim2.new(1, 0, 0.5, 0),
@@ -1090,13 +1329,13 @@ tNext.MouseButton1Click:Connect(function()
 	cycleTarget(1)
 end)
 
-local skinHdr = sectionRow(pageChar, "Skin Color", 9, 24)
+local skinHdr = sectionRow(cards.skin, "Skin Color", 9, 24)
 local skinSw = makeSwitch(skinHdr, false, function()
 	if hooks.live then
 		hooks.live("full")
 	end
 end)
-local skinPicker = colorPicker(pageChar, 10, CONFIG.SkinPresets, Color3.fromRGB(255, 224, 189), pageChar, function()
+local skinPicker = colorPicker(cards.skin, 10, CONFIG.SkinPresets, Color3.fromRGB(255, 224, 189), pageChar, function()
 	skinSw.Set(true)
 	if hooks.live then
 		hooks.live("color")
@@ -1185,10 +1424,10 @@ do
 		BorderSizePixel = 0,
 	}, pageHome)
 	new("UICorner", { CornerRadius = UDim.new(0, 18) }, hero)
-	new("UIGradient", {
+	table.insert(theme.grads, new("UIGradient", {
 		Rotation = 25,
-		Color = ColorSequence.new(Color3.fromRGB(10, 132, 255), Color3.fromRGB(150, 80, 255)),
-	}, hero)
+		Color = ColorSequence.new(CONFIG.Accent, CONFIG.Accent2),
+	}, hero))
 	addRim(hero, 1, 0.3)
 
 	local av = new("Frame", {
@@ -1407,70 +1646,586 @@ do
 end
 
 ------------------------------------------------------------
+-- SETTINGS page
+------------------------------------------------------------
+do
+	local LABEL = Color3.fromRGB(205, 212, 230)
+	local ctl = {}
+
+	local function titledCard(order, title)
+		local c = groupCard(pageSet, order)
+		new("TextLabel", {
+			LayoutOrder = 0,
+			Size = UDim2.new(1, 0, 0, 14),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Text = string.upper(title),
+			TextSize = 10,
+			TextColor3 = Color3.fromRGB(150, 200, 255),
+			TextXAlignment = Enum.TextXAlignment.Left,
+		}, c)
+		return c
+	end
+
+	local function toggleRow(card, order, text, init, onChange)
+		local row = new("Frame", { LayoutOrder = order, Size = UDim2.new(1, 0, 0, 26), BackgroundTransparency = 1 }, card)
+		new("TextLabel", {
+			BackgroundTransparency = 1,
+			Size = UDim2.new(0.7, 0, 1, 0),
+			Font = Enum.Font.GothamMedium,
+			Text = text,
+			TextSize = 12,
+			TextColor3 = LABEL,
+			TextXAlignment = Enum.TextXAlignment.Left,
+		}, row)
+		return makeSwitch(row, init, onChange)
+	end
+
+	local function cycler(card, order, text, getText, onCycle)
+		local row = new("Frame", { LayoutOrder = order, Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1 }, card)
+		new("TextLabel", {
+			BackgroundTransparency = 1,
+			Size = UDim2.new(0.5, 0, 1, 0),
+			Font = Enum.Font.GothamMedium,
+			Text = text,
+			TextSize = 12,
+			TextColor3 = LABEL,
+			TextXAlignment = Enum.TextXAlignment.Left,
+		}, row)
+		local pg = new("Frame", {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, 0, 0.5, 0),
+			Size = UDim2.fromOffset(150, 28),
+			BackgroundTransparency = 1,
+		}, row)
+		local prev = glassButton(pg, "<", UDim2.fromOffset(28, 28), UDim2.fromOffset(0, 0), false)
+		local lab = new("TextLabel", {
+			Position = UDim2.fromOffset(30, 0),
+			Size = UDim2.fromOffset(90, 28),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Text = getText(),
+			TextSize = 12,
+			TextColor3 = WHITE,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+		}, pg)
+		local nxt = glassButton(pg, ">", UDim2.fromOffset(28, 28), UDim2.fromOffset(122, 0), false)
+		prev.UICorner.CornerRadius = UDim.new(1, 0)
+		nxt.UICorner.CornerRadius = UDim.new(1, 0)
+		prev.MouseButton1Click:Connect(function()
+			onCycle(-1)
+			lab.Text = getText()
+		end)
+		nxt.MouseButton1Click:Connect(function()
+			onCycle(1)
+			lab.Text = getText()
+		end)
+		return lab
+	end
+
+	local function slider(card, order, text, minV, maxV, init, fmt, onChange, commitOnly)
+		local row = new("Frame", { LayoutOrder = order, Size = UDim2.new(1, 0, 0, 38), BackgroundTransparency = 1 }, card)
+		new("TextLabel", {
+			BackgroundTransparency = 1,
+			Size = UDim2.new(0.6, 0, 0, 16),
+			Font = Enum.Font.GothamMedium,
+			Text = text,
+			TextSize = 12,
+			TextColor3 = LABEL,
+			TextXAlignment = Enum.TextXAlignment.Left,
+		}, row)
+		local valLabel = new("TextLabel", {
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, 0, 0, 0),
+			Size = UDim2.new(0.4, 0, 0, 16),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Text = "",
+			TextSize = 12,
+			TextColor3 = WHITE,
+			TextXAlignment = Enum.TextXAlignment.Right,
+		}, row)
+		local track = new("Frame", {
+			Position = UDim2.new(0, 0, 0, 25),
+			Size = UDim2.new(1, 0, 0, 6),
+			BackgroundColor3 = WHITE,
+			BackgroundTransparency = 0.8,
+			BorderSizePixel = 0,
+		}, row)
+		new("UICorner", { CornerRadius = UDim.new(1, 0) }, track)
+		local fill = new("Frame", { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = WHITE, BorderSizePixel = 0 }, track)
+		new("UICorner", { CornerRadius = UDim.new(1, 0) }, fill)
+		table.insert(theme.grads, new("UIGradient", { Color = ColorSequence.new(CONFIG.Accent, CONFIG.Accent2) }, fill))
+		local knob = new("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.new(0, 0, 0.5, 0),
+			Size = UDim2.fromOffset(16, 16),
+			BackgroundColor3 = WHITE,
+			BorderSizePixel = 0,
+			ZIndex = 2,
+		}, track)
+		new("UICorner", { CornerRadius = UDim.new(1, 0) }, knob)
+		new("UIStroke", { Color = Color3.new(0, 0, 0), Transparency = 0.7, Thickness = 1 }, knob)
+		local hit = new("TextButton", {
+			Text = "",
+			AutoButtonColor = false,
+			BackgroundTransparency = 1,
+			Position = UDim2.new(0, -8, 0.5, -14),
+			Size = UDim2.new(1, 16, 0, 28),
+		}, track)
+
+		local value, dragging = init, false
+		local function render(v)
+			local a = (v - minV) / (maxV - minV)
+			fill.Size = UDim2.new(a, 0, 1, 0)
+			knob.Position = UDim2.new(a, 0, 0.5, 0)
+			valLabel.Text = fmt(v)
+		end
+		local function fromInput(pos)
+			local a = math.clamp((pos.X - track.AbsolutePosition.X) / math.max(track.AbsoluteSize.X, 1), 0, 1)
+			value = math.floor(minV + a * (maxV - minV) + 0.5)
+			render(value)
+			if not commitOnly then
+				onChange(value)
+			end
+		end
+		hit.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1
+				or input.UserInputType == Enum.UserInputType.Touch then
+				dragging = true
+				pageSet.ScrollingEnabled = false
+				fromInput(input.Position)
+				input.Changed:Connect(function()
+					if input.UserInputState == Enum.UserInputState.End then
+						dragging = false
+						pageSet.ScrollingEnabled = true
+						if commitOnly then
+							onChange(value)
+						end
+					end
+				end)
+			end
+		end)
+		connect(UserInputService.InputChanged, function(input)
+			if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+				or input.UserInputType == Enum.UserInputType.Touch) then
+				fromInput(input.Position)
+			end
+		end)
+		render(init)
+		return {
+			Set = function(v)
+				value = v
+				render(v)
+			end,
+		}
+	end
+
+	local function pct(v)
+		return v .. "%"
+	end
+
+	-- Appearance
+	local cA = titledCard(1, "Appearance")
+	local chipRow = new("Frame", { LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1 }, cA)
+	local chips = {}
+	local function refreshChips()
+		for i, c in ipairs(chips) do
+			c.Transparency = (i == S.theme) and 0 or 1
+		end
+	end
+	local nThemes = #SET.themes
+	for i, t in ipairs(SET.themes) do
+		local chip = new("TextButton", {
+			Position = UDim2.new((i - 1) / (nThemes - 1), -(i - 1) * 26 / (nThemes - 1), 0, 2),
+			Size = UDim2.fromOffset(26, 26),
+			Text = "",
+			AutoButtonColor = false,
+			BackgroundColor3 = WHITE,
+			BorderSizePixel = 0,
+		}, chipRow)
+		new("UIGradient", { Rotation = 45, Color = ColorSequence.new(t[2], t[3]) }, chip)
+		new("UICorner", { CornerRadius = UDim.new(1, 0) }, chip)
+		chips[i] = new("UIStroke", { Color = WHITE, Thickness = 2, Transparency = 1 }, chip)
+		pressFX(chip)
+		chip.MouseButton1Click:Connect(function()
+			S.theme = i
+			play("Click")
+			hooks.apply()
+			refreshChips()
+		end)
+	end
+	refreshChips()
+	local sGlass = slider(cA, 2, "Glass opacity", 40, 100, math.floor((1 - S.glass) * 100 + 0.5), pct, function(v)
+		S.glass = 1 - v / 100
+		hooks.apply()
+	end)
+	local sScale = slider(cA, 3, "UI size", 70, 120, math.floor(S.scale * 100 + 0.5), pct, function(v)
+		S.scale = v / 100
+		hooks.apply()
+	end, true)
+
+	-- Sound
+	local cS = titledCard(2, "Sound")
+	local swSnd = toggleRow(cS, 1, "UI sounds", S.sounds, function(on)
+		S.sounds = on
+	end)
+	local sVol = slider(cS, 2, "Volume", 0, 100, math.floor(S.volume * 100 + 0.5), pct, function(v)
+		S.volume = v / 100
+		hooks.apply()
+	end)
+
+	-- Icon & menu
+	local cI = titledCard(3, "Icon and menu")
+	local keyLabel = cycler(cI, 1, "Menu key", function()
+		return S.menuKey
+	end, function(dir)
+		local idx = 1
+		for i, k in ipairs(SET.keys) do
+			if k == S.menuKey then
+				idx = i
+			end
+		end
+		idx = ((idx - 1 + dir) % #SET.keys) + 1
+		S.menuKey = SET.keys[idx]
+		play("Click")
+		hooks.apply()
+	end)
+	local swIcon
+	swIcon = toggleRow(cI, 2, "Floating icon", S.showIcon, function(on)
+		if not on and not UserInputService.KeyboardEnabled then
+			swIcon.Set(true)
+			setSetStatus("Need a keyboard to reopen the menu", "err")
+			play("Error")
+			return
+		end
+		S.showIcon = on
+		hooks.apply()
+	end)
+	local swDock = toggleRow(cI, 3, "Hide icon to edge", S.iconDocked, function(on)
+		if on then
+			hooks.dock()
+		else
+			hooks.undock()
+		end
+	end)
+	local sIcon = slider(cI, 4, "Icon size", 40, 72, S.iconSize, function(v)
+		return v .. " px"
+	end, function(v)
+		S.iconSize = v
+		hooks.apply()
+	end, true)
+
+	-- Behavior
+	local cB = titledCard(4, "Behavior")
+	local swRe = toggleRow(cB, 1, "Re-apply after respawn", S.autoReapply, function(on)
+		S.autoReapply = on
+	end)
+	local swAuto = toggleRow(cB, 2, "Auto-apply saved outfit", S.autoApplySaved, function(on)
+		S.autoApplySaved = on
+	end)
+	local swLoad = toggleRow(cB, 3, "Show loading screen", S.loading, function(on)
+		S.loading = on
+	end)
+
+	-- Actions
+	local cX = groupCard(pageSet, 5)
+	local resetS = glassButton(cX, "Reset to defaults", UDim2.new(1, 0, 0, 34), UDim2.new(0, 0, 0, 0), false)
+	resetS.LayoutOrder = 1
+	new("TextLabel", {
+		LayoutOrder = 2,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamMedium,
+		Text = "Save writes " .. SET.file .. " (outfit + settings) in your executor workspace.",
+		TextSize = 10,
+		TextColor3 = MUTED,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, cX)
+
+	ctl.sync = function()
+		refreshChips()
+		sGlass.Set(math.floor((1 - S.glass) * 100 + 0.5))
+		sScale.Set(math.floor(S.scale * 100 + 0.5))
+		sVol.Set(math.floor(S.volume * 100 + 0.5))
+		sIcon.Set(S.iconSize)
+		keyLabel.Text = S.menuKey
+		swSnd.Set(S.sounds)
+		swIcon.Set(S.showIcon)
+		swDock.Set(S.iconDocked)
+		swRe.Set(S.autoReapply)
+		swAuto.Set(S.autoApplySaved)
+		swLoad.Set(S.loading)
+	end
+	resetS.MouseButton1Click:Connect(function()
+		for k, v in pairs(SET.defaults) do
+			S[k] = v
+		end
+		hooks.apply()
+		ctl.sync()
+		play("Click")
+		setSetStatus("Defaults restored (press Save to keep)", "ok")
+	end)
+
+	saveBtn.MouseButton1Click:Connect(function()
+		if hooks.save then
+			hooks.save()
+		end
+	end)
+	unloadBtn.MouseButton1Click:Connect(function()
+		if hooks.unload then
+			hooks.unload()
+		end
+	end)
+end
+
+------------------------------------------------------------
 -- Floating icon
 ------------------------------------------------------------
 local icon = new("TextButton", {
 	Name = "Icon",
 	Text = "",
 	AutoButtonColor = false,
-	Size = UDim2.fromOffset(56, 56),
-	Position = UDim2.new(0, 14, 0.5, -28),
+	Size = UDim2.fromOffset(S.iconSize, S.iconSize),
+	Position = UDim2.new(0, 10, 0.5, -math.floor(S.iconSize / 2)),
 	BorderSizePixel = 0,
 	BackgroundColor3 = WHITE,
 	BackgroundTransparency = 0.05,
+	Visible = false,
 }, gui)
-new("UIGradient", { Rotation = 45, Color = ColorSequence.new(CONFIG.Accent, CONFIG.Accent2) }, icon)
-new("UICorner", { CornerRadius = UDim.new(1, 0) }, icon)
-addRim(icon, 1.5, 0)
+do
+	table.insert(theme.grads, new("UIGradient", {
+		Rotation = 45,
+		Color = ColorSequence.new(CONFIG.Accent, CONFIG.Accent2),
+	}, icon))
+	new("UICorner", { CornerRadius = UDim.new(1, 0) }, icon)
+	addRim(icon, 1.5, 0)
 
--- glossy highlight
-local iconGloss = new("Frame", {
-	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 3),
-	Size = UDim2.new(0.78, 0, 0.45, 0),
-	BackgroundColor3 = WHITE,
-	BorderSizePixel = 0,
-}, icon)
-new("UICorner", { CornerRadius = UDim.new(1, 0) }, iconGloss)
-new("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(0.55, 1) }, iconGloss)
+	-- glossy highlight
+	local gloss = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 3),
+		Size = UDim2.new(0.78, 0, 0.45, 0),
+		BackgroundColor3 = WHITE,
+		BorderSizePixel = 0,
+	}, icon)
+	new("UICorner", { CornerRadius = UDim.new(1, 0) }, gloss)
+	new("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(0.55, 1) }, gloss)
 
--- pulsing glow ring
-local glowRing = new("Frame", {
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.new(0.5, 0, 0.5, 0),
-	Size = UDim2.new(1, 8, 1, 8),
-	BackgroundTransparency = 1,
-}, icon)
-new("UICorner", { CornerRadius = UDim.new(1, 0) }, glowRing)
-local glowStroke = new("UIStroke", { Color = CONFIG.Accent, Thickness = 2, Transparency = 0.4 }, glowRing)
-TweenService:Create(
-	glowStroke,
-	TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-	{ Transparency = 0.92 }
-):Play()
-TweenService:Create(
-	glowRing,
-	TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-	{ Size = UDim2.new(1, 18, 1, 18) }
-):Play()
-
--- logo: sarili mong image (CONFIG.IconImage) o default na hanger icon
-if CONFIG.IconImage and CONFIG.IconImage ~= "" then
-	local img = new("ImageLabel", {
+	-- pulsing glow ring
+	local ring = new("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.new(0.5, 0, 0.5, 0),
-		Size = UDim2.new(0.8, 0, 0.8, 0),
+		Size = UDim2.new(1, 8, 1, 8),
 		BackgroundTransparency = 1,
-		Image = CONFIG.IconImage,
-		ScaleType = Enum.ScaleType.Fit,
 	}, icon)
-	new("UICorner", { CornerRadius = UDim.new(1, 0) }, img)
-else
-	local iconLogo = makeIcon("hanger", icon, 30, WHITE)
-	iconLogo.box.AnchorPoint = Vector2.new(0.5, 0.5)
-	iconLogo.box.Position = UDim2.new(0.5, 0, 0.5, 1)
+	new("UICorner", { CornerRadius = UDim.new(1, 0) }, ring)
+	local ringStroke = new("UIStroke", { Color = CONFIG.Accent, Thickness = 2, Transparency = 0.4 }, ring)
+	table.insert(theme.strokes, ringStroke)
+	TweenService:Create(
+		ringStroke,
+		TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		{ Transparency = 0.92 }
+	):Play()
+	TweenService:Create(
+		ring,
+		TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		{ Size = UDim2.new(1, 18, 1, 18) }
+	):Play()
+
+	-- logo: sarili mong image (CONFIG.IconImage) o default na hanger icon
+	if CONFIG.IconImage and CONFIG.IconImage ~= "" then
+		local img = new("ImageLabel", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.new(0.5, 0, 0.5, 0),
+			Size = UDim2.new(0.8, 0, 0.8, 0),
+			BackgroundTransparency = 1,
+			Image = CONFIG.IconImage,
+			ScaleType = Enum.ScaleType.Fit,
+		}, icon)
+		new("UICorner", { CornerRadius = UDim.new(1, 0) }, img)
+	else
+		local logo = makeIcon("hanger", icon, 30, WHITE)
+		logo.box.AnchorPoint = Vector2.new(0.5, 0.5)
+		logo.box.Position = UDim2.new(0.5, 0, 0.5, 1)
+	end
+
+	-- status dot: green kapag may naka-apply na outfit
+	local dot = new("Frame", {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, 0, 0, 0),
+		Size = UDim2.fromOffset(13, 13),
+		BackgroundColor3 = Color3.fromRGB(130, 140, 165),
+		BorderSizePixel = 0,
+		ZIndex = 3,
+	}, icon)
+	new("UICorner", { CornerRadius = UDim.new(1, 0) }, dot)
+	new("UIStroke", { Color = Color3.fromRGB(10, 14, 28), Thickness = 2 }, dot)
+	hooks.iconDot = dot
+	pressFX(icon)
+
+	-- edge tab (lalabas kapag naka-hide yung icon; i-tap para ibalik)
+	local edgeTab = new("TextButton", {
+		Name = "IconTab",
+		Text = "",
+		AutoButtonColor = false,
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 0, 0.5, 0),
+		Size = UDim2.fromOffset(20, 68),
+		BackgroundColor3 = WHITE,
+		BackgroundTransparency = 0.1,
+		BorderSizePixel = 0,
+		Visible = false,
+	}, gui)
+	table.insert(theme.grads, new("UIGradient", {
+		Rotation = 90,
+		Color = ColorSequence.new(CONFIG.Accent, CONFIG.Accent2),
+	}, edgeTab))
+	new("UICorner", { CornerRadius = UDim.new(0, 10) }, edgeTab)
+	addRim(edgeTab, 1, 0.3)
+	local edgeArrow = new("TextLabel", {
+		Size = UDim2.new(1, 0, 1, 0),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBlack,
+		Text = ">",
+		TextSize = 16,
+		TextColor3 = WHITE,
+	}, edgeTab)
+
+	-- quick menu (long-press sa icon)
+	local QW, QPAD, QBTN, QGAP = 160, 8, 30, 4
+	local items = {
+		{ "Hide icon", "hide" },
+		{ "Apply outfit", "apply" },
+		{ "Reset outfit", "reset" },
+		{ "Open settings", "settings" },
+	}
+	local QH = QPAD * 2 + #items * QBTN + (#items - 1) * QGAP
+	local catcher = new("TextButton", {
+		Size = UDim2.new(1, 0, 1, 0),
+		BackgroundTransparency = 1,
+		Text = "",
+		AutoButtonColor = false,
+		Visible = false,
+		ZIndex = 20,
+	}, gui)
+	local quick = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Size = UDim2.fromOffset(QW, QH),
+		BackgroundColor3 = WHITE,
+		BorderSizePixel = 0,
+		Visible = false,
+		ZIndex = 21,
+	}, gui)
+	glassFill(quick, 0.1)
+	new("UICorner", { CornerRadius = UDim.new(0, 18) }, quick)
+	addRim(quick, 1.2, 0.1)
+	local qScale = new("UIScale", { Scale = 1 }, quick)
+	new("UIPadding", {
+		PaddingLeft = UDim.new(0, QPAD),
+		PaddingRight = UDim.new(0, QPAD),
+		PaddingTop = UDim.new(0, QPAD),
+		PaddingBottom = UDim.new(0, QPAD),
+	}, quick)
+	new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, QGAP) }, quick)
+
+	local function closeQuick()
+		if not quick.Visible then
+			return
+		end
+		tween(qScale, { Scale = 0.85 }, 0.12)
+		task.delay(0.12, function()
+			quick.Visible = false
+			catcher.Visible = false
+		end)
+	end
+	catcher.MouseButton1Click:Connect(closeQuick)
+
+	for i, it in ipairs(items) do
+		local b = glassButton(quick, it[1], UDim2.new(1, 0, 0, QBTN), UDim2.new(0, 0, 0, 0), it[2] == "apply")
+		b.TextSize = 12
+		b.LayoutOrder = i
+		b.MouseButton1Click:Connect(function()
+			closeQuick()
+			if it[2] == "hide" then
+				hooks.dock()
+			elseif it[2] == "settings" then
+				hooks.openTab(4)
+			elseif hooks.act then
+				hooks.act(it[2])
+			end
+		end)
+	end
+
+	hooks.quick = function()
+		local ap, asz = icon.AbsolutePosition, icon.AbsoluteSize
+		local vp = gui.AbsoluteSize
+		local onLeft = (ap.X + asz.X / 2) < vp.X / 2
+		local cx = onLeft and (ap.X + asz.X + 10 + QW / 2) or (ap.X - 10 - QW / 2)
+		local cy = math.clamp(ap.Y + asz.Y / 2, QH / 2 + 8, math.max(QH / 2 + 8, vp.Y - QH / 2 - 8))
+		quick.Position = UDim2.fromOffset(cx, cy)
+		qScale.Scale = 0.85
+		quick.Visible = true
+		catcher.Visible = true
+		tween(qScale, { Scale = 1 }, 0.25, Enum.EasingStyle.Back)
+		play("Open")
+	end
+
+	-- idikit sa pinakamalapit na gilid pagkatapos i-drag
+	hooks.snap = function()
+		local ap, asz = icon.AbsolutePosition, icon.AbsoluteSize
+		local vp = gui.AbsoluteSize
+		local left = (ap.X + asz.X / 2) < vp.X / 2
+		local x = left and 10 or (vp.X - asz.X - 10)
+		local y = math.clamp(ap.Y, 10, math.max(10, vp.Y - asz.Y - 10))
+		tween(icon, { Position = UDim2.fromOffset(x, y) }, 0.3, Enum.EasingStyle.Back)
+	end
+
+	hooks.refreshIcon = function()
+		local enabled = hooks.iconReady and S.showIcon
+		icon.Size = UDim2.fromOffset(S.iconSize, S.iconSize)
+		icon.Visible = enabled and not S.iconDocked
+		edgeTab.Visible = enabled and S.iconDocked
+	end
+
+	hooks.dock = function()
+		local ap, asz = icon.AbsolutePosition, icon.AbsoluteSize
+		local vp = gui.AbsoluteSize
+		local cy = ap.Y + asz.Y / 2
+		local left = (ap.X + asz.X / 2) < vp.X / 2
+		edgeTab.AnchorPoint = Vector2.new(left and 0 or 1, 0.5)
+		edgeArrow.Text = left and ">" or "<"
+		edgeTab.Position = UDim2.new(left and 0 or 1, left and -24 or 24, 0, cy)
+		S.iconDocked = true
+		hooks.refreshIcon()
+		tween(edgeTab, { Position = UDim2.new(left and 0 or 1, 0, 0, cy) }, 0.35, Enum.EasingStyle.Back)
+		play("Close")
+	end
+
+	hooks.undock = function()
+		local left = edgeTab.AnchorPoint.X == 0
+		local cy = edgeTab.AbsolutePosition.Y + edgeTab.AbsoluteSize.Y / 2
+		local size = S.iconSize
+		local vp = gui.AbsoluteSize
+		icon.Position = UDim2.fromOffset(
+			left and 10 or (vp.X - size - 10),
+			math.clamp(cy - size / 2, 10, math.max(10, vp.Y - size - 10))
+		)
+		S.iconDocked = false
+		hooks.refreshIcon()
+		local isc = icon:FindFirstChildOfClass("UIScale")
+		if isc then
+			isc.Scale = 0
+			tween(isc, { Scale = 1 }, 0.45, Enum.EasingStyle.Back)
+		end
+		play("Open")
+	end
+	edgeTab.MouseButton1Click:Connect(function()
+		hooks.undock()
+	end)
 end
-pressFX(icon)
 
 ------------------------------------------------------------
 -- Tabs / open / hide
@@ -1481,8 +2236,10 @@ local function setTab(i, silent)
 	pageHome.Visible = (i == 1)
 	pageOutfit.Visible = (i == 2)
 	pageChar.Visible = (i == 3)
-	bar.Visible = (i ~= 1) -- Apply/Reset hindi kailangan sa Home
-	tween(indicator, { Position = UDim2.new((i - 1) / 3, 2, 0, 3) }, 0.3)
+	pageSet.Visible = (i == 4)
+	bar.Visible = (i == 2 or i == 3) -- Apply/Reset sa Outfit at Character lang
+	settingsBar.Visible = (i == 4)
+	tween(indicator, { Position = UDim2.fromOffset(6, 64 + (i - 1) * 56) }, 0.3, Enum.EasingStyle.Back)
 	for j = 1, #tabButtons do
 		local c = (j == i) and WHITE or MUTED
 		tabLabels[j].TextColor3 = c
@@ -1509,7 +2266,7 @@ local fit = 1
 local function updateFit()
 	local cam = workspace.CurrentCamera
 	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
-	fit = math.clamp(math.min((vp.Y - 24) / WIN_H, (vp.X - 24) / WIN_W, 1), 0.5, 1)
+	fit = math.clamp(math.min((vp.Y - 24) / WIN_H, (vp.X - 24) / WIN_W, 1), 0.5, 1) * S.scale
 	if isOpen then
 		winScale.Scale = fit
 	end
@@ -1559,7 +2316,15 @@ end
 minBtn.MouseButton1Click:Connect(function()
 	setOpen(false)
 end)
-makeDraggable(icon, icon, toggle)
+makeDraggable(icon, icon, toggle, function()
+	hooks.snap()
+end, function()
+	hooks.quick()
+end)
+hooks.openTab = function(i)
+	setTab(i)
+	setOpen(true)
+end
 makeDraggable(dragZone, window)
 connect(UserInputService.InputBegan, function(input, processed)
 	if not processed and input.KeyCode == CONFIG.ToggleKey then
@@ -2564,13 +3329,119 @@ resetBtn.MouseButton1Click:Connect(resetAll)
 connect(LocalPlayer.CharacterAdded, function(char)
 	table.clear(equipped)
 	equippedHair = nil
-	if not state.applied then
+	if not state.applied or not S.autoReapply then
 		return
 	end
 	char:WaitForChild("Humanoid", 10)
 	task.wait(1.5) -- let the game's own appearance load first
 	task.spawn(applyToCharacter, char)
 end)
+
+------------------------------------------------------------
+-- Settings logic (apply / collect / load)
+------------------------------------------------------------
+hooks.iconReady = false
+
+do
+	local function col2t(c)
+		return { math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5) }
+	end
+	local function t2col(t, fallback)
+		if type(t) == "table" and #t >= 3 then
+			return Color3.fromRGB(
+				math.clamp(tonumber(t[1]) or 0, 0, 255),
+				math.clamp(tonumber(t[2]) or 0, 0, 255),
+				math.clamp(tonumber(t[3]) or 0, 0, 255)
+			)
+		end
+		return fallback
+	end
+
+	hooks.collect = function()
+		saveSlot()
+		local acc = {}
+		for i = 1, CONFIG.MaxSlots do
+			if accIds[i] and accIds[i] ~= "" then
+				acc[tostring(i)] = accIds[i]
+			end
+		end
+		return {
+			shirt = digits(shirtBox.Text),
+			pants = digits(pantsBox.Text),
+			head = digits(headBox.Text),
+			face = digits(faceBox.Text),
+			hair = digits(hairBox.Text),
+			acc = acc,
+			slots = slots,
+			hairOn = hairSw.Get(),
+			solid = solidSw.Get(),
+			hairColor = col2t(hairPicker.Get()),
+			skinOn = skinSw.Get(),
+			skinColor = col2t(skinPicker.Get()),
+			hairTarget = hooks.target,
+		}
+	end
+
+	hooks.loadOutfit = function(d)
+		if type(d) ~= "table" then
+			return
+		end
+		shirtBox.Text = digits(d.shirt)
+		pantsBox.Text = digits(d.pants)
+		headBox.Text = digits(d.head)
+		faceBox.Text = digits(d.face)
+		hairBox.Text = digits(d.hair)
+		table.clear(accIds)
+		if type(d.acc) == "table" then
+			for k, v in pairs(d.acc) do
+				local i = tonumber(k)
+				if i and i >= 1 and i <= CONFIG.MaxSlots then
+					accIds[i] = digits(v)
+				end
+			end
+		end
+		if type(d.slots) == "number" then
+			slots = math.clamp(math.floor(d.slots), 1, CONFIG.MaxSlots)
+		end
+		slot = 1
+		refreshSlot()
+		hairPicker.Set(t2col(d.hairColor, hairPicker.Get()))
+		skinPicker.Set(t2col(d.skinColor, skinPicker.Get()))
+		hairSw.Set(d.hairOn == true)
+		solidSw.Set(d.solid ~= false)
+		skinSw.Set(d.skinOn == true)
+		hooks.target = (type(d.hairTarget) == "string") and d.hairTarget or nil
+		tLabel.Text = hooks.target or "Auto"
+	end
+
+	hooks.apply = function()
+		local t = SET.themes[S.theme] or SET.themes[1]
+		CONFIG.Accent, CONFIG.Accent2 = t[2], t[3]
+		theme.apply()
+		glassBg.BackgroundTransparency = S.glass
+		updateFit()
+		for _, snd in pairs(sounds) do
+			snd.Volume = S.volume
+		end
+		local okk, kc = pcall(function()
+			return Enum.KeyCode[S.menuKey]
+		end)
+		if okk and kc then
+			CONFIG.ToggleKey = kc
+		end
+		if hooks.refreshIcon then
+			hooks.refreshIcon()
+		end
+	end
+
+	hooks.act = function(name)
+		if name == "apply" then
+			applyAll()
+		elseif name == "reset" then
+			resetAll()
+		end
+	end
+end
 
 ------------------------------------------------------------
 -- Live color preview + HOME logic + startup loading screen
@@ -2835,6 +3706,13 @@ do
 			frames, acc = 0, 0
 			push(fpsHist, lastFps)
 			push(pingHist, lastPing)
+			if isOpen then
+				statLabel.Text = string.format("%d fps  ·  %d ms", lastFps, lastPing)
+				statDot.BackgroundColor3 = (lastFps >= 50 and GOOD) or (lastFps >= 30 and WARN) or BAD
+			end
+			if hooks.iconDot then
+				hooks.iconDot.BackgroundColor3 = state.applied and GOOD or Color3.fromRGB(130, 140, 165)
+			end
 			if isOpen and currentTab == 1 then
 				pcall(updateHome)
 			end
@@ -3429,19 +4307,74 @@ local function Destroy()
 	end
 	gui:Destroy()
 end
+hooks.save = function()
+	if not writefile then
+		setSetStatus("Executor can't save files", "err")
+		play("Error")
+		return
+	end
+	local ok, err = pcall(function()
+		writefile(SET.file, game:GetService("HttpService"):JSONEncode({
+			version = 1,
+			settings = S,
+			outfit = hooks.collect(),
+		}))
+	end)
+	if ok then
+		setSetStatus("Saved: " .. SET.file, "ok")
+		play("Success")
+	else
+		setSetStatus("Save failed: " .. string.sub(tostring(err), 1, 30), "err")
+		play("Error")
+	end
+end
+
+hooks.unload = function()
+	if not hooks.armed then
+		hooks.armed = true
+		unloadBtn.Text = "Tap again"
+		play("Click")
+		task.delay(3, function()
+			if hooks.armed and unloadBtn.Parent then
+				hooks.armed = false
+				unloadBtn.Text = "Unload"
+			end
+		end)
+		return
+	end
+	play("Close")
+	pcall(resetAll) -- ibalik muna yung original na itsura
+	task.wait(0.25)
+	Destroy()
+	env.ClothingHub = nil
+end
+
 env.ClothingHub = { Destroy = Destroy }
 
+if savedData and type(savedData.outfit) == "table" then
+	pcall(hooks.loadOutfit, savedData.outfit)
+end
 refreshSlot()
 icon.Visible = false
 
 local function showMain()
-	icon.Visible = true
-	local isc = icon:FindFirstChildOfClass("UIScale")
-	if isc then
-		isc.Scale = 0
-		tween(isc, { Scale = 1 }, 0.55, Enum.EasingStyle.Back)
+	hooks.iconReady = true
+	hooks.refreshIcon()
+	if icon.Visible then
+		local isc = icon:FindFirstChildOfClass("UIScale")
+		if isc then
+			isc.Scale = 0
+			tween(isc, { Scale = 1 }, 0.55, Enum.EasingStyle.Back)
+		end
 	end
 	setOpen(true)
+	if S.autoApplySaved and savedData and type(savedData.outfit) == "table" then
+		task.delay(1.2, function()
+			if not destroyed then
+				applyAll()
+			end
+		end)
+	end
 end
 
 if CONFIG.ShowLoading then
