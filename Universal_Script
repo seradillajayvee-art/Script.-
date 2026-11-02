@@ -1,5 +1,5 @@
 --==================================================================
--- ABILITY MENU - JAYVEE  (v6.4)
+-- ABILITY MENU - JAYVEE  (v6.5)
 -- Own-game LocalScript
 -- Place in: StarterPlayer > StarterPlayerScripts
 --
@@ -11,6 +11,16 @@
 --   MISC     : device info, sky box, anti lag, fast mode
 --   SETTINGS : theme, scale, sounds, animations, keybind, reset/unload
 --
+-- v6.4 CHANGES  (new major version: the access key is now ULTRAINSTINCTBYJAYVEEV6)
+--   * KEYBOARD OVERLAY has a new look (STYLE: Keyboard): the left side of a keyboard (ESC 1-4 / TAB Q W E R T /
+--     CAPS A S D F G / SHIFT Z X C V B / CTRL ALT SPACE) next to a mouse (left, right, wheel). Outlined keys,
+--     the keys you press turn blue. The old look is still there as STYLE: Classic.
+--   * TARGET LOCK / FINISHER / ATTACK DASH reach the enemy with DODGE HOPS (about 16 studs per hop, at the speed
+--     of your own dodge) instead of a teleport, so the game does not kick you. A real dodge always wins.
+--   * BULLET DODGE: beam / streak tracers and fast small bullets that pass close to you make you dodge.
+--   * AUTO FRIENDLY: your Roblox friends and / or your team are marked FRIENDLY by themselves.
+--   * TARGET HUD: name, HP bar and distance of the player you locked.
+
 -- v6.3 CHANGES
 --   * FRIENDLY / TARGET LOCK are leaderboard-style lists in the ABILITY tab (avatar, name, distance, HP and an
 --     UNFRIEND / UNTARGET button). Click a player with the MOUSE (button chosen in the FRIENDLY card, default
@@ -40,7 +50,7 @@
 --     you to that player, wherever he is.
 --   * FINISHER: you hit someone, he drops to low HP and runs away -> your next hit / punch teleports you to him.
 
--- v6.0 CHANGES
+-- v6.0CHANGES
 --   * KEYBOARD OVERLAY (SETTINGS tab, OBS style): shows only the keys you use - W A S D, SPACE / SHIFT, mouse
 --     M1 / M2 and your own custom keys (1 2 3 4 Q E R F by default). Keys light up while pressed.
 --     Movable (drag it), resizable, adjustable opacity, ignores typing in chat.
@@ -112,7 +122,7 @@
 --   * Damage fallback dodges even when no enemy is inside the radius.
 --==================================================================
 
-print("[JAYVEE] Ability Menu v5.13 loading...")
+print("[JAYVEE] Ability Menu v6.0 loading...")
 
 -- On-screen status banner: shows "loading", "loaded" or the exact ERROR on your screen.
 local function JV_Banner(text, isError)
@@ -163,7 +173,7 @@ local U = {} -- helper functions live here (Luau allows only 200 locals per scop
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local SCRIPT_VERSION = "v5.13"
+local SCRIPT_VERSION = "v6.0"
 local VERSION_MAJOR = SCRIPT_VERSION:match("%d+") or "4"
 local PASSWORD_PREFIX = "ULTRAINSTINCTBYJAYVEE"
 local PASSWORD = PASSWORD_PREFIX .. "V" .. VERSION_MAJOR
@@ -364,6 +374,15 @@ local Settings = {
 	OvAlpha = 0.35,               -- transparency of keys that are not pressed
 	OvX = 0.86,                   -- overlay centre (fraction of the screen)
 	OvY = 0.72,
+	OvStyle = "Keyboard",         -- Keyboard (left side of a keyboard + mouse) / Classic
+	OvTop = true,                 -- Keyboard style: ESC 1 2 3 4 row
+
+	-- v6.0  bullet dodge / auto friendly / target hud
+	BulletDodge = true,
+	BulletRadius = 8,             -- a tracer / bullet that passes closer than this many studs makes you dodge
+	AutoFriendRoblox = false,     -- your Roblox friends are marked FRIENDLY automatically
+	AutoFriendTeam = false,       -- players on your team are marked FRIENDLY automatically
+	TargetHud = true,             -- small panel with the locked target's name / HP / distance
 
 	-- v5.11  friendly / target lock / finisher
 	FriendlyOn = true,
@@ -413,6 +432,7 @@ U.CHOICES = {
 	TpMode = {"Dash", "Instant"},
 	SelectBtn = {"Middle", "Right", "Left", "Off"},
 	AutoRotate = {"Off", "Landscape", "All"},
+	OvStyle = {"Keyboard", "Classic"},
 }
 
 function U.fsReady()
@@ -502,6 +522,7 @@ function U.applySnapshot(snap)
 	Settings.FinRange = math.clamp(Settings.FinRange, 50, 400)
 	Settings.FinMemory = math.clamp(Settings.FinMemory, 3, 15)
 	Settings.TpGap = math.clamp(Settings.TpGap, 2, 8)
+	Settings.BulletRadius = math.clamp(Settings.BulletRadius, 4, 16)
 	for _, key in ipairs({"ThemeIndex", "AuraTintIndex", "ESPColorIndex"}) do
 		Settings[key] = math.max(1, math.floor(Settings[key]))
 	end
@@ -1723,28 +1744,28 @@ end
 
 local DODGE_CHAT = {
 	CALM = {
-		"Your eyes saw the attack. My body already answered. ⚡",
-		"You moved with intent. I moved without thought. 🥶",
-		"The attack was decided before it reached me. 👁️",
-		"I do not chase the opening. I simply appear beyond it. 🌌",
+		"Your eyes saw the attack. My body already answered. âš¡",
+		"You moved with intent. I moved without thought. ðŸ¥¶",
+		"The attack was decided before it reached me. ðŸ‘ï¸",
+		"I do not chase the opening. I simply appear beyond it. ðŸŒŒ",
 	},
 	ALERT = {
-		"Now I can feel every move before it happens. ⚡",
-		"Your rhythm is getting easier to read. 🐉",
-		"The closer you push me, the faster instinct takes over. 👁️",
-		"I heard the attack before your hand even moved. 🥶",
+		"Now I can feel every move before it happens. âš¡",
+		"Your rhythm is getting easier to read. ðŸ‰",
+		"The closer you push me, the faster instinct takes over. ðŸ‘ï¸",
+		"I heard the attack before your hand even moved. ðŸ¥¶",
 	},
 	INTENSE = {
-		"Every second hurts. Every instinct sharpens. ⚡",
-		"You pushed me this far. Now survive the response. 🔥",
-		"Pain is not slowing me down. It is removing hesitation. 🩶",
-		"My body has stopped asking permission to move. 👁️",
+		"Every second hurts. Every instinct sharpens. âš¡",
+		"You pushed me this far. Now survive the response. ðŸ”¥",
+		"Pain is not slowing me down. It is removing hesitation. ðŸ©¶",
+		"My body has stopped asking permission to move. ðŸ‘ï¸",
 	},
 	CRITICAL = {
-		"One more hit will not be enough to catch me. ⚡",
-		"At the edge of defeat, instinct becomes absolute. 🥶",
-		"This body is wounded. The instinct is not. 🔥",
-		"You finally pushed me to my limit. Now watch me disappear. 🌌",
+		"One more hit will not be enough to catch me. âš¡",
+		"At the edge of defeat, instinct becomes absolute. ðŸ¥¶",
+		"This body is wounded. The instinct is not. ðŸ”¥",
+		"You finally pushed me to my limit. Now watch me disappear. ðŸŒŒ",
 	},
 }
 local lastDodgeChatIndex = 0
@@ -2554,6 +2575,7 @@ local function senseStep()
 	if not threat and now >= nextScan then
 		nextScan = now + 0.03
 		threat = U.scanThreats(now)
+		if not threat and Settings.BulletDodge and U.scanBullets then threat = U.scanBullets(now) end
 	end
 
 	-- melee / damage / contact
@@ -4146,12 +4168,14 @@ function U.friendApply(plr)
 			U.saveFriends()
 		end
 	end
+	if U.autoFriendCheck then U.autoFriendCheck(plr) end
 end
 for _, plr in ipairs(Players:GetPlayers()) do U.friendApply(plr) end
 bind(Players.PlayerAdded, U.friendApply)
 
 function U.addFriend(key)
 	U.friendly[key] = true
+	if U.autoSkip then U.autoSkip[key] = nil; U.autoFriend[key] = nil end   -- now a real (saved) friend
 	if typeof(key) == "Instance" and key:IsA("Player") then
 		U.friendBook[key.UserId] = key.Name
 		U.saveFriends()
@@ -4160,6 +4184,7 @@ end
 
 function U.removeFriend(key)
 	U.friendly[key] = nil
+	if U.autoSkip then U.autoSkip[key] = true; U.autoFriend[key] = nil end   -- removed by hand: never auto-mark again
 	if typeof(key) == "Instance" and key:IsA("Player") then
 		U.friendBook[key.UserId] = nil
 		U.saveFriends()
@@ -4484,9 +4509,9 @@ function U.tpTo(model, now)
 	local pos = tr.Position + flat.Unit * Settings.TpGap
 	pos = Vector3.new(pos.X, tr.Position.Y, pos.Z)
 	if Settings.TpMode == "Dash" then
-		if dodging then return false end
+		if dodging or U.chase.active then return false end
 		U.tp.last = now
-		task.spawn(U.dashTo, model, pos)
+		U.chaseStart(model)
 		return true
 	end
 	root.CFrame = CFrame.lookAt(pos, Vector3.new(tr.Position.X, pos.Y, tr.Position.Z))
@@ -4495,11 +4520,15 @@ function U.tpTo(model, now)
 	return true
 end
 
--- DASH: a dodge that ends next to the enemy (same sound / afterimage / smoke / trail as a dodge)
-function U.dashTo(model, dest)
-	if dodging or not root or not root.Parent then return end
+-- DODGE CHASE: you reach the enemy with dodge-style HOPS (about 16 studs each, at the speed of your own dodge),
+-- never with one big teleport (a teleport can get you kicked).  A real dodge always wins: the chase stops.
+U.chase = {token = 0, active = false}
+
+-- one hop: a short dodge slide (same sound / afterimage / smoke as a dodge)
+function U.dashHop(model, dest, dur, first)
+	if dodging or not root or not root.Parent then return false end
 	local tr = U.getRoot(model)
-	if not tr then return end
+	if not tr then return false end
 	dodging = true
 	U.lastDodgeAt = os.clock()
 	dodgeToken += 1
@@ -4507,38 +4536,76 @@ function U.dashTo(model, dest)
 	followToken += 1
 	following = false
 
-	local startPos = root.Position
-	local startCF = root.CFrame
+	local startPos, startCF = root.Position, root.CFrame
 	local endCF = CFrame.lookAt(dest, Vector3.new(tr.Position.X, dest.Y, tr.Position.Z))
-	local dur = math.clamp((dest - startPos).Magnitude / 170, 0.09, 0.32)
+	if first then U.playRandomDodgeSound() end
+	U.createAfterimage(0.4)
 
-	U.playRandomDodgeSound()
-	U.createAfterimage(0.45)
-	U.smokePuff(startPos)
-
-	local ghosts, t0 = 0, os.clock()
+	local t0 = os.clock()
 	while true do
 		if myToken ~= dodgeToken or not root or not root.Parent then
 			if myToken == dodgeToken then dodging = false end
-			return
+			return false
 		end
 		local a = math.clamp((os.clock() - t0) / dur, 0, 1)
 		local e = 1 - (1 - a) ^ 3
 		root.CFrame = startCF:Lerp(endCF, e)
 		root.AssemblyLinearVelocity = Vector3.zero
-		if ghosts < 2 and a >= (ghosts + 1) / 3 then
-			ghosts += 1
-			U.createAfterimage(0.35)
-		end
 		if a >= 1 then break end
 		RunService.RenderStepped:Wait()
 	end
 	U.createTrail(startPos + Vector3.new(0, 1, 0), dest + Vector3.new(0, 1, 0))
 	U.smokePuff(dest)
-	task.delay(0.1, function()
-		if myToken == dodgeToken then dodging = false end
+	if myToken == dodgeToken then dodging = false end
+	return true
+end
+
+function U.chaseTo(model, token)
+	local C = U.chase
+	C.active = true
+	local baseAct = ACTIVITY[Settings.DodgeActivity] or ACTIVITY.High
+	local hopDur = math.clamp(baseAct.dur * 1.25, 0.12, 0.26)
+	local HOP = 16
+	local t0 = os.clock()
+	local last = U.lastDodgeAt or 0
+	local first = true
+	while token == C.token do
+		local tr, hum = U.getRoot(model), U.getHum(model)
+		if not tr or not hum or hum.Health <= 0 or not root or not root.Parent then break end
+		if not humanoid or humanoid.Health <= 0 then break end
+		if (U.lastDodgeAt or 0) > last + 0.001 then break end      -- a real dodge happened: it wins
+		if os.clock() - t0 > 2.2 then break end
+		local from = root.Position
+		local flat = Vector3.new(from.X - tr.Position.X, 0, from.Z - tr.Position.Z)
+		if flat.Magnitude < 0.5 then flat = -tr.CFrame.LookVector end
+		local dest = tr.Position + flat.Unit * Settings.TpGap
+		dest = Vector3.new(dest.X, tr.Position.Y, dest.Z)
+		local step = dest - from
+		if step.Magnitude <= 1.5 then break end                    -- already next to him
+		if step.Magnitude > HOP then dest = from + step.Unit * HOP end
+		if dodging then
+			task.wait(0.03)
+		else
+			if not U.dashHop(model, dest, hopDur, first) then break end
+			first = false
+			last = U.lastDodgeAt or last
+			task.wait(0.04)
+		end
+	end
+	if token == C.token and Settings.FollowAfterDodge and model.Parent and root and U.getRoot(model) then
+		pcall(U.startFollow, model)
+	end
+end
+
+function U.chaseStart(model)
+	local C = U.chase
+	C.token += 1
+	local my = C.token
+	task.spawn(function()
+		local ok, err = pcall(U.chaseTo, model, my)
+		if not ok then warn("[JAYVEE] chase error:", err) end
+		if C.token == my then C.active = false end
 	end)
-	if Settings.FollowAfterDodge and model.Parent then pcall(U.startFollow, model) end
 end
 
 ----------------------------------------------------- DODGE AI
@@ -4680,6 +4747,228 @@ function U.aiRefine(dest, targetRoot, threat)
 	if score(alt2) > score(dest) + 8 then return Vector3.new(alt2.X, origin.Y, alt2.Z) end
 	return nil
 end
+
+----------------------------------------------------- BULLET DODGE (tracers / bullets)
+U.bul = {list = {}, nextClean = 0}
+U.BULLET_NAMES = {"bullet", "tracer", "projectile", "pellet", "laser", "missile", "rocket", "slug"}
+
+-- our own effects / our own character never count
+function U.bulletOurs(inst)
+	if inst:GetAttribute("JV_FX") then return true end
+	if character and inst:IsDescendantOf(character) then return true end
+	local a = inst.Parent
+	for _ = 1, 3 do
+		if not a or a == workspace then break end
+		if a:GetAttribute("JV_FX") then return true end
+		a = a.Parent
+	end
+	return false
+end
+
+-- is the closest player / NPC to this point one of your friendlies? (a friend shooting is no threat)
+function U.friendlyNearPos(pos)
+	if not Settings.FriendlyOn or next(U.friendly) == nil then return false end
+	local best, bestD = nil, 14
+	U.eachTarget(function(m)
+		local tr = U.getRoot(m)
+		if tr then
+			local dd = (tr.Position - pos).Magnitude
+			if dd < bestD then bestD, best = dd, m end
+		end
+	end)
+	return best ~= nil and U.isFriendly(best)
+end
+
+-- distance from point p to the segment a-b
+function U.segDist(a, b, p)
+	local ab = b - a
+	local l2 = ab:Dot(ab)
+	if l2 < 1e-6 then return (p - a).Magnitude end
+	local t = math.clamp((p - a):Dot(ab) / l2, 0, 1)
+	return (p - (a + ab * t)).Magnitude
+end
+
+-- a new Beam (hit-scan tracer), a thin long part (tracer streak) or a small named / trailed part (bullet)
+function U.bulletAdded(d)
+	if not Settings.BulletDodge then return end
+	if d.ClassName == "Beam" then
+		U.bul.list[#U.bul.list + 1] = {kind = "beam", inst = d, t = os.clock()}
+	elseif d:IsA("BasePart") then
+		local n = string.lower(d.Name)
+		local named = false
+		for _, w in ipairs(U.BULLET_NAMES) do
+			if string.find(n, w, 1, true) then named = true break end
+		end
+		task.defer(function()      -- size and children are set right after the part is parented
+			if not d.Parent then return end
+			local sz = d.Size
+			local big, small = math.max(sz.X, sz.Y, sz.Z), math.min(sz.X, sz.Y, sz.Z)
+			local mid = sz.X + sz.Y + sz.Z - big - small
+			local streak = big >= 3 and mid <= 1.2 and small <= 1.2 and big >= mid * 3
+			local hasTrail = d:FindFirstChildWhichIsA("Trail") ~= nil or d:FindFirstChildWhichIsA("Beam") ~= nil
+			local bulletish = (named or hasTrail) and big <= 3.5
+			if streak or bulletish then
+				U.bul.list[#U.bul.list + 1] = {kind = streak and "streak" or "bullet", inst = d, t = os.clock()}
+			end
+		end)
+	end
+end
+bind(workspace.DescendantAdded, U.bulletAdded)
+
+-- a tracer / bullet that passes closer than BULLET RADIUS makes you dodge (sidestep it)
+function U.scanBullets(now)
+	if not Settings.BulletDodge or not root or not root.Parent then return nil end
+	local B = U.bul
+	local list = B.list
+	if #list == 0 then return nil end
+	if now > B.nextClean then
+		B.nextClean = now + 0.5
+		for i = #list, 1, -1 do
+			local it = list[i]
+			if not it.inst.Parent or now - it.t > 1.5 then table.remove(list, i) end
+		end
+	end
+	local rp = root.Position + root.AssemblyLinearVelocity * 0.08
+	local R = Settings.BulletRadius
+	local best, bestD, bestItem = nil, math.huge, nil
+	for _, it in ipairs(list) do
+		local inst = it.inst
+		if inst.Parent and (it.cd or 0) <= now and now - it.t <= 1.2 and not U.bulletOurs(inst) then
+			local d, dir
+			if it.kind == "beam" then
+				local a0, a1 = inst.Attachment0, inst.Attachment1
+				if inst.Enabled and a0 and a1 then
+					local A, Bp = a0.WorldPosition, a1.WorldPosition
+					if (Bp - A).Magnitude >= 8 and (A - rp).Magnitude > 6 then
+						if it.friendly == nil then it.friendly = U.friendlyNearPos(A) end
+						if not it.friendly then
+							local dd = U.segDist(A, Bp, rp)
+							if dd <= R then d, dir = dd, (Bp - A).Unit end
+						end
+					end
+				end
+			elseif it.kind == "streak" then
+				local sz = inst.Size
+				local big = math.max(sz.X, sz.Y, sz.Z)
+				local axis = (sz.X == big) and inst.CFrame.RightVector
+					or ((sz.Y == big) and inst.CFrame.UpVector or inst.CFrame.LookVector)
+				local A, Bp = inst.Position - axis * big / 2, inst.Position + axis * big / 2
+				if (inst.Position - rp).Magnitude > 6 then
+					if it.friendly == nil then
+						it.friendly = U.friendlyNearPos(A) or U.friendlyNearPos(Bp)
+					end
+					if not it.friendly then
+						local dd = U.segDist(A, Bp, rp)
+						if dd <= R then d, dir = dd, axis end
+					end
+				end
+			else   -- small fast bullet: where is it going?
+				local pos = inst.Position
+				local vel = inst.AssemblyLinearVelocity
+				if it.lp then
+					local dt = now - it.lt
+					if dt > 0.016 then
+						local mv = (pos - it.lp) / dt
+						if mv.Magnitude > vel.Magnitude then vel = mv end
+						it.lp, it.lt = pos, now
+					end
+				else
+					it.lp, it.lt, it.origin = pos, now, pos
+				end
+				local sp = vel.Magnitude
+				if sp >= 60 and sp < 6000 and (pos - rp).Magnitude > 5 then
+					local tca = (rp - pos):Dot(vel) / vel:Dot(vel)
+					if tca > 0 and tca <= 0.7 then
+						local closest = (pos + vel * tca - rp).Magnitude
+						if closest <= R then
+							if it.friendly == nil then it.friendly = U.friendlyNearPos(it.origin or pos) end
+							if not it.friendly then d, dir = closest, vel end
+						end
+					end
+				end
+			end
+			if d and d < bestD then bestD, best, bestItem = d, dir, it end
+		end
+	end
+	if not best then return nil end
+	bestItem.cd = now + 0.45
+	return {away = false, dir = best, name = "BULLET TRACER", dist = math.clamp(R + 4, 9, 20), bullet = true}
+end
+
+----------------------------------------------------- AUTO FRIENDLY (Roblox friends / your team)
+U.autoFriend = setmetatable({}, {__mode = "k"})   -- [Player] = true  (marked automatically, not saved)
+U.autoSkip = setmetatable({}, {__mode = "k"})     -- [Player] = true  (you removed him by hand: do not mark him again)
+
+function U.autoFriendCheck(plr)
+	if plr == player or U.autoSkip[plr] or U.friendBook[plr.UserId] then return end
+	local byTeam = Settings.AutoFriendTeam and player.Team ~= nil and plr.Team == player.Team
+	if byTeam then
+		U.friendly[plr] = true
+		U.autoFriend[plr] = true
+	elseif Settings.AutoFriendRoblox then
+		task.spawn(function()
+			local ok, isFriend = pcall(function() return player:IsFriendsWith(plr.UserId) end)
+			if ok and isFriend and Settings.AutoFriendRoblox and plr.Parent and not U.autoSkip[plr] then
+				U.friendly[plr] = true
+				U.autoFriend[plr] = true
+				U.markSync()
+			end
+		end)
+	end
+end
+
+-- the two switches changed: take the automatic marks back and mark everybody again
+U.reg(function()
+	local sig = tostring(Settings.AutoFriendRoblox) .. tostring(Settings.AutoFriendTeam)
+	if sig == U.afSig then return end
+	U.afSig = sig
+	for plr in pairs(U.autoFriend) do U.friendly[plr] = nil end
+	table.clear(U.autoFriend)
+	for _, plr in ipairs(Players:GetPlayers()) do U.autoFriendCheck(plr) end
+	U.markSync()
+end)
+
+----------------------------------------------------- TARGET HUD (name / HP / distance of the locked player)
+U.THUD = {}
+U.THUD.frame = new("Frame", {
+	Name = "TargetHud", AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 52),
+	Size = UDim2.fromOffset(230, 40), BackgroundColor3 = COL.bg, BackgroundTransparency = 0.25,
+	BorderSizePixel = 0, Visible = false,
+}, gui)
+U.corner(U.THUD.frame, 10)
+stroke(U.THUD.frame, 1.2, 0.5, Color3.fromRGB(165, 165, 170))
+U.THUD.name = new("TextLabel", {
+	BackgroundTransparency = 1, Position = UDim2.fromOffset(10, 4), Size = UDim2.new(1, -20, 0, 16), Text = "",
+	Font = Enum.Font.GothamBold, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
+	TextColor3 = COL.text, TextTruncate = Enum.TextTruncate.AtEnd,
+}, U.THUD.frame)
+U.THUD.bar = new("Frame", {
+	Position = UDim2.fromOffset(10, 25), Size = UDim2.new(1, -20, 0, 8), BackgroundColor3 = COL.off, BorderSizePixel = 0,
+}, U.THUD.frame)
+U.corner(U.THUD.bar, 4)
+U.THUD.fill = new("Frame", {Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.fromRGB(80, 210, 120), BorderSizePixel = 0}, U.THUD.bar)
+U.corner(U.THUD.fill, 4)
+
+U.reg(function()
+	local H = U.THUD
+	local m = (unlocked and Settings.TargetHud and Settings.TargetLockOn) and U.nearestTargetModel() or nil
+	if not m then
+		H.frame.Visible = false
+		return
+	end
+	local hum, tr = U.getHum(m), U.getRoot(m)
+	if not hum or not tr or not root then
+		H.frame.Visible = false
+		return
+	end
+	local frac = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
+	local plr = Players:GetPlayerFromCharacter(m)
+	H.name.Text = string.format("TARGET  %s  -  %d studs  -  HP %d%%",
+		plr and plr.DisplayName or m.Name, math.floor((tr.Position - root.Position).Magnitude + 0.5), math.floor(frac * 100 + 0.5))
+	H.fill.Size = UDim2.fromScale(frac, 1)
+	H.fill.BackgroundColor3 = Color3.fromRGB(235, 70, 70):Lerp(Color3.fromRGB(80, 210, 120), frac)
+	H.frame.Visible = true
+end, true)
 
 -- FINISHER: remember who you hit
 U.fin = {victim = nil, t = 0, hp = setmetatable({}, {__mode = "k"}), nextPoll = 0}
@@ -4914,7 +5203,18 @@ do
 	end)
 	U.infoText(cad, function()
 		return "When you hit / punch / use a skill and an enemy is INSIDE the circle, you dodge-dash right next to him (dodge effects, no hard teleport) so your hit lands even if he keeps dodging. TARGET LOCK and FINISHER use the same move.\n"
-			.. "MOVE STYLE: DASH = fast dodge-style slide, INSTANT = jump straight to him."
+			.. "MOVE STYLE: DASH = dodge-style hops at your dodge speed (safe - no teleport kick), INSTANT = a real teleport (the game can kick you for it)."
+	end, false, 10)
+
+	-- BULLET DODGE
+	local cbu = U.makeCard(p, "BULLET DODGE", "Sees a bullet tracer - dodges")
+	U.toggleRow(cbu, "BULLET DODGE", function() return Settings.BulletDodge end, function(v) Settings.BulletDodge = v end)
+	U.stepperRow(cbu, "BULLET RADIUS", function() return U.fmt(Settings.BulletRadius) .. " studs" end,
+		U.adjust("BulletRadius", 1, 4, 16))
+	U.infoText(cbu, function()
+		return "Dodges when a bullet tracer (beam or streak) or a fast small bullet passes closer than BULLET RADIUS to you. You sidestep the line of fire.\n"
+			.. "Tracers of your own gun, your own effects and your FRIENDLY players are ignored.\n"
+			.. "Note: hit-scan guns damage you the moment they fire, so the tracer helps against the NEXT shots (and against slow bullets)."
 	end, false, 10)
 
 	-- FRIENDLY: click / tap = BLUE, saved list, leaderboard style
@@ -4923,6 +5223,8 @@ do
 	U.choiceRow(cfr, "PC CLICK BUTTON", function() return Settings.SelectBtn end, function()
 		Settings.SelectBtn = U.cycleList(U.CHOICES.SelectBtn, Settings.SelectBtn)
 	end)
+	U.toggleRow(cfr, "AUTO: ROBLOX FRIENDS", function() return Settings.AutoFriendRoblox end, function(v) Settings.AutoFriendRoblox = v end)
+	U.toggleRow(cfr, "AUTO: MY TEAM", function() return Settings.AutoFriendTeam end, function(v) Settings.AutoFriendTeam = v end)
 	U.infoText(cfr, function()
 		return "PC: " .. U.clickName() .. " on a player = FRIENDLY. He turns BLUE and none of his punches / abilities make you dodge. Click him again to remove him.\n"
 			.. "PHONE: tap a player.\n"
@@ -4943,10 +5245,11 @@ do
 	-- TARGET LOCK: double click / tap = GREY, every hit dashes you to him
 	local ctl = U.makeCard(p, "TARGET LOCK", "Double click / tap a player: GREY - your hits dash you to him")
 	U.toggleRow(ctl, "TARGET LOCK", function() return Settings.TargetLockOn end, function(v) Settings.TargetLockOn = v end)
+	U.toggleRow(ctl, "TARGET HUD", function() return Settings.TargetHud end, function(v) Settings.TargetHud = v end)
 	U.stepperRow(ctl, "STOP DISTANCE", function() return U.fmt(Settings.TpGap) .. " studs" end,
 		U.adjust("TpGap", 0.5, 2, 8))
 	U.infoText(ctl, function()
-		return "PC: DOUBLE " .. U.clickName() .. " on a player = TARGET LOCK. PHONE: double tap. He turns GREY and every hit / punch / skill you do dodge-dashes you next to him, wherever you are. Do it again (or press UNTARGET) to unlock.\n"
+		return "PC: DOUBLE " .. U.clickName() .. " on a player = TARGET LOCK. PHONE: double tap. He turns GREY and every hit / punch / skill you do makes you chase him with dodge hops (no teleport), wherever he is. Do it again (or press UNTARGET) to unlock.\n"
 			.. "You can lock several players - you dash to the closest one."
 	end, false, 10)
 	U.buildList(ctl, "target", U.targetEntries, Color3.fromRGB(165, 165, 170), {
@@ -6173,7 +6476,21 @@ U.KO.rootStroke = stroke(U.KO.root, 1.5, 0.2, theme().a)
 U.KO.rootStroke.Enabled = false
 U.KO.holder = new("Frame", {BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1)}, U.KO.root)
 
+U.KO_BLUE = Color3.fromRGB(33, 94, 255)
+
 function U.koPaint(c)
+	if c.kb then
+		-- keyboard style: dark outlined keys, the pressed ones turn blue
+		if c.down then
+			c.frame.BackgroundColor3 = U.KO_BLUE
+			c.frame.BackgroundTransparency = 0.05
+		else
+			c.frame.BackgroundColor3 = Color3.fromRGB(16, 16, 22)
+			c.frame.BackgroundTransparency = c.zone and 1 or Settings.OvAlpha
+		end
+		if c.label then c.label.TextColor3 = Color3.new(1, 1, 1) end
+		return
+	end
 	if c.down then
 		c.frame.BackgroundColor3 = theme().a
 		c.frame.BackgroundTransparency = 0.05
@@ -6185,7 +6502,7 @@ function U.koPaint(c)
 	end
 end
 
-function U.koBuild()
+function U.koBuildClassic()
 	local K = U.KO
 	for _, c in ipairs(K.holder:GetChildren()) do c:Destroy() end
 	K.cells = {}
@@ -6272,10 +6589,167 @@ function U.koBuild()
 	for _, c in ipairs(K.cells) do U.koPaint(c) end
 end
 
+-- STYLE "Keyboard": the left side of a keyboard + a mouse (outlined keys, pressed keys turn blue)
+function U.koBuildKeyboard()
+	local K = U.KO
+	for _, c in ipairs(K.holder:GetChildren()) do c:Destroy() end
+	K.cells = {}
+	local KS, GAP = 28, 3
+	local PT = KS + GAP
+	local WHITE, DARK = Color3.new(1, 1, 1), Color3.fromRGB(16, 16, 22)
+
+	-- {KeyCode name, label, x (key units), width (key units), [second key that lights the same cell]}
+	local ROWS = {
+		top = {
+			{"Escape", "ESC", 0, 1}, {"One", "1", 1.25, 1}, {"Two", "2", 2.25, 1},
+			{"Three", "3", 3.25, 1}, {"Four", "4", 4.25, 1},
+		},
+		letters1 = {
+			{"Tab", "TAB", 0, 1.5}, {"Q", "Q", 1.5, 1}, {"W", "W", 2.5, 1}, {"E", "E", 3.5, 1},
+			{"R", "R", 4.5, 1}, {"T", "T", 5.5, 1},
+		},
+		letters2 = {
+			{"CapsLock", "CAPS", 0, 1.75}, {"A", "A", 1.75, 1}, {"S", "S", 2.75, 1}, {"D", "D", 3.75, 1},
+			{"F", "F", 4.75, 1}, {"G", "G", 5.75, 1},
+		},
+		shift = {
+			{"LeftShift", "SHIFT", 0, 2.25, "RightShift"}, {"Z", "Z", 2.25, 1}, {"X", "X", 3.25, 1},
+			{"C", "C", 4.25, 1}, {"V", "V", 5.25, 1}, {"B", "B", 6.25, 1},
+		},
+		bottom = {
+			{"LeftControl", "CTRL", 0, 1.25, "RightControl"}, {"LeftAlt", "ALT", 1.25, 1.25, "RightAlt"},
+			{"Space", "", 2.5, 4.75},
+		},
+	}
+	local order = {}
+	if Settings.OvTop then order[#order + 1] = ROWS.top end
+	if Settings.OvMove then
+		order[#order + 1] = ROWS.letters1
+		order[#order + 1] = ROWS.letters2
+	end
+	if Settings.OvJump then
+		order[#order + 1] = ROWS.shift
+		order[#order + 1] = ROWS.bottom
+	end
+
+	local shown = {}
+	local function addKey(name, label, x, w, alt, ry)
+		local ok, kc = pcall(function() return Enum.KeyCode[name] end)
+		if not ok or not kc then return end
+		local kc2
+		if alt then
+			local ok2, v = pcall(function() return Enum.KeyCode[alt] end)
+			if ok2 then kc2 = v end
+		end
+		local f = new("Frame", {
+			Position = UDim2.fromOffset(math.floor(x * PT), ry * PT),
+			Size = UDim2.fromOffset(math.floor(w * PT) - GAP, KS),
+			BackgroundColor3 = DARK, BackgroundTransparency = Settings.OvAlpha, BorderSizePixel = 0,
+		}, K.holder)
+		U.corner(f, 7)
+		stroke(f, 1.5, 0.1, WHITE)
+		local l = new("TextLabel", {
+			BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Text = label, TextScaled = true,
+			Font = Enum.Font.GothamBold, TextColor3 = WHITE,
+		}, f)
+		new("UITextSizeConstraint", {MaxTextSize = 13, MinTextSize = 6}, l)
+		new("UIPadding", {
+			PaddingLeft = UDim.new(0, 3), PaddingRight = UDim.new(0, 3),
+			PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4),
+		}, l)
+		K.cells[#K.cells + 1] = {frame = f, label = l, kc = kc, kc2 = kc2, down = false, kb = true}
+		shown[name] = true
+	end
+
+	local blockW, blockH = 0, 0
+	for r, row in ipairs(order) do
+		for _, k in ipairs(row) do
+			addKey(k[1], k[2], k[3], k[4], k[5], r - 1)
+			blockW = math.max(blockW, math.floor((k[3] + k[4]) * PT) - GAP)
+		end
+		blockH = r * PT - GAP
+	end
+
+	-- custom keys that are not on the board (or whose rows are hidden): extra rows underneath, 6 per row
+	local extras = {}
+	for _, n in ipairs(U.koParseCustom()) do
+		if not shown[n] then extras[#extras + 1] = n end
+	end
+	local ry = #order
+	for i = 1, #extras, 6 do
+		for j = i, math.min(i + 5, #extras) do
+			addKey(extras[j], U.koLabel(extras[j]), j - i, 1, nil, ry)
+			blockW = math.max(blockW, (j - i + 1) * PT - GAP)
+		end
+		ry += 1
+		blockH = ry * PT - GAP
+	end
+
+	-- the mouse: left / right button and the wheel
+	local W, H = blockW, blockH
+	if Settings.OvMouse then
+		local MW, MH = math.floor(2.3 * PT), math.floor(3.9 * PT)
+		local x0 = blockW > 0 and (blockW + math.floor(PT * 0.7)) or 0
+		local body = new("CanvasGroup", {
+			Position = UDim2.fromOffset(x0, 0), Size = UDim2.fromOffset(MW, MH),
+			BackgroundColor3 = DARK, BackgroundTransparency = Settings.OvAlpha, BorderSizePixel = 0,
+		}, K.holder)
+		U.corner(body, math.floor(MW * 0.45))
+		stroke(body, 1.5, 0.1, WHITE)
+		local function zone(px, py, sx, sy, button)
+			local z = new("Frame", {
+				Position = UDim2.fromScale(px, py), Size = UDim2.fromScale(sx, sy),
+				BackgroundColor3 = DARK, BackgroundTransparency = 1, BorderSizePixel = 0,
+			}, body)
+			K.cells[#K.cells + 1] = {frame = z, mouse = button, down = false, kb = true, zone = true}
+			return z
+		end
+		zone(0, 0, 0.5, 0.46, Enum.UserInputType.MouseButton1)
+		zone(0.5, 0, 0.5, 0.46, Enum.UserInputType.MouseButton2)
+		new("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(0.5, 0), Size = UDim2.new(0, 1, 0.46, 0),
+			BackgroundColor3 = WHITE, BackgroundTransparency = 0.15, BorderSizePixel = 0,
+		}, body)
+		new("Frame", {
+			Position = UDim2.fromScale(0, 0.46), Size = UDim2.new(1, 0, 0, 1),
+			BackgroundColor3 = WHITE, BackgroundTransparency = 0.15, BorderSizePixel = 0,
+		}, body)
+		local wheel = zone(0.415, 0.09, 0.17, 0.24, Enum.UserInputType.MouseButton3)
+		U.corner(wheel, 5)
+		stroke(wheel, 1.5, 0.1, WHITE)
+		W = x0 + MW
+		H = math.max(blockH, MH)
+	end
+
+	K.root.Size = UDim2.fromOffset(math.max(W, 1), math.max(H, 1))
+	for _, c in ipairs(K.cells) do U.koPaint(c) end
+end
+
+function U.koBuild()
+	if Settings.OvStyle == "Classic" then U.koBuildClassic() else U.koBuildKeyboard() end
+end
+
+-- keep the overlay fully on the screen (the keyboard style is bigger)
+function U.koFit()
+	local K = U.KO
+	if K.drag then return end
+	local size = gui.AbsoluteSize
+	if size.X < 1 or size.Y < 1 then return end
+	local half = K.root.AbsoluteSize / 2
+	local lx, ly = math.min(half.X / size.X, 0.5), math.min(half.Y / size.Y, 0.5)
+	local pos = UDim2.fromScale(math.clamp(Settings.OvX, lx, 1 - lx), math.clamp(Settings.OvY, ly, 1 - ly))
+	if K.root.Position ~= pos then K.root.Position = pos end
+end
+
 -- live key state: polled every frame so it always matches what you really press
 function U.koStep()
 	local K = U.KO
 	if not K.on then return end
+	local now = os.clock()
+	if now > (K.nextFit or 0) then
+		K.nextFit = now + 0.25
+		U.koFit()
+	end
 	local typing = UIS:GetFocusedTextBox() ~= nil   -- typing in chat / a text box: do not light up keys
 	for _, c in ipairs(K.cells) do
 		local down
@@ -6284,7 +6758,7 @@ function U.koStep()
 		elseif typing then
 			down = false
 		else
-			down = UIS:IsKeyDown(c.kc)
+			down = UIS:IsKeyDown(c.kc) or (c.kc2 ~= nil and UIS:IsKeyDown(c.kc2))
 		end
 		if down ~= c.down then
 			c.down = down
@@ -6324,13 +6798,13 @@ U.reg(function()
 	K.on = (unlocked and Settings.KeyOverlay) and true or false
 	K.root.Visible = K.on
 	if not K.on then return end
-	local sig = table.concat({tostring(Settings.OvMove), tostring(Settings.OvJump), tostring(Settings.OvMouse), Settings.OvCustom}, "|")
+	local sig = table.concat({tostring(Settings.OvMove), tostring(Settings.OvJump), tostring(Settings.OvMouse), tostring(Settings.OvTop), Settings.OvStyle, Settings.OvCustom}, "|")
 	if sig ~= K.sig then
 		K.sig = sig
 		U.koBuild()
 	end
-	K.root.Position = UDim2.fromScale(Settings.OvX, Settings.OvY)
 	K.scale.Scale = Settings.OvScale
+	U.koFit()
 	K.root.Active = K.moveMode
 	K.root.BackgroundTransparency = K.moveMode and 0.65 or 1
 	K.rootStroke.Enabled = K.moveMode
@@ -6584,9 +7058,13 @@ do
 	-- KEYBOARD OVERLAY: OBS style key display with only the keys you pick
 	local cko = U.makeCard(p, "KEYBOARD OVERLAY", "OBS style - only the keys you use")
 	U.toggleRow(cko, "KEYBOARD OVERLAY", function() return Settings.KeyOverlay end, function(v) Settings.KeyOverlay = v end)
-	U.toggleRow(cko, "MOVEMENT  (W A S D)", function() return Settings.OvMove end, function(v) Settings.OvMove = v end)
-	U.toggleRow(cko, "SPACE + SHIFT", function() return Settings.OvJump end, function(v) Settings.OvJump = v end)
-	U.toggleRow(cko, "MOUSE  (M1 / M2)", function() return Settings.OvMouse end, function(v) Settings.OvMouse = v end)
+	U.choiceRow(cko, "STYLE", function() return Settings.OvStyle end, function()
+		Settings.OvStyle = U.cycleList(U.CHOICES.OvStyle, Settings.OvStyle)
+	end)
+	U.toggleRow(cko, "TOP ROW  (ESC 1 2 3 4)", function() return Settings.OvTop end, function(v) Settings.OvTop = v end)
+	U.toggleRow(cko, "LETTER KEYS  (W A S D ...)", function() return Settings.OvMove end, function(v) Settings.OvMove = v end)
+	U.toggleRow(cko, "SHIFT / CTRL / SPACE", function() return Settings.OvJump end, function(v) Settings.OvJump = v end)
+	U.toggleRow(cko, "MOUSE  (LEFT / RIGHT / WHEEL)", function() return Settings.OvMouse end, function(v) Settings.OvMouse = v end)
 	U.choiceRow(cko, "CUSTOM KEYS", function()
 		return U.listening == "OvAdd" and "PRESS KEYS... ESC = DONE" or "ADD / REMOVE"
 	end, function()
@@ -6616,7 +7094,7 @@ do
 	end)
 	U.infoText(cko, function()
 		return "Keys light up while you hold them. Turn on MOVE OVERLAY and drag it where you want, then turn it off so clicks go through to the game.\n"
-			.. "CUSTOM KEYS: tap the row, press every key you want to show (press it again to remove), ESC when done.\n"
+			.. "STYLE KEYBOARD shows the left side of a keyboard + a mouse. Hide rows you do not use. CUSTOM KEYS are extra keys that are not on the board: tap the row, press every key you want to show (press it again to remove), ESC when done. STYLE CLASSIC is the old compact look.\n"
 			.. "Keys are ignored while you type in chat. Press SAVE (DATA card) to keep your overlay."
 	end, false, 10)
 
