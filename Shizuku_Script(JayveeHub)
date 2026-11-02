@@ -1,0 +1,1458 @@
+-- ==========================================================
+-- JAYVEE HUB | Shigaku
+-- Author: Jayvee
+-- ==========================================================
+
+local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local Lighting = game:GetService("Lighting")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local localPlayer = LocalPlayer
+local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+-- ==========================================================
+-- [0] BRAND / ADMIN / THEME  (edit these)
+-- ==========================================================
+local Brand = {
+    Name = "JAYVEE HUB",
+    Author = "Jayvee",
+    Version = "v1.0",
+    Logo = "J",
+}
+
+-- Admins skip the key system completely. Everyone else must enter a key.
+local ADMINS = {
+    ["BzQ71"] = true,
+}
+
+-- Pick one: "Purple", "Blue", "Red", "Green"
+local ThemeName = "Purple"
+
+local rgb = Color3.fromRGB
+local Themes = {
+    Purple = {
+        Bg = rgb(18, 13, 28), Bg2 = rgb(30, 19, 48), Panel = rgb(26, 19, 40),
+        Item = rgb(34, 26, 52), ItemHover = rgb(46, 34, 72),
+        Accent = rgb(168, 85, 247), AccentDark = rgb(112, 56, 196),
+        Text = rgb(243, 236, 255), Sub = rgb(170, 155, 205), Off = rgb(62, 50, 86),
+        Good = rgb(100, 255, 150), Bad = rgb(255, 85, 110),
+    },
+    Blue = {
+        Bg = rgb(10, 16, 28), Bg2 = rgb(14, 30, 52), Panel = rgb(16, 24, 40),
+        Item = rgb(22, 34, 56), ItemHover = rgb(30, 46, 76),
+        Accent = rgb(64, 160, 255), AccentDark = rgb(36, 100, 200),
+        Text = rgb(232, 243, 255), Sub = rgb(150, 175, 205), Off = rgb(44, 58, 82),
+        Good = rgb(100, 255, 150), Bad = rgb(255, 85, 110),
+    },
+    Red = {
+        Bg = rgb(20, 10, 12), Bg2 = rgb(38, 14, 18), Panel = rgb(28, 15, 18),
+        Item = rgb(40, 22, 26), ItemHover = rgb(56, 30, 36),
+        Accent = rgb(235, 64, 70), AccentDark = rgb(170, 36, 44),
+        Text = rgb(255, 236, 236), Sub = rgb(205, 160, 162), Off = rgb(70, 44, 48),
+        Good = rgb(100, 255, 150), Bad = rgb(255, 200, 80),
+    },
+    Green = {
+        Bg = rgb(8, 18, 12), Bg2 = rgb(12, 34, 21), Panel = rgb(14, 26, 18),
+        Item = rgb(20, 38, 26), ItemHover = rgb(28, 54, 37),
+        Accent = rgb(60, 220, 110), AccentDark = rgb(30, 150, 70),
+        Text = rgb(230, 255, 238), Sub = rgb(150, 205, 165), Off = rgb(40, 66, 50),
+        Good = rgb(120, 255, 170), Bad = rgb(255, 85, 110),
+    },
+}
+local Theme = Themes[ThemeName] or Themes.Purple
+
+-- ==========================================================
+-- UI HELPERS
+-- ==========================================================
+local function tween(obj, t, props, style, dir)
+    local tw = TweenService:Create(obj, TweenInfo.new(t, style or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out), props)
+    tw:Play()
+    return tw
+end
+
+local function mk(class, props, parent)
+    local o = Instance.new(class)
+    for k, v in pairs(props) do o[k] = v end
+    if parent then o.Parent = parent end
+    return o
+end
+
+local function round(o, r)
+    return mk("UICorner", { CornerRadius = UDim.new(0, r) }, o)
+end
+
+local function outline(o, color, thickness, transparency)
+    return mk("UIStroke", {
+        Color = color,
+        Thickness = thickness or 1.5,
+        Transparency = transparency or 0,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, o)
+end
+
+-- ==========================================================
+-- [1] KEY SYSTEM  (skipped for admins)
+-- ==========================================================
+local rawUrl = "https://gist.githubusercontent.com/PighubTEST/941f6017a4cbae2ef08b027f9d4541e6/raw/006b65a6f3f91b092c9c31a49a48d31a41a0c417/Key.txt"
+local webhookUrl = "https://discordapp.com/api/webhooks/1556511954292580493/k-JcNVuqrXolwULELMD6OKRR6jgPCEHW_Gp0LJbYRB8QFesJbK2fq4R2h93v-akWl1w_"
+
+local function sendWebhook()
+    local data = {
+        ["content"] = "ðŸŸ¢ **[" .. Brand.Name .. "] à¸¡à¸µà¸„à¸™à¸¢à¸·à¸™à¸¢à¸±à¸™ Key à¸ªà¸³à¹€à¸£à¹‡à¸ˆà¹à¸¥à¸°à¸à¸³à¸¥à¸±à¸‡à¹ƒà¸Šà¹‰à¸‡à¸²à¸™!**",
+        ["embeds"] = {{
+            ["title"] = "Player Details",
+            ["color"] = 65280,
+            ["fields"] = {
+                { ["name"] = "Username:", ["value"] = localPlayer.Name, ["inline"] = true },
+                { ["name"] = "Display Name:", ["value"] = localPlayer.DisplayName, ["inline"] = true },
+                { ["name"] = "User ID:", ["value"] = tostring(localPlayer.UserId), ["inline"] = true },
+                { ["name"] = "Game ID:", ["value"] = tostring(game.PlaceId), ["inline"] = true },
+            },
+            ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+        }},
+    }
+
+    local jsonBody = HttpService:JSONEncode(data)
+
+    pcall(function()
+        local requestFunc = syn and syn.request or http_request or request
+        if requestFunc then
+            requestFunc({
+                Url = webhookUrl,
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = jsonBody,
+            })
+        end
+    end)
+end
+
+local function runKeySystem()
+    if CoreGui:FindFirstChild("JAYVEE_KeySystem") then
+        CoreGui.JAYVEE_KeySystem:Destroy()
+    end
+
+    local gui = mk("ScreenGui", { Name = "JAYVEE_KeySystem", ResetOnSpawn = false }, CoreGui)
+
+    local frame = mk("Frame", {
+        Size = UDim2.new(0, 340, 0, 200),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        BackgroundColor3 = Theme.Bg,
+        BorderSizePixel = 0,
+    }, gui)
+    round(frame, 18)
+    outline(frame, Theme.Accent, 1.5, 0.3)
+    mk("UIGradient", { Color = ColorSequence.new(Theme.Bg, Theme.Bg2), Rotation = 90 }, frame)
+
+    local scale = mk("UIScale", { Scale = 0.8 }, frame)
+    tween(scale, 0.35, { Scale = 1 }, Enum.EasingStyle.Back)
+
+    mk("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 34), Position = UDim2.new(0, 0, 0, 8),
+        BackgroundTransparency = 1, Text = "ðŸ”‘ " .. Brand.Name .. " â€” ENTER KEY",
+        TextColor3 = Theme.Text, TextSize = 15, Font = Enum.Font.GothamBlack,
+    }, frame)
+
+    mk("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 16), Position = UDim2.new(0, 0, 0, 38),
+        BackgroundTransparency = 1, Text = "by " .. Brand.Author,
+        TextColor3 = Theme.Sub, TextSize = 11, Font = Enum.Font.Gotham,
+    }, frame)
+
+    local box = mk("TextBox", {
+        Size = UDim2.new(0.85, 0, 0, 40), Position = UDim2.new(0.075, 0, 0, 70),
+        PlaceholderText = "Enter your key here...", PlaceholderColor3 = Theme.Sub,
+        Text = "", TextColor3 = Theme.Text, BackgroundColor3 = Theme.Item,
+        Font = Enum.Font.Gotham, TextSize = 13, ClearTextOnFocus = false,
+    }, frame)
+    round(box, 10)
+    local boxStroke = outline(box, Theme.Accent, 1, 1)
+    box.Focused:Connect(function() tween(boxStroke, 0.2, { Transparency = 0.2 }) end)
+    box.FocusLost:Connect(function() tween(boxStroke, 0.2, { Transparency = 1 }) end)
+
+    local submit = mk("TextButton", {
+        Size = UDim2.new(0.85, 0, 0, 40), Position = UDim2.new(0.075, 0, 0, 126),
+        Text = "Submit Key", TextColor3 = Color3.new(1, 1, 1),
+        BackgroundColor3 = Theme.AccentDark, Font = Enum.Font.GothamBold,
+        TextSize = 13, AutoButtonColor = false,
+    }, frame)
+    round(submit, 10)
+    submit.MouseEnter:Connect(function() tween(submit, 0.15, { BackgroundColor3 = Theme.Accent }) end)
+    submit.MouseLeave:Connect(function() tween(submit, 0.15, { BackgroundColor3 = Theme.AccentDark }) end)
+
+    local passed, busy = false, false
+
+    submit.MouseButton1Click:Connect(function()
+        if busy then return end
+        local userKey = box.Text
+        if userKey == "" then return end
+
+        busy = true
+        submit.Text = "Checking..."
+
+        local success, result = pcall(function()
+            return game:HttpGet(rawUrl)
+        end)
+
+        if success and result then
+            local isValid = false
+            for line in result:gmatch("[^\r\n]+") do
+                line = line:gsub("^%s*(.-)%s*$", "%1")
+                if line == userKey then
+                    isValid = true
+                    break
+                end
+            end
+
+            if isValid then
+                sendWebhook()
+                passed = true
+                return
+            else
+                submit.Text = "âŒ Invalid Key!"
+                tween(submit, 0.15, { BackgroundColor3 = Theme.Bad })
+                task.wait(1.5)
+                tween(submit, 0.15, { BackgroundColor3 = Theme.AccentDark })
+                submit.Text = "Submit Key"
+                box.Text = ""
+            end
+        else
+            submit.Text = "âŒ Connection Failed"
+            task.wait(1.5)
+            submit.Text = "Submit Key"
+        end
+        busy = false
+    end)
+
+    repeat task.wait(0.1) until passed
+    gui:Destroy()
+end
+
+if ADMINS[localPlayer.Name] then
+    print("ðŸ‘‘ [" .. Brand.Name .. "] Admin detected (" .. localPlayer.Name .. ") - key skipped.")
+else
+    runKeySystem()
+    print("ðŸ”‘ [" .. Brand.Name .. "] Key verified successfully! Loading main script...")
+end
+
+-- ==========================================================
+-- [0] LANGUAGE LOCALIZATION DICTIONARY
+-- ==========================================================
+local L = {
+    EN = {
+        ConsoleInit = "[JAYVEE HUB] All systems initialized successfully! Custom UI loaded.",
+        NotifDesc = "JAYVEE HUB loaded successfully in English!",
+
+        TabParry = "Parry",
+        TabSkill = "Skill",
+        TabGym = "Gym Farm",
+        TabESP = "ESP",
+        TabSettings = "Settings",
+
+        SecToggles = "Toggles",
+        SecTuning = "Tuning",
+        SecFarm = "Farm",
+        SecDisplay = "Display",
+        SecInterface = "Interface",
+        SecAbout = "About",
+
+        ParryToggle = "Auto Parry",
+        CritToggle = "Enable Critical Parry",
+        ClashToggle = "AUTO Clash",
+        FaceTargetToggle = "Enable Face Target (Auto Look)",
+        FaceTargetDelay = "Face Target - Delay/Speed (ms)",
+        ParryOffset = "Parry - Tuning Offset (ms)",
+        ParryRange = "Parry - Max Range (Studs)",
+        CritRange = "Critical Max Range (Studs)",
+
+        SkillToggle = "Enable Auto Press R Key",
+        SkillOffset = "R - Tuning Offset (ms)",
+        SkillRange = "R - Max Range (Studs)",
+
+        GymToggle = "Enable Auto Farm Gym",
+        GymMachine = "Select Gym Machine",
+        GymSpamCToggle = "Enable Auto Spam C",
+
+        ESPToggle = "Enable Enemy ESP",
+        SelfHPToggle = "Show Self Health Bar",
+
+        MobileToggleBtn = "Show Mobile Toggle Button",
+        FPSBoosterToggle = "âš¡ FPS Booster",
+        UnloadBtn = "Unload Hub (Close All)",
+    },
+    TH = {
+        ConsoleInit = "[JAYVEE HUB] à¹€à¸£à¸´à¹ˆà¸¡à¸•à¹‰à¸™à¸£à¸°à¸šà¸šà¸—à¸±à¹‰à¸‡à¸«à¸¡à¸” + à¹‚à¸«à¸¥à¸” Custom UI à¸ªà¸³à¹€à¸£à¹‡à¸ˆ!",
+        NotifDesc = "à¹‚à¸«à¸¥à¸” JAYVEE HUB à¹ƒà¸Šà¹‰à¸‡à¸²à¸™à¸ à¸²à¸©à¸²à¹„à¸—à¸¢à¸ªà¸³à¹€à¸£à¹‡à¸ˆ!",
+
+        TabParry = "à¸šà¸¥à¹‡à¸­à¸",
+        TabSkill = "à¸ªà¸à¸´à¸¥",
+        TabGym = "à¸Ÿà¸²à¸£à¹Œà¸¡à¸¢à¸´à¸¡",
+        TabESP = "ESP",
+        TabSettings = "à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸²",
+
+        SecToggles = "à¸ªà¸§à¸´à¸•à¸Šà¹Œ",
+        SecTuning = "à¸›à¸£à¸±à¸šà¹à¸•à¹ˆà¸‡",
+        SecFarm = "à¸Ÿà¸²à¸£à¹Œà¸¡",
+        SecDisplay = "à¸à¸²à¸£à¹à¸ªà¸”à¸‡à¸œà¸¥",
+        SecInterface = "à¸«à¸™à¹‰à¸²à¸•à¹ˆà¸²à¸‡",
+        SecAbout = "à¹€à¸à¸µà¹ˆà¸¢à¸§à¸à¸±à¸š",
+
+        ParryToggle = "Auto Parry",
+        CritToggle = "à¹€à¸›à¸´à¸”à¸£à¸°à¸šà¸šà¸à¸±à¸™ Critical",
+        ClashToggle = "AUTO Clash",
+        FaceTargetToggle = "à¹€à¸›à¸´à¸”à¹ƒà¸Šà¹‰à¸‡à¸²à¸™ Face Target (à¸«à¸±à¸™à¸«à¸™à¹‰à¸²à¸­à¸±à¸•à¹‚à¸™à¸¡à¸±à¸•à¸´)",
+        FaceTargetDelay = "Face Target - à¸„à¸§à¸²à¸¡à¹€à¸£à¹‡à¸§/à¸”à¸µà¹€à¸¥à¸¢à¹Œà¸à¸²à¸£à¸«à¸±à¸™ (ms)",
+        ParryOffset = "Parry - à¸›à¸£à¸±à¸šà¸”à¸µà¹€à¸¥à¸¢à¹Œ Offset (ms)",
+        ParryRange = "Parry - à¸£à¸°à¸¢à¸°à¸ªà¸¹à¸‡à¸ªà¸¸à¸” (Studs)",
+        CritRange = "à¸£à¸°à¸¢à¸°à¸à¸±à¸™ Critical à¸ªà¸¹à¸‡à¸ªà¸¸à¸”",
+
+        SkillToggle = "à¹€à¸›à¸´à¸”à¹ƒà¸Šà¹‰à¸‡à¸²à¸™à¸à¸”à¸›à¸¸à¹ˆà¸¡ R à¸­à¸±à¸•à¹‚à¸™à¸¡à¸±à¸•à¸´",
+        SkillOffset = "R - à¸›à¸£à¸±à¸šà¸”à¸µà¹€à¸¥à¸¢à¹Œ Offset (ms)",
+        SkillRange = "R - à¸£à¸°à¸¢à¸°à¸ªà¸¹à¸‡à¸ªà¸¸à¸” (Studs)",
+
+        GymToggle = "à¹€à¸›à¸´à¸”/à¸›à¸´à¸” à¸£à¸°à¸šà¸š Auto Farm Gym",
+        GymMachine = "à¹€à¸¥à¸·à¸­à¸à¹€à¸„à¸£à¸·à¹ˆà¸­à¸‡à¸­à¸­à¸à¸à¸³à¸¥à¸±à¸‡à¸à¸²à¸¢",
+        GymSpamCToggle = "à¹€à¸›à¸´à¸”/à¸›à¸´à¸” à¸à¸”à¸›à¸¸à¹ˆà¸¡ C à¸£à¸±à¸§à¹†",
+
+        ESPToggle = "à¹€à¸›à¸´à¸”à¹ƒà¸Šà¹‰à¸‡à¸²à¸™ ESP à¸¨à¸±à¸•à¸£à¸¹",
+        SelfHPToggle = "à¹à¸ªà¸”à¸‡à¸«à¸¥à¸­à¸”à¹€à¸¥à¸·à¸­à¸”à¸•à¸±à¸§à¹€à¸­à¸‡",
+
+        MobileToggleBtn = "à¹à¸ªà¸”à¸‡à¸›à¸¸à¹ˆà¸¡à¸‹à¹ˆà¸­à¸™à¹€à¸¡à¸™à¸¹à¸ªà¸³à¸«à¸£à¸±à¸šà¸¡à¸·à¸­à¸–à¸·à¸­",
+        FPSBoosterToggle = "âš¡ à¹€à¸žà¸´à¹ˆà¸¡ FPS (FPS Booster)",
+        UnloadBtn = "à¸›à¸´à¸”à¸ªà¸„à¸£à¸´à¸›à¸•à¹Œà¸—à¸±à¹‰à¸‡à¸«à¸¡à¸” (Unload)",
+    },
+}
+
+-- ==========================================================
+-- [1] STARTUP LANGUAGE SELECTION
+-- ==========================================================
+local function askLanguage()
+    if CoreGui:FindFirstChild("JAYVEE_LanguageSelect") then
+        CoreGui.JAYVEE_LanguageSelect:Destroy()
+    end
+
+    local gui = mk("ScreenGui", { Name = "JAYVEE_LanguageSelect", ResetOnSpawn = false }, CoreGui)
+
+    local dim = mk("Frame", {
+        Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 1, BorderSizePixel = 0,
+    }, gui)
+    tween(dim, 0.3, { BackgroundTransparency = 0.55 })
+
+    local box = mk("Frame", {
+        Size = UDim2.new(0, 340, 0, 190), AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0), BackgroundColor3 = Theme.Bg, BorderSizePixel = 0,
+    }, gui)
+    round(box, 18)
+    outline(box, Theme.Accent, 1.5, 0.3)
+    mk("UIGradient", { Color = ColorSequence.new(Theme.Bg, Theme.Bg2), Rotation = 90 }, box)
+    local scale = mk("UIScale", { Scale = 0.8 }, box)
+    tween(scale, 0.35, { Scale = 1 }, Enum.EasingStyle.Back)
+
+    mk("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 40), Position = UDim2.new(0, 0, 0, 10),
+        BackgroundTransparency = 1, Text = Brand.Name .. " - SELECT LANGUAGE",
+        TextColor3 = Theme.Text, TextSize = 16, Font = Enum.Font.GothamBlack,
+    }, box)
+
+    mk("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 22), Position = UDim2.new(0, 0, 0, 48),
+        BackgroundTransparency = 1, Text = "à¸à¸£à¸¸à¸“à¸²à¹€à¸¥à¸·à¸­à¸à¸ à¸²à¸©à¸² / Please choose your language",
+        TextColor3 = Theme.Sub, TextSize = 12, Font = Enum.Font.Gotham,
+    }, box)
+
+    local chosen = nil
+
+    local function langButton(text, xScale, code)
+        local b = mk("TextButton", {
+            Size = UDim2.new(0, 135, 0, 50), Position = UDim2.new(xScale, 0, 0, 100),
+            BackgroundColor3 = Theme.Item, Text = text, TextColor3 = Theme.Text,
+            TextSize = 14, Font = Enum.Font.GothamBold, AutoButtonColor = false,
+        }, box)
+        round(b, 12)
+        local s = outline(b, Theme.Accent, 1, 0.7)
+        b.MouseEnter:Connect(function()
+            tween(b, 0.15, { BackgroundColor3 = Theme.AccentDark })
+            tween(s, 0.15, { Transparency = 0 })
+        end)
+        b.MouseLeave:Connect(function()
+            tween(b, 0.15, { BackgroundColor3 = Theme.Item })
+            tween(s, 0.15, { Transparency = 0.7 })
+        end)
+        b.MouseButton1Click:Connect(function() chosen = code end)
+    end
+
+    langButton("ðŸ‡¹ðŸ‡­ à¸ à¸²à¸©à¸²à¹„à¸—à¸¢", 0.06, "TH")
+    langButton("ðŸ‡¬ðŸ‡§ English", 0.52, "EN")
+
+    repeat task.wait(0.1) until chosen ~= nil
+    gui:Destroy()
+    return chosen
+end
+
+local currentLang = askLanguage()
+local function T(key)
+    return L[currentLang][key] or key
+end
+
+print(T("ConsoleInit"))
+
+-- ==========================================================
+-- [2] CONFIGURATION
+-- ==========================================================
+local config = {
+    Enabled = false,
+    Distance = 13,
+    OffsetMs = 50,
+    HoldTime = 0.1,
+    Cooldown = 0.5,
+
+    CritParryEnabled = false,
+    CritDistance = 13,
+    CritHoldTime = 0.15,
+
+    GrappleClashEnabled = true,
+    FaceTargetEnabled = false,
+    FaceTargetDelayMs = 20,
+
+    CustomKeyEnabled = false,
+    CustomKeyDistance = 14,
+    CustomKeyOffsetMs = 50,
+    CustomKeyHoldTime = 0.1,
+    CustomKeyCooldown = 1,
+
+    ESPEnabled = true,
+    ESPDistance = 50,
+    SelfHPEnabled = true,
+
+    ShowMobileButton = true,
+
+    GymAutoFarmEnabled = false,
+    GymSpamCEnabled = true,
+    SelectedMachine = "Dumbbells",
+}
+
+-- ==========================================================
+-- [3] SYSTEM VARIABLES & DIRECT PARRY CACHE
+-- ==========================================================
+local connections = {}
+local lastParryTime = 0
+local lastCritParryTime = 0
+local lastCustomKeyTime = 0
+local rActiveEndTime = 0
+local totalCooldown = 6.0
+local lastMySkillUseTick = 0
+local espObjects = {}
+
+local cachedParryFunc = nil
+local uiToggle = nil -- assigned once the UI is built
+
+task.spawn(function()
+    for _, obj in ipairs(getgc(true)) do
+        if type(obj) == "function" then
+            local success, info = pcall(debug.getinfo, obj)
+            if success and info and info.name == "blockDown" then
+                cachedParryFunc = obj
+                print("[Shigaku] Cache Direct blockDown Function Found!")
+                break
+            end
+        end
+    end
+end)
+
+local targetAttackIds = {
+    ["95432539086507"] = true, ["127652830424259"] = true, ["133561275899596"] = true, ["86988308923085"] = true,
+    ["121471421329674"] = true, ["135150880228352"] = true, ["130498708444269"] = true, ["129831639841561"] = true, ["113080327178952"] = true,
+    ["78002651293497"] = true, ["81298190119416"] = true, ["129533593077903"] = true, ["78001667383339"] = true,
+    ["94233501359933"] = true, ["89846992766385"] = true, ["114237624893724"] = true, ["133208165126228"] = true,
+    ["105809977457645"] = true, ["117591731961980"] = true, ["88542597427799"]  = true, ["72254440347288"]  = true,
+    ["136284801845628"] = true, ["119147884530639"] = true, ["90794918602660"]  = true, ["109750054031329"] = true, ["82625582981303"] = true,
+    ["113392694674506"] = true, ["82412737902773"]  = true, ["82317141001094"]  = true, ["76604827063163"]  = true,
+    ["133357496764772"] = true, ["110148279302283"] = true, ["117036243967842"] = true, ["106354651233027"] = true,
+    ["135994489945802"] = true, ["114835480586145"] = true, ["117379664663217"] = true, ["93031112522404"]  = true,
+    ["89112066701585"]  = true, ["112759207171901"] = true, ["80518082687616"]  = true, ["94449959709745"]  = true,
+    ["86519381955010"]  = true, ["87159011089659"]  = true, ["118338307106823"] = true, ["121438136985421"] = true,
+    ["84375937750850"]  = true, ["111649601592738"] = true, ["117312512978802"] = true, ["95806782137174"]  = true,
+    ["117998451958630"] = true,
+}
+
+local criticalAttackIds = {
+    ["Lethwei"]               = { Id = "73165238897286",  Delay = 250 },
+    ["Ogre"]                  = { Id = "76173576438450",  Delay = 250 },
+    ["Sambo"]                 = { Id = "119091396680452", Delay = 250 },
+    ["Taekkyon"]              = { Id = "128544893600186", Delay = 250 },
+    ["Cursed Speech"]         = { Id = "133357496764772", Delay = 250 },
+    ["Savate"]                = { Id = "101681086760808", Delay = 250 },
+    ["Brawler"]               = { Id = "124813129557337", Delay = 250 },
+    ["Karate"]                = { Id = "114835480586145", Delay = 250 },
+    ["Basic"]                 = { Id = "133357496764772", Delay = 250 },
+    ["Fist of Flowing Water"] = { Id = "121438136985421", Delay = 10  },
+    ["Boxing"]                = { Id = "80518082687616",  Delay = 250 },
+    ["Tae Kwon Do"]           = { Id = "117998451958630", Delay = 500 },
+}
+
+local function getHealthInfo(character)
+    if not character then return 0, 0 end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if humanoid then return math.floor(humanoid.Health), math.floor(humanoid.MaxHealth) end
+    return 0, 0
+end
+
+local function pressParryKey()
+    task.spawn(function()
+        if config.OffsetMs > 0 then task.wait(config.OffsetMs / 1000) end
+        pcall(function()
+            if cachedParryFunc then
+                pcall(cachedParryFunc)
+            else
+                for _, obj in ipairs(getgc(true)) do
+                    if type(obj) == "function" then
+                        local success, info = pcall(debug.getinfo, obj)
+                        if success and info and info.name == "blockDown" then
+                            cachedParryFunc = obj
+                            pcall(obj)
+                            break
+                        end
+                    end
+                end
+            end
+        end)
+    end)
+end
+
+local function pressCritParryKey(delayMs)
+    task.spawn(function()
+        if delayMs and delayMs > 0 then task.wait(delayMs / 1000) end
+        pcall(function()
+            if cachedParryFunc then
+                pcall(cachedParryFunc)
+            else
+                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.F, false, game)
+                task.wait(config.CritHoldTime)
+                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.F, false, game)
+            end
+        end)
+    end)
+end
+
+local function pressCustomKey()
+    task.spawn(function()
+        local totalDuration = (config.CustomKeyOffsetMs / 1000) + config.CustomKeyHoldTime + 0.15
+        rActiveEndTime = tick() + totalDuration
+        lastMySkillUseTick = tick()
+        if config.CustomKeyOffsetMs > 0 then task.wait(config.CustomKeyOffsetMs / 1000) end
+        pcall(function()
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.R, false, game)
+            task.wait(config.CustomKeyHoldTime)
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.R, false, game)
+        end)
+    end)
+end
+
+table.insert(connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.R then
+        local current = tick()
+        if current - lastMySkillUseTick >= totalCooldown then
+            lastMySkillUseTick = current
+        end
+    elseif input.KeyCode == Enum.KeyCode.RightControl then
+        if uiToggle then uiToggle() end
+    end
+end))
+
+-- ==========================================================
+-- [4] CUSTOM UI LIBRARY
+-- ==========================================================
+if CoreGui:FindFirstChild("JAYVEE_HUB") then
+    CoreGui.JAYVEE_HUB:Destroy()
+end
+
+local iosGui = mk("ScreenGui", { Name = "JAYVEE_HUB", ResetOnSpawn = false }, CoreGui)
+
+local mainWindow = mk("Frame", {
+    Name = "MainWindow",
+    Size = UDim2.new(0, 580, 0, 380),
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.new(0.5, 0, 0.5, 0),
+    BackgroundColor3 = Theme.Bg,
+    BackgroundTransparency = 0.04,
+    BorderSizePixel = 0,
+    Active = true,
+    Draggable = true,
+}, iosGui)
+round(mainWindow, 18)
+outline(mainWindow, Theme.Accent, 1.5, 0.4)
+mk("UIGradient", { Color = ColorSequence.new(Theme.Bg, Theme.Bg2), Rotation = 90 }, mainWindow)
+
+-- auto-fit smaller screens (phones)
+local viewport = (Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize) or Vector2.new(1280, 720)
+local baseScale = math.clamp(math.min(viewport.X / 640, viewport.Y / 430), 0.55, 1)
+local uiScale = mk("UIScale", { Scale = baseScale * 0.85 }, mainWindow)
+tween(uiScale, 0.4, { Scale = baseScale }, Enum.EasingStyle.Back)
+
+-- title bar
+local titleBar = mk("Frame", { Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1 }, mainWindow)
+
+local badge = mk("TextLabel", {
+    Size = UDim2.new(0, 34, 0, 34), Position = UDim2.new(0, 14, 0, 9),
+    BackgroundColor3 = Theme.Accent, Text = Brand.Logo, TextColor3 = Color3.new(1, 1, 1),
+    TextSize = 19, Font = Enum.Font.GothamBlack,
+}, titleBar)
+round(badge, 11)
+mk("UIGradient", { Color = ColorSequence.new(Theme.Accent, Theme.AccentDark), Rotation = 45 }, badge)
+
+mk("TextLabel", {
+    Size = UDim2.new(1, -130, 0, 22), Position = UDim2.new(0, 58, 0, 7),
+    BackgroundTransparency = 1, Text = Brand.Name .. " â€” Shigaku",
+    TextColor3 = Theme.Text, TextSize = 15, Font = Enum.Font.GothamBlack,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, titleBar)
+
+mk("TextLabel", {
+    Size = UDim2.new(1, -130, 0, 16), Position = UDim2.new(0, 58, 0, 28),
+    BackgroundTransparency = 1, Text = "by " .. Brand.Author .. "  â€¢  " .. Brand.Version,
+    TextColor3 = Theme.Sub, TextSize = 11, Font = Enum.Font.Gotham,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, titleBar)
+
+local minBtn = mk("TextButton", {
+    Size = UDim2.new(0, 30, 0, 30), AnchorPoint = Vector2.new(1, 0),
+    Position = UDim2.new(1, -14, 0, 11), BackgroundColor3 = Theme.Item,
+    Text = "â€“", TextColor3 = Theme.Text, TextSize = 18, Font = Enum.Font.GothamBold,
+    AutoButtonColor = false,
+}, titleBar)
+round(minBtn, 9)
+minBtn.MouseEnter:Connect(function() tween(minBtn, 0.15, { BackgroundColor3 = Theme.AccentDark }) end)
+minBtn.MouseLeave:Connect(function() tween(minBtn, 0.15, { BackgroundColor3 = Theme.Item }) end)
+
+mk("Frame", {
+    Size = UDim2.new(1, -28, 0, 1), Position = UDim2.new(0, 14, 0, 52),
+    BackgroundColor3 = Theme.Accent, BackgroundTransparency = 0.8, BorderSizePixel = 0,
+}, mainWindow)
+
+-- sidebar
+local sidebar = mk("ScrollingFrame", {
+    Size = UDim2.new(0, 142, 1, -96), Position = UDim2.new(0, 10, 0, 62),
+    BackgroundTransparency = 1, BorderSizePixel = 0, CanvasSize = UDim2.new(0, 0, 0, 0),
+    AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollBarThickness = 2,
+    ScrollBarImageColor3 = Theme.Accent,
+}, mainWindow)
+mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6) }, sidebar)
+
+mk("TextLabel", {
+    Size = UDim2.new(0, 142, 0, 18), AnchorPoint = Vector2.new(0, 1),
+    Position = UDim2.new(0, 10, 1, -10), BackgroundTransparency = 1,
+    Text = "made by " .. Brand.Author, TextColor3 = Theme.Sub, TextSize = 10,
+    Font = Enum.Font.GothamMedium, TextXAlignment = Enum.TextXAlignment.Left,
+}, mainWindow)
+
+local containerHolder = mk("Frame", {
+    Size = UDim2.new(1, -170, 1, -72), Position = UDim2.new(0, 160, 0, 62),
+    BackgroundTransparency = 1, ClipsDescendants = true,
+}, mainWindow)
+
+local pages, tabs = {}, {}
+local activeName = nil
+local tabOrder = 0
+
+local function selectTab(name)
+    for n, t in pairs(tabs) do
+        local on = (n == name)
+        pages[n].Visible = on
+        tween(t.btn, 0.2, {
+            BackgroundColor3 = on and Theme.AccentDark or Theme.Item,
+            BackgroundTransparency = on and 0 or 0.5,
+            TextColor3 = on and Color3.new(1, 1, 1) or Theme.Sub,
+        })
+        tween(t.bar, 0.2, { BackgroundTransparency = on and 0 or 1 })
+    end
+    activeName = name
+    local p = pages[name]
+    p.Position = UDim2.new(0, 16, 0, 5)
+    tween(p, 0.28, { Position = UDim2.new(0, 0, 0, 5) })
+end
+
+local function createTabButton(name, title, icon)
+    tabOrder = tabOrder + 1
+
+    local btn = mk("TextButton", {
+        Size = UDim2.new(1, -8, 0, 38), BackgroundColor3 = Theme.Item, BackgroundTransparency = 0.5,
+        Text = "    " .. (icon or "") .. "  " .. title, TextColor3 = Theme.Sub, TextSize = 13,
+        Font = Enum.Font.GothamSemibold, TextXAlignment = Enum.TextXAlignment.Left,
+        AutoButtonColor = false, LayoutOrder = tabOrder,
+    }, sidebar)
+    round(btn, 11)
+
+    local bar = mk("Frame", {
+        Size = UDim2.new(0, 3, 0, 18), AnchorPoint = Vector2.new(0, 0.5),
+        Position = UDim2.new(0, 5, 0.5, 0), BackgroundColor3 = Color3.new(1, 1, 1),
+        BackgroundTransparency = 1, BorderSizePixel = 0,
+    }, btn)
+    round(bar, 2)
+
+    local page = mk("ScrollingFrame", {
+        Size = UDim2.new(1, 0, 1, -6), Position = UDim2.new(0, 0, 0, 5),
+        BackgroundTransparency = 1, BorderSizePixel = 0, CanvasSize = UDim2.new(0, 0, 0, 0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollBarThickness = 3,
+        ScrollBarImageColor3 = Theme.Accent, Visible = false,
+    }, containerHolder)
+    mk("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8) }, page)
+
+    tabs[name] = { btn = btn, bar = bar }
+    pages[name] = page
+
+    btn.MouseEnter:Connect(function()
+        if activeName ~= name then tween(btn, 0.15, { BackgroundTransparency = 0.2 }) end
+    end)
+    btn.MouseLeave:Connect(function()
+        if activeName ~= name then tween(btn, 0.15, { BackgroundTransparency = 0.5 }) end
+    end)
+    btn.MouseButton1Click:Connect(function() selectTab(name) end)
+
+    if not activeName then selectTab(name) end
+    return page
+end
+
+local function addSection(page, text)
+    mk("TextLabel", {
+        Size = UDim2.new(1, -8, 0, 18), BackgroundTransparency = 1,
+        Text = string.upper(text), TextColor3 = Theme.Accent, TextSize = 11,
+        Font = Enum.Font.GothamBold, TextXAlignment = Enum.TextXAlignment.Left,
+    }, page)
+end
+
+local function addToggle(page, text, defaultState, callback)
+    local row = mk("Frame", { Size = UDim2.new(1, -8, 0, 42), BackgroundColor3 = Theme.Item }, page)
+    round(row, 11)
+
+    mk("TextLabel", {
+        Size = UDim2.new(1, -74, 1, 0), Position = UDim2.new(0, 14, 0, 0),
+        BackgroundTransparency = 1, Text = text, TextColor3 = Theme.Text, TextSize = 12,
+        Font = Enum.Font.GothamMedium, TextXAlignment = Enum.TextXAlignment.Left,
+        TextWrapped = true,
+    }, row)
+
+    local sw = mk("Frame", {
+        Size = UDim2.new(0, 44, 0, 24), AnchorPoint = Vector2.new(1, 0.5),
+        Position = UDim2.new(1, -12, 0.5, 0),
+        BackgroundColor3 = defaultState and Theme.Accent or Theme.Off,
+    }, row)
+    round(sw, 12)
+
+    local knob = mk("Frame", {
+        Size = UDim2.new(0, 18, 0, 18), AnchorPoint = Vector2.new(0, 0.5),
+        Position = defaultState and UDim2.new(1, -21, 0.5, 0) or UDim2.new(0, 3, 0.5, 0),
+        BackgroundColor3 = Color3.new(1, 1, 1),
+    }, sw)
+    round(knob, 9)
+
+    local state = defaultState
+    local hit = mk("TextButton", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "" }, row)
+
+    hit.MouseEnter:Connect(function() tween(row, 0.15, { BackgroundColor3 = Theme.ItemHover }) end)
+    hit.MouseLeave:Connect(function() tween(row, 0.15, { BackgroundColor3 = Theme.Item }) end)
+    hit.MouseButton1Click:Connect(function()
+        state = not state
+        callback(state)
+        tween(sw, 0.2, { BackgroundColor3 = state and Theme.Accent or Theme.Off })
+        tween(knob, 0.25, { Position = state and UDim2.new(1, -21, 0.5, 0) or UDim2.new(0, 3, 0.5, 0) }, Enum.EasingStyle.Back)
+    end)
+end
+
+local function addSlider(page, text, min, max, default, callback)
+    local row = mk("Frame", { Size = UDim2.new(1, -8, 0, 58), BackgroundColor3 = Theme.Item }, page)
+    round(row, 11)
+
+    mk("TextLabel", {
+        Size = UDim2.new(1, -90, 0, 22), Position = UDim2.new(0, 14, 0, 7),
+        BackgroundTransparency = 1, Text = text, TextColor3 = Theme.Text, TextSize = 12,
+        Font = Enum.Font.GothamMedium, TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, row)
+
+    local valLbl = mk("TextLabel", {
+        Size = UDim2.new(0, 64, 0, 22), AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -12, 0, 7), BackgroundTransparency = 1,
+        Text = tostring(default), TextColor3 = Theme.Accent, TextSize = 12,
+        Font = Enum.Font.GothamBold, TextXAlignment = Enum.TextXAlignment.Right,
+    }, row)
+
+    local bar = mk("Frame", {
+        Size = UDim2.new(1, -28, 0, 6), Position = UDim2.new(0, 14, 0, 40),
+        BackgroundColor3 = Theme.Off,
+    }, row)
+    round(bar, 3)
+
+    local startPos = math.clamp((default - min) / (max - min), 0, 1)
+
+    local fill = mk("Frame", { Size = UDim2.new(startPos, 0, 1, 0), BackgroundColor3 = Theme.Accent }, bar)
+    round(fill, 3)
+    mk("UIGradient", { Color = ColorSequence.new(Theme.AccentDark, Theme.Accent) }, fill)
+
+    local knob = mk("Frame", {
+        Size = UDim2.new(0, 14, 0, 14), AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(startPos, 0, 0.5, 0), BackgroundColor3 = Color3.new(1, 1, 1),
+        ZIndex = 2,
+    }, bar)
+    round(knob, 7)
+
+    local hit = mk("TextButton", {
+        Size = UDim2.new(1, 0, 0, 28), AnchorPoint = Vector2.new(0, 0.5),
+        Position = UDim2.new(0, 0, 0.5, 0), BackgroundTransparency = 1, Text = "",
+    }, bar)
+
+    local dragging = false
+
+    local function update(input)
+        local pos = math.clamp((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+        local val = math.floor((min + (max - min) * pos) * 100 + 0.5) / 100
+        if max - min > 10 then val = math.floor(val + 0.5) end
+        fill.Size = UDim2.new(pos, 0, 1, 0)
+        knob.Position = UDim2.new(pos, 0, 0.5, 0)
+        valLbl.Text = tostring(val)
+        callback(val)
+    end
+
+    hit.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            tween(knob, 0.12, { Size = UDim2.new(0, 19, 0, 19) })
+            update(input)
+        end
+    end)
+
+    table.insert(connections, UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            if dragging then
+                dragging = false
+                tween(knob, 0.12, { Size = UDim2.new(0, 14, 0, 14) })
+            end
+        end
+    end))
+
+    table.insert(connections, UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            update(input)
+        end
+    end))
+end
+
+local function addDropdown(page, text, options, defaultOption, callback)
+    local row = mk("Frame", { Size = UDim2.new(1, -8, 0, 70), BackgroundColor3 = Theme.Item }, page)
+    round(row, 11)
+
+    mk("TextLabel", {
+        Size = UDim2.new(1, -28, 0, 22), Position = UDim2.new(0, 14, 0, 7),
+        BackgroundTransparency = 1, Text = text, TextColor3 = Theme.Text, TextSize = 12,
+        Font = Enum.Font.GothamMedium, TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, row)
+
+    local idx = 1
+    for i, opt in ipairs(options) do
+        if opt == defaultOption then
+            idx = i
+            break
+        end
+    end
+
+    local btn = mk("TextButton", {
+        Size = UDim2.new(1, -28, 0, 30), Position = UDim2.new(0, 14, 0, 33),
+        BackgroundColor3 = Theme.Panel, Text = defaultOption .. "   âŸ³", TextColor3 = Theme.Accent,
+        TextSize = 12, Font = Enum.Font.GothamBold, AutoButtonColor = false,
+    }, row)
+    round(btn, 8)
+    local s = outline(btn, Theme.Accent, 1, 0.7)
+
+    btn.MouseEnter:Connect(function() tween(s, 0.15, { Transparency = 0.1 }) end)
+    btn.MouseLeave:Connect(function() tween(s, 0.15, { Transparency = 0.7 }) end)
+    btn.MouseButton1Click:Connect(function()
+        idx = idx + 1
+        if idx > #options then idx = 1 end
+        local chosen = options[idx]
+        btn.Text = chosen .. "   âŸ³"
+        callback(chosen)
+    end)
+end
+
+local function addButton(page, text, callback)
+    local row = mk("TextButton", {
+        Size = UDim2.new(1, -8, 0, 40), BackgroundColor3 = Theme.AccentDark,
+        BackgroundTransparency = 0.35, Text = text, TextColor3 = Theme.Text,
+        TextSize = 13, Font = Enum.Font.GothamBold, AutoButtonColor = false,
+    }, page)
+    round(row, 11)
+    row.MouseEnter:Connect(function() tween(row, 0.15, { BackgroundTransparency = 0 }) end)
+    row.MouseLeave:Connect(function() tween(row, 0.15, { BackgroundTransparency = 0.35 }) end)
+    row.MouseButton1Click:Connect(function()
+        local t = tween(row, 0.08, { Size = UDim2.new(1, -14, 0, 37) })
+        t.Completed:Wait()
+        tween(row, 0.12, { Size = UDim2.new(1, -8, 0, 40) })
+        callback()
+    end)
+end
+
+local function addInfo(page, text)
+    local row = mk("Frame", { Size = UDim2.new(1, -8, 0, 40), BackgroundColor3 = Theme.Panel }, page)
+    round(row, 11)
+    mk("TextLabel", {
+        Size = UDim2.new(1, -24, 1, 0), Position = UDim2.new(0, 12, 0, 0),
+        BackgroundTransparency = 1, Text = text, TextColor3 = Theme.Sub, TextSize = 11,
+        Font = Enum.Font.GothamMedium, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
+    }, row)
+end
+
+-- show / hide window with animation
+local windowVisible = true
+local function setWindowVisible(v)
+    windowVisible = v
+    if v then
+        mainWindow.Visible = true
+        uiScale.Scale = baseScale * 0.88
+        tween(uiScale, 0.28, { Scale = baseScale }, Enum.EasingStyle.Back)
+    else
+        local t = tween(uiScale, 0.18, { Scale = baseScale * 0.88 })
+        t.Completed:Connect(function()
+            if not windowVisible then mainWindow.Visible = false end
+        end)
+    end
+end
+uiToggle = function() setWindowVisible(not windowVisible) end
+minBtn.MouseButton1Click:Connect(function() setWindowVisible(false) end)
+
+-- floating mobile button
+local mobileToggleBtn = mk("TextButton", {
+    Name = "MobileToggleButton",
+    Size = UDim2.new(0, 56, 0, 56), AnchorPoint = Vector2.new(0, 0.5),
+    Position = UDim2.new(0, 20, 0.4, 0), BackgroundColor3 = Theme.Bg,
+    BackgroundTransparency = 0.1, Text = Brand.Logo, TextColor3 = Theme.Accent,
+    TextSize = 26, Font = Enum.Font.GothamBlack, AutoButtonColor = false,
+    Active = true, Draggable = true, Visible = config.ShowMobileButton,
+}, iosGui)
+round(mobileToggleBtn, 28)
+local mBtnStroke = outline(mobileToggleBtn, Theme.Accent, 2, 0)
+mk("UIGradient", { Color = ColorSequence.new(Theme.Bg2, Theme.Bg), Rotation = 90 }, mobileToggleBtn)
+
+mobileToggleBtn.MouseButton1Click:Connect(function()
+    local t = tween(mobileToggleBtn, 0.08, { Size = UDim2.new(0, 48, 0, 48) })
+    t.Completed:Wait()
+    tween(mobileToggleBtn, 0.2, { Size = UDim2.new(0, 56, 0, 56) }, Enum.EasingStyle.Back)
+    uiToggle()
+end)
+
+-- gentle glowing pulse on the mobile button
+task.spawn(function()
+    while mobileToggleBtn and mobileToggleBtn.Parent do
+        tween(mBtnStroke, 1.1, { Transparency = 0.75 }, Enum.EasingStyle.Sine).Completed:Wait()
+        if not (mobileToggleBtn and mobileToggleBtn.Parent) then break end
+        tween(mBtnStroke, 1.1, { Transparency = 0 }, Enum.EasingStyle.Sine).Completed:Wait()
+    end
+end)
+
+-- ==========================================================
+-- [5] TABS & CONTROLS
+-- ==========================================================
+local tabParry = createTabButton("Parry", T("TabParry"), "ðŸ›¡ï¸")
+local tabSkill = createTabButton("Skill", T("TabSkill"), "âš”ï¸")
+local tabGym = createTabButton("Gym", T("TabGym"), "ðŸ‹ï¸")
+local tabESP = createTabButton("ESP", T("TabESP"), "ðŸ‘ï¸")
+local tabSettings = createTabButton("Settings", T("TabSettings"), "âš™ï¸")
+
+-- Parry
+addSection(tabParry, T("SecToggles"))
+addToggle(tabParry, T("ParryToggle"), config.Enabled, function(v) config.Enabled = v end)
+addToggle(tabParry, T("CritToggle"), config.CritParryEnabled, function(v) config.CritParryEnabled = v end)
+addToggle(tabParry, T("ClashToggle"), config.GrappleClashEnabled, function(v) config.GrappleClashEnabled = v end)
+addToggle(tabParry, T("FaceTargetToggle"), config.FaceTargetEnabled, function(v) config.FaceTargetEnabled = v end)
+addSection(tabParry, T("SecTuning"))
+addSlider(tabParry, T("FaceTargetDelay"), 0, 200, config.FaceTargetDelayMs, function(v) config.FaceTargetDelayMs = v end)
+addSlider(tabParry, T("ParryOffset"), 0, 300, config.OffsetMs, function(v) config.OffsetMs = v end)
+addSlider(tabParry, T("ParryRange"), 5, 30, config.Distance, function(v) config.Distance = v end)
+addSlider(tabParry, T("CritRange"), 5, 35, config.CritDistance, function(v) config.CritDistance = v end)
+
+-- Skill
+addSection(tabSkill, T("SecToggles"))
+addToggle(tabSkill, T("SkillToggle"), config.CustomKeyEnabled, function(v) config.CustomKeyEnabled = v end)
+addSection(tabSkill, T("SecTuning"))
+addSlider(tabSkill, T("SkillOffset"), 0, 300, config.CustomKeyOffsetMs, function(v) config.CustomKeyOffsetMs = v end)
+addSlider(tabSkill, T("SkillRange"), 5, 30, config.CustomKeyDistance, function(v) config.CustomKeyDistance = v end)
+
+-- Gym Farm
+addSection(tabGym, T("SecFarm"))
+addDropdown(tabGym, T("GymMachine"), { "Dumbbells", "Deadlift", "Bench Press", "Treadmill" }, config.SelectedMachine, function(opt)
+    config.SelectedMachine = opt
+end)
+addToggle(tabGym, T("GymToggle"), config.GymAutoFarmEnabled, function(v) config.GymAutoFarmEnabled = v end)
+addToggle(tabGym, T("GymSpamCToggle"), config.GymSpamCEnabled, function(v) config.GymSpamCEnabled = v end)
+
+-- ESP
+addSection(tabESP, T("SecDisplay"))
+addToggle(tabESP, T("ESPToggle"), config.ESPEnabled, function(v) config.ESPEnabled = v end)
+addToggle(tabESP, T("SelfHPToggle"), config.SelfHPEnabled, function(v) config.SelfHPEnabled = v end)
+
+-- Settings
+addSection(tabSettings, T("SecInterface"))
+addToggle(tabSettings, T("MobileToggleBtn"), config.ShowMobileButton, function(v)
+    config.ShowMobileButton = v
+    mobileToggleBtn.Visible = v
+end)
+
+addButton(tabSettings, T("FPSBoosterToggle"), function()
+    pcall(function()
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+        Lighting.GlobalShadows = false
+        Lighting.FogEnd = 9e9
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                obj.Material = Enum.Material.SmoothPlastic
+                obj.Reflectance = 0
+            elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+                obj.Enabled = false
+            end
+        end
+    end)
+end)
+
+addButton(tabSettings, T("UnloadBtn"), function()
+    for _, conn in ipairs(connections) do
+        if conn then conn:Disconnect() end
+    end
+    if CoreGui:FindFirstChild("JAYVEE_HUB") then CoreGui.JAYVEE_HUB:Destroy() end
+    if CoreGui:FindFirstChild("JAYVEEHUD") then CoreGui.JAYVEEHUD:Destroy() end
+    for _, esp in pairs(espObjects) do
+        if esp.Billboard then esp.Billboard:Destroy() end
+    end
+    print("[" .. Brand.Name .. "] Unloaded successfully!")
+end)
+
+addSection(tabSettings, T("SecAbout"))
+addInfo(tabSettings, Brand.Name .. " " .. Brand.Version .. "  â€¢  made by " .. Brand.Author .. "  â€¢  RightCtrl = show/hide")
+
+-- ==========================================================
+-- [6] GYM AUTO FARM BACKGROUND LOGIC
+-- ==========================================================
+local machineCoords = {
+    ["Dumbbells"]   = Vector3.new(1035.75, 382.44, 157.55),
+    ["Deadlift"]    = Vector3.new(1040.17, 382.84, 141.73),
+    ["Bench Press"] = Vector3.new(1022.32, 384.60, 138.86),
+    ["Treadmill"]   = Vector3.new(1010.89, 384.39, 92.65),
+}
+
+local targetColor = Color3.fromRGB(230, 35, 51)
+local endColor = Color3.fromRGB(245, 242, 233)
+local tolerance = 0.08
+local isSpammingQ = false
+local isSpammingE = false
+local isSpammingC = false
+
+local function checkColorMatch(color, target)
+    local rDiff = math.abs(color.R - target.R)
+    local gDiff = math.abs(color.G - target.G)
+    local bDiff = math.abs(color.B - target.B)
+    return (rDiff <= tolerance and gDiff <= tolerance and bDiff <= tolerance)
+end
+
+local function getGymHudTargetFrames()
+    local gymHud = playerGui:FindFirstChild("GymHud")
+    if not gymHud then return nil, nil end
+    local panel = gymHud:FindFirstChild("Panel")
+    if not panel then return nil, nil end
+    local mainFrameObj = panel:FindFirstChild("Frame")
+    if not mainFrameObj then return nil, nil end
+    local firstFace = mainFrameObj:FindFirstChild("Face")
+    if not firstFace then return nil, nil end
+
+    local innerFrames = {}
+    for _, child in ipairs(firstFace:GetChildren()) do
+        if child:IsA("Frame") then table.insert(innerFrames, child) end
+    end
+
+    local targetFrame1, targetFrame2 = nil, nil
+    for _, f in ipairs(innerFrames) do
+        local subFace = f:FindFirstChild("Face")
+        if subFace and subFace:IsA("GuiObject") then
+            if not targetFrame1 then
+                targetFrame1 = subFace
+            else
+                targetFrame2 = subFace
+                break
+            end
+        end
+    end
+    return targetFrame1, targetFrame2
+end
+
+local function clickButton(button)
+    if button and button:IsA("TextButton") then
+        local success = false
+        pcall(function()
+            for _, conn in ipairs(getconnections(button.Activated)) do
+                conn:Fire()
+                success = true
+            end
+            for _, conn in ipairs(getconnections(button.MouseButton1Click)) do
+                conn:Fire()
+                success = true
+            end
+        end)
+        if not success then
+            pcall(function()
+                local absPos = button.AbsolutePosition
+                local absSize = button.AbsoluteSize
+                local cx = absPos.X + (absSize.X / 2)
+                local cy = absPos.Y + (absSize.Y / 2)
+                VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 0)
+                task.wait(0.05)
+                VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 0)
+            end)
+        end
+    end
+end
+
+local function pressKey(keyCode)
+    pcall(function()
+        VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
+        task.wait(0.02)
+        VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+    end)
+end
+
+table.insert(connections, RunService.RenderStepped:Connect(function()
+    if config.GymAutoFarmEnabled then
+        local targetPos = machineCoords[config.SelectedMachine]
+        if targetPos then
+            local char = LocalPlayer.Character
+            if char and char:FindFirstChild("HumanoidRootPart") then
+                local hrp = char.HumanoidRootPart
+                hrp.CFrame = CFrame.new(targetPos)
+
+                local gymWeightSelect = playerGui:FindFirstChild("GymWeightSelect")
+                local menuOpen = false
+
+                if gymWeightSelect then
+                    for _, btn in ipairs(gymWeightSelect:GetDescendants()) do
+                        if btn:IsA("TextButton") and btn.Visible then
+                            menuOpen = true
+                            break
+                        end
+                    end
+                end
+
+                if menuOpen then
+                    if config.SelectedMachine == "Treadmill" then
+                        local clicked = false
+                        local speedPriority = { "sprint", "run", "jog", "walk", "fast", "high" }
+                        for _, keyword in ipairs(speedPriority) do
+                            for _, btn in ipairs(gymWeightSelect:GetDescendants()) do
+                                if btn:IsA("TextButton") and btn.Visible then
+                                    if string.lower(btn.Name):find(keyword) or string.lower(btn.Text):find(keyword) then
+                                        clickButton(btn)
+                                        clicked = true
+                                        task.wait(0.5)
+                                        break
+                                    end
+                                end
+                            end
+                            if clicked then break end
+                        end
+                        if not clicked then
+                            for _, btn in ipairs(gymWeightSelect:GetDescendants()) do
+                                if btn:IsA("TextButton") and btn.Visible then
+                                    clickButton(btn)
+                                    task.wait(0.5)
+                                    break
+                                end
+                            end
+                        end
+                    else
+                        local weightButtons = {}
+                        for _, btn in ipairs(gymWeightSelect:GetDescendants()) do
+                            if btn:IsA("TextButton") and btn.Visible then
+                                local numStr = btn.Name:match("%d+") or btn.Text:match("%d+")
+                                if numStr then
+                                    local weightVal = tonumber(numStr)
+                                    table.insert(weightButtons, { button = btn, value = weightVal })
+                                end
+                            end
+                        end
+
+                        table.sort(weightButtons, function(a, b)
+                            return a.value > b.value
+                        end)
+
+                        if #weightButtons > 0 then
+                            for _, item in ipairs(weightButtons) do
+                                if not config.GymAutoFarmEnabled then break end
+                                clickButton(item.button)
+                                task.wait(0.5)
+                            end
+                        else
+                            for _, btn in ipairs(gymWeightSelect:GetDescendants()) do
+                                if btn:IsA("TextButton") and btn.Visible then
+                                    clickButton(btn)
+                                    task.wait(0.5)
+                                    break
+                                end
+                            end
+                        end
+                    end
+                else
+                    local f1, f2 = getGymHudTargetFrames()
+                    if f1 and checkColorMatch(f1.BackgroundColor3, targetColor) and not isSpammingQ then
+                        isSpammingQ = true
+                        task.spawn(function()
+                            while config.GymAutoFarmEnabled and f1 do
+                                if checkColorMatch(f1.BackgroundColor3, endColor) then break end
+                                pressKey(Enum.KeyCode.Q)
+                                task.wait(0.5)
+                            end
+                            isSpammingQ = false
+                        end)
+                    end
+
+                    if f2 and checkColorMatch(f2.BackgroundColor3, targetColor) and not isSpammingE then
+                        isSpammingE = true
+                        task.spawn(function()
+                            while config.GymAutoFarmEnabled and f2 do
+                                if checkColorMatch(f2.BackgroundColor3, endColor) then break end
+                                pressKey(Enum.KeyCode.E)
+                                task.wait(0.5)
+                            end
+                            isSpammingE = false
+                        end)
+                    end
+                end
+            end
+        end
+    end
+
+    -- Spam C (runs while Auto Farm Gym is enabled)
+    if config.GymAutoFarmEnabled and config.GymSpamCEnabled and not isSpammingC then
+        isSpammingC = true
+        task.spawn(function()
+            while config.GymAutoFarmEnabled and config.GymSpamCEnabled do
+                pressKey(Enum.KeyCode.C)
+                task.wait(0.5)
+            end
+            isSpammingC = false
+        end)
+    end
+end))
+
+-- ==========================================================
+-- [7] COMPACT HUD & MONITOR LOOPS
+-- ==========================================================
+if CoreGui:FindFirstChild("JAYVEEHUD") then CoreGui.JAYVEEHUD:Destroy() end
+local screenGui = mk("ScreenGui", { Name = "JAYVEEHUD", ResetOnSpawn = false }, CoreGui)
+
+local mainContainer = mk("Frame", {
+    Size = UDim2.new(0, 190, 0, 44), AnchorPoint = Vector2.new(0.5, 1),
+    Position = UDim2.new(0.5, 0, 1, -25), BackgroundColor3 = Theme.Bg,
+    BackgroundTransparency = 0.25, BorderSizePixel = 0,
+}, screenGui)
+round(mainContainer, 12)
+outline(mainContainer, Theme.Accent, 1.2, 0.3)
+
+local selfHpLabel = mk("TextLabel", {
+    Size = UDim2.new(0.5, 0, 1, 0), BackgroundTransparency = 1, Text = "â¤ï¸ HP: 100",
+    TextColor3 = Theme.Text, TextSize = 11, Font = Enum.Font.GothamBold,
+}, mainContainer)
+
+local timerLabel = mk("TextLabel", {
+    Size = UDim2.new(0.5, 0, 1, 0), Position = UDim2.new(0.5, 0, 0, 0),
+    BackgroundTransparency = 1, Text = "âš¡ READY", TextColor3 = Theme.Good,
+    TextSize = 11, Font = Enum.Font.GothamBold,
+}, mainContainer)
+
+-- AUTO Clash Monitor
+task.spawn(function()
+    local gui = playerGui:WaitForChild("GrappleClash", 5)
+    local frame = gui and gui:WaitForChild("Frame", 5)
+    local button = frame and frame:WaitForChild("TextButton", 5)
+
+    if frame and button then
+        local isSpammingClash = false
+        local lastArea = frame.AbsoluteSize.X * frame.AbsoluteSize.Y
+
+        frame:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+            if not config.GrappleClashEnabled then
+                isSpammingClash = false
+                return
+            end
+
+            local currentSize = frame.AbsoluteSize
+            local currentArea = currentSize.X * currentSize.Y
+
+            if currentArea > lastArea then
+                if not isSpammingClash then
+                    isSpammingClash = true
+                    task.spawn(function()
+                        while isSpammingClash and config.GrappleClashEnabled do
+                            local success = pcall(function()
+                                for _, connection in ipairs(getconnections(button.Activated)) do
+                                    connection:Fire()
+                                end
+                            end)
+                            if not success then
+                                button.MouseButton1Click:Fire()
+                            end
+                            task.wait(0.05)
+                        end
+                        isSpammingClash = false
+                    end)
+                end
+            elseif currentArea < lastArea then
+                isSpammingClash = false
+            end
+
+            lastArea = currentArea
+        end)
+        print("[" .. Brand.Name .. "] AUTO Clash Monitor Loaded Successfully!")
+    end
+end)
+
+table.insert(connections, RunService.RenderStepped:Connect(function()
+    screenGui.Enabled = config.SelfHPEnabled
+    if config.SelfHPEnabled and LocalPlayer.Character then
+        local hp, maxHp = getHealthInfo(LocalPlayer.Character)
+        selfHpLabel.Text = string.format("â¤ï¸ %d/%d", hp, maxHp)
+    end
+
+    local elapsed = tick() - lastMySkillUseTick
+    local remaining = totalCooldown - elapsed
+    if remaining > 0 then
+        timerLabel.Text = string.format("âš¡ %.1fs", remaining)
+        timerLabel.TextColor3 = Theme.Bad
+    else
+        timerLabel.Text = "âš¡ READY"
+        timerLabel.TextColor3 = Theme.Good
+    end
+end))
+
+-- ==========================================================
+-- [8] MONITOR CHARACTERS
+-- ==========================================================
+local function monitorCharacter(char, player)
+    local humanoid = char:WaitForChild("Humanoid", 5)
+    if not humanoid then return end
+    table.insert(connections, humanoid.AnimationPlayed:Connect(function(animTrack)
+        local animId = string.match(animTrack.Animation.AnimationId or "", "%d+$")
+        if not animId then return end
+        local localHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local enemyHrp = char:FindFirstChild("HumanoidRootPart")
+        if not localHrp or not enemyHrp then return end
+        local dist = (localHrp.Position - enemyHrp.Position).Magnitude
+
+        if config.FaceTargetEnabled and (targetAttackIds[animId] or criticalAttackIds[animId]) then
+            task.spawn(function()
+                if config.FaceTargetDelayMs > 0 then
+                    task.wait(config.FaceTargetDelayMs / 1000)
+                end
+                if localHrp and enemyHrp and localHrp.Parent and enemyHrp.Parent then
+                    localHrp.CFrame = CFrame.new(localHrp.Position, Vector3.new(enemyHrp.Position.X, localHrp.Position.Y, enemyHrp.Position.Z))
+                end
+            end)
+        end
+
+        local critStyle, critDelay = nil, nil
+        for style, info in pairs(criticalAttackIds) do
+            if info.Id == animId then
+                critStyle, critDelay = style, info.Delay
+                break
+            end
+        end
+
+        if critStyle and config.CritParryEnabled and dist <= config.CritDistance then
+            if tick() < rActiveEndTime then return end
+            if tick() - lastCritParryTime >= 0.3 then
+                lastCritParryTime = tick()
+                pressCritParryKey(critDelay)
+            end
+            return
+        end
+
+        if targetAttackIds[animId] then
+            local isMySkillReady = (tick() - lastMySkillUseTick >= totalCooldown)
+
+            if config.CustomKeyEnabled and isMySkillReady and dist <= config.CustomKeyDistance and (tick() - lastCustomKeyTime >= config.CustomKeyCooldown) then
+                lastCustomKeyTime = tick()
+                pressCustomKey()
+            end
+
+            if config.Enabled and dist <= config.Distance and (tick() - lastParryTime >= config.Cooldown) then
+                if tick() >= rActiveEndTime then
+                    lastParryTime = tick()
+                    pressParryKey()
+                end
+            end
+        end
+    end))
+end
+
+-- ==========================================================
+-- [9] ESP SETUP
+-- ==========================================================
+local function createESP(player)
+    if player == LocalPlayer then return end
+    local espData = { Billboard = Instance.new("BillboardGui"), TextLabel = Instance.new("TextLabel") }
+    espData.Billboard.Size = UDim2.new(0, 200, 0, 50)
+    espData.Billboard.StudsOffset = Vector3.new(0, 3, 0)
+    espData.Billboard.AlwaysOnTop = true
+    espData.TextLabel.Size = UDim2.new(1, 0, 1, 0)
+    espData.TextLabel.BackgroundTransparency = 1
+    espData.TextLabel.TextColor3 = Theme.Accent
+    espData.TextLabel.TextStrokeTransparency = 0
+    espData.TextLabel.TextSize = 14
+    espData.TextLabel.Font = Enum.Font.GothamBold
+    espData.TextLabel.Parent = espData.Billboard
+    espData.Billboard.Parent = CoreGui
+    espObjects[player] = espData
+
+    table.insert(connections, RunService.RenderStepped:Connect(function()
+        if not config.ESPEnabled or not player.Character then
+            espData.Billboard.Enabled = false
+            return
+        end
+        local character = player.Character
+        local head = character:FindFirstChild("Head")
+        local enemyHrp = character:FindFirstChild("HumanoidRootPart")
+        local localChar = LocalPlayer.Character
+        local localHrp = localChar and localChar:FindFirstChild("HumanoidRootPart")
+
+        if head and enemyHrp and localHrp then
+            local distance = (localHrp.Position - enemyHrp.Position).Magnitude
+            if distance <= config.ESPDistance then
+                if espData.Billboard.Adornee ~= head then espData.Billboard.Adornee = head end
+                espData.Billboard.Enabled = true
+                local hp, maxHp = getHealthInfo(character)
+                espData.TextLabel.Text = string.format("%s [%d Studs]\nâ¤ HP: %d/%d", player.Name, math.floor(distance), hp, maxHp)
+            else
+                espData.Billboard.Enabled = false
+            end
+        else
+            espData.Billboard.Enabled = false
+        end
+    end))
+end
+
+for _, p in ipairs(Players:GetPlayers()) do
+    if p ~= LocalPlayer and p.Character then task.spawn(function() monitorCharacter(p.Character, p) end) end
+    createESP(p)
+    table.insert(connections, p.CharacterAdded:Connect(function(c) monitorCharacter(c, p) end))
+end
+
+table.insert(connections, Players.PlayerAdded:Connect(function(p)
+    table.insert(connections, p.CharacterAdded:Connect(function(c) monitorCharacter(c, p) end))
+    createESP(p)
+end))
+
+print(T("NotifDesc"))
