@@ -1,5 +1,5 @@
 --==================================================================
--- ABILITY MENU - JAYVEE  (v6.5)
+-- ABILITY MENU - JAYVEE  (v6.6)
 -- Own-game LocalScript
 -- Place in: StarterPlayer > StarterPlayerScripts
 --
@@ -11,6 +11,13 @@
 --   MISC     : device info, sky box, anti lag, fast mode
 --   SETTINGS : theme, scale, sounds, animations, keybind, reset/unload
 --
+-- v6.5 CHANGES
+--   * GUN AIM DODGE: an enemy that holds a gun (or plays a fire animation) and AIMS at you makes you dodge
+--     BEFORE the bullet comes - every AIM INTERVAL seconds while he keeps aiming. (A hit-scan bullet can not be
+--     dodged after it was fired, so dodging the aim is the only way.)
+--   * ICON HIDER: hold the icon for a moment (do not move) -> a small popup with HIDE / BACK, smooth animation.
+--     A hidden icon is invisible but still tappable (hold it again -> SHOW). Also a HIDE ICON switch in SETTINGS.
+
 -- v6.4 CHANGES  (new major version: the access key is now ULTRAINSTINCTBYJAYVEEV6)
 --   * KEYBOARD OVERLAY has a new look (STYLE: Keyboard): the left side of a keyboard (ESC 1-4 / TAB Q W E R T /
 --     CAPS A S D F G / SHIFT Z X C V B / CTRL ALT SPACE) next to a mouse (left, right, wheel). Outlined keys,
@@ -50,7 +57,7 @@
 --     you to that player, wherever he is.
 --   * FINISHER: you hit someone, he drops to low HP and runs away -> your next hit / punch teleports you to him.
 
--- v6.0CHANGES
+-- v6.0 CHANGES
 --   * KEYBOARD OVERLAY (SETTINGS tab, OBS style): shows only the keys you use - W A S D, SPACE / SHIFT, mouse
 --     M1 / M2 and your own custom keys (1 2 3 4 Q E R F by default). Keys light up while pressed.
 --     Movable (drag it), resizable, adjustable opacity, ignores typing in chat.
@@ -122,7 +129,7 @@
 --   * Damage fallback dodges even when no enemy is inside the radius.
 --==================================================================
 
-print("[JAYVEE] Ability Menu v6.0 loading...")
+print("[JAYVEE] Ability Menu v6.1 loading...")
 
 -- On-screen status banner: shows "loading", "loaded" or the exact ERROR on your screen.
 local function JV_Banner(text, isError)
@@ -173,7 +180,7 @@ local U = {} -- helper functions live here (Luau allows only 200 locals per scop
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local SCRIPT_VERSION = "v6.0"
+local SCRIPT_VERSION = "v6.1"
 local VERSION_MAJOR = SCRIPT_VERSION:match("%d+") or "4"
 local PASSWORD_PREFIX = "ULTRAINSTINCTBYJAYVEE"
 local PASSWORD = PASSWORD_PREFIX .. "V" .. VERSION_MAJOR
@@ -384,6 +391,11 @@ local Settings = {
 	AutoFriendTeam = false,       -- players on your team are marked FRIENDLY automatically
 	TargetHud = true,             -- small panel with the locked target's name / HP / distance
 
+	-- v6.1  gun aim dodge
+	AimDodge = true,
+	AimRange = 150,               -- an armed enemy aiming at you from closer than this makes you dodge
+	AimInterval = 0.7,            -- seconds between two aim dodges (per enemy)
+
 	-- v5.11  friendly / target lock / finisher
 	FriendlyOn = true,
 	TargetLockOn = true,
@@ -523,6 +535,8 @@ function U.applySnapshot(snap)
 	Settings.FinMemory = math.clamp(Settings.FinMemory, 3, 15)
 	Settings.TpGap = math.clamp(Settings.TpGap, 2, 8)
 	Settings.BulletRadius = math.clamp(Settings.BulletRadius, 4, 16)
+	Settings.AimRange = math.clamp(Settings.AimRange, 50, 300)
+	Settings.AimInterval = math.clamp(Settings.AimInterval, 0.3, 1.5)
 	for _, key in ipairs({"ThemeIndex", "AuraTintIndex", "ESPColorIndex"}) do
 		Settings[key] = math.max(1, math.floor(Settings[key]))
 	end
@@ -2631,6 +2645,11 @@ local function senseStep()
 		nextRanged = now + 0.1
 		ranged = U.scanRanged(now)
 	end
+	if not (hitTarget or contact or attack or threat or ranged) and Settings.AimDodge and U.scanAim
+		and now >= (U.nextAim or 0) then
+		U.nextAim = now + 0.08
+		ranged = U.scanAim(now)
+	end
 
 	if not (hitTarget or contact or attack or threat or ranged) then return end
 
@@ -3612,6 +3631,8 @@ minimized.InputBegan:Connect(function() U.minLastUse = os.clock() end)
 -- icon UI configuration (size / shape / opacity / border)
 function U.paintIcon()
 	local tr = math.clamp(Settings.IconTransparency + (U.minFade or 0), 0, 0.92)
+	local hv = U.iconAlpha and U.iconAlpha.Value or 0       -- ICON HIDER: 0 = visible, 1 = hidden (ghost)
+	if hv > 0 then tr = tr + (1 - tr) * hv end
 	if U.minPainted == tr then return end
 	U.minPainted = tr
 	minimized.BackgroundTransparency = tr
@@ -3732,8 +3753,114 @@ end
 minimizeBtn.Activated:Connect(closeMenu)
 closeBtn.Activated:Connect(closeMenu)
 minimized.Activated:Connect(function()
-	if minDrag.moved then return end
+	if minDrag.moved or os.clock() < (U.iconSuppress or 0) then return end
 	U.openMenu()
+end)
+
+--==================================================
+-- ICON HIDER: hold the icon (do not move) -> HIDE / BACK.  A hidden icon is invisible but still tappable.
+--==================================================
+U.iconHidden = false
+U.iconAlpha = Instance.new("NumberValue")
+U.iconAlpha.Changed:Connect(function()
+	U.minPainted = nil
+	U.paintIcon()
+end)
+
+U.IP = {token = 0}
+do
+	local box = new("CanvasGroup", {
+		Name = "IconPopup", Size = UDim2.fromOffset(162, 48), BackgroundColor3 = COL.bg, BackgroundTransparency = 0.05,
+		BorderSizePixel = 0, Visible = false, GroupTransparency = 1, ZIndex = 40,
+	}, gui)
+	U.corner(box, 14)
+	stroke(box, 1.5, 0.35, theme().a)
+	U.IP.root = box
+	U.IP.scale = new("UIScale", {Scale = 0.7}, box)
+	local function btn(text, x, color)
+		local b = new("TextButton", {
+			Position = UDim2.fromOffset(x, 8), Size = UDim2.fromOffset(72, 32), Text = text,
+			Font = Enum.Font.GothamBlack, TextSize = 12, TextColor3 = Color3.new(1, 1, 1),
+			BackgroundColor3 = color, AutoButtonColor = true, ZIndex = 41,
+		}, box)
+		U.corner(b, 10)
+		return b
+	end
+	U.IP.hideBtn = btn("HIDE", 6, theme().b)
+	U.IP.backBtn = btn("BACK", 84, COL.off)
+end
+
+function U.iconPopupClose()
+	local P = U.IP
+	if not P.root.Visible then return end
+	P.token += 1
+	local my = P.token
+	U.tw(P.scale, 0.16, {Scale = 0.75}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	U.tw(P.root, 0.16, {GroupTransparency = 1}, Enum.EasingStyle.Quad)
+	task.delay(0.18, function()
+		if my == P.token then P.root.Visible = false end
+	end)
+end
+
+function U.iconPopupOpen()
+	local P = U.IP
+	P.hideBtn.Text = U.iconHidden and "SHOW" or "HIDE"
+	P.hideBtn.BackgroundColor3 = theme().b
+	local ap, as = minimized.AbsolutePosition, minimized.AbsoluteSize
+	local vp = gui.AbsoluteSize
+	local w, h = 162, 48
+	local x = ap.X + as.X + 10
+	if ap.X + as.X / 2 > vp.X / 2 then x = ap.X - w - 10 end        -- icon on the right half: open to its left
+	local y = ap.Y + as.Y / 2 - h / 2
+	x = math.clamp(x, 6, math.max(vp.X - w - 6, 6))
+	y = math.clamp(y, 6, math.max(vp.Y - h - 6, 6))
+	P.root.Position = UDim2.fromOffset(x, y)
+	P.token += 1
+	local my = P.token
+	P.root.Visible = true
+	P.scale.Scale = 0.7
+	P.root.GroupTransparency = 1
+	U.tw(P.scale, 0.22, {Scale = 1}, Enum.EasingStyle.Back)
+	U.tw(P.root, 0.18, {GroupTransparency = 0}, Enum.EasingStyle.Quad)
+	U.play("click")
+	task.delay(6, function()          -- nobody chose: close by itself
+		if my == P.token and P.root.Visible then U.iconPopupClose() end
+	end)
+end
+
+-- smooth fade out / in; the hidden icon can still be tapped
+function U.setIconHidden(on)
+	on = on and true or false
+	if U.iconHidden == on then return end
+	U.iconHidden = on
+	U.tw(U.iconAlpha, on and 0.4 or 0.3, {Value = on and 1 or 0}, Enum.EasingStyle.Quint)
+	U.play(on and "toggleOff" or "toggleOn")
+	U.minLastUse = os.clock()
+end
+
+U.IP.hideBtn.Activated:Connect(function()
+	U.setIconHidden(not U.iconHidden)
+	U.iconPopupClose()
+end)
+U.IP.backBtn.Activated:Connect(function()
+	U.play("click")
+	U.iconPopupClose()
+end)
+
+-- long press on the icon (finger / mouse stays in place) -> popup; the release must not open the menu
+U.IconHold = {id = 0}
+minimized.InputBegan:Connect(function(input)
+	local ut = input.UserInputType
+	if ut ~= Enum.UserInputType.MouseButton1 and ut ~= Enum.UserInputType.Touch then return end
+	U.IconHold.id += 1
+	local my = U.IconHold.id
+	local startPos = input.Position
+	task.delay(0.8, function()
+		if my ~= U.IconHold.id or input.UserInputState == Enum.UserInputState.End then return end
+		if minDrag.moved or (input.Position - startPos).Magnitude > 8 then return end
+		U.iconSuppress = os.clock() + 1.5
+		U.iconPopupOpen()
+	end)
 end)
 
 --==================================================
@@ -4895,6 +5022,42 @@ function U.scanBullets(now)
 	return {away = false, dir = best, name = "BULLET TRACER", dist = math.clamp(R + 4, 9, 20), bullet = true}
 end
 
+----------------------------------------------------- GUN AIM DODGE (an enemy with a gun aims at you)
+U.aimCd = setmetatable({}, {__mode = "k"})
+U.GUN_WORDS = {
+	"gun", "pistol", "rifle", "ak47", "ak-47", "m4a1", "m16", "glock", "shotgun", "sniper", "revolver", "smg",
+	"uzi", "blaster", "cannon", "launcher", "rocket", "deagle", "musket", "carbine", "magnum", "minigun",
+	"railgun", "laser", "crossbow",
+}
+
+function U.looksLikeGun(model)
+	local tool = model:FindFirstChildOfClass("Tool")
+	if not tool then return false end
+	local n = string.lower(tool.Name)
+	for _, w in ipairs(U.GUN_WORDS) do
+		if string.find(n, w, 1, true) then return true end
+	end
+	return false
+end
+
+-- an enemy holding a tool (gun) AIMS at you from far away: dodge before the shot, then again every AIM INTERVAL
+function U.scanAim(now)
+	if not Settings.AimDodge or not root or not humanoid or humanoid.Health <= 0 then return nil end
+	local best, bestD = nil, math.huge
+	U.eachTarget(function(m)
+		if not U.isValidTarget(m) or (U.aimCd[m] or 0) > now then return end
+		local tr = U.getRoot(m)
+		if not tr or not m:FindFirstChildOfClass("Tool") then return end
+		local toMe = root.Position - tr.Position
+		local d = toMe.Magnitude
+		if d <= Settings.Radius or d > Settings.AimRange or d < 0.1 then return end   -- close fights are handled elsewhere
+		if tr.CFrame.LookVector:Dot(toMe.Unit) < 0.965 then return end                -- aiming at you (about 15 degrees)
+		if (U.looksLikeGun(m) or U.enemyLooksLikeAttacking(m, true)) and d < bestD then bestD, best = d, m end
+	end)
+	if best then U.aimCd[best] = now + Settings.AimInterval end
+	return best
+end
+
 ----------------------------------------------------- AUTO FRIENDLY (Roblox friends / your team)
 U.autoFriend = setmetatable({}, {__mode = "k"})   -- [Player] = true  (marked automatically, not saved)
 U.autoSkip = setmetatable({}, {__mode = "k"})     -- [Player] = true  (you removed him by hand: do not mark him again)
@@ -5211,10 +5374,16 @@ do
 	U.toggleRow(cbu, "BULLET DODGE", function() return Settings.BulletDodge end, function(v) Settings.BulletDodge = v end)
 	U.stepperRow(cbu, "BULLET RADIUS", function() return U.fmt(Settings.BulletRadius) .. " studs" end,
 		U.adjust("BulletRadius", 1, 4, 16))
+	U.toggleRow(cbu, "GUN AIM DODGE", function() return Settings.AimDodge end, function(v) Settings.AimDodge = v end)
+	U.stepperRow(cbu, "AIM RANGE", function() return U.fmt(Settings.AimRange) .. " studs" end,
+		U.adjust("AimRange", 25, 50, 300))
+	U.stepperRow(cbu, "AIM INTERVAL", function() return U.fmt(Settings.AimInterval) .. "s" end,
+		U.adjust("AimInterval", 0.1, 0.3, 1.5))
 	U.infoText(cbu, function()
 		return "Dodges when a bullet tracer (beam or streak) or a fast small bullet passes closer than BULLET RADIUS to you. You sidestep the line of fire.\n"
 			.. "Tracers of your own gun, your own effects and your FRIENDLY players are ignored.\n"
-			.. "Note: hit-scan guns damage you the moment they fire, so the tracer helps against the NEXT shots (and against slow bullets)."
+			.. "A hit-scan bullet hurts you the moment it is fired, so a tracer can only help against the NEXT shots.\n"
+			.. "GUN AIM DODGE fixes that: when an enemy holding a gun AIMS at you (inside AIM RANGE) you dodge BEFORE he shoots, and again every AIM INTERVAL while he keeps aiming."
 	end, false, 10)
 
 	-- FRIENDLY: click / tap = BLUE, saved list, leaderboard style
@@ -7165,12 +7334,13 @@ do
 	U.stepperRow(cu, "HOLD TIME", function() return string.format("%.2fs", Settings.IconHoldTime) end,
 		U.adjust("IconHoldTime", 0.05, 0.15, 1.2))
 	U.toggleRow(cu, "SNAP TO EDGE", function() return Settings.IconSnapEdge end, function(v) Settings.IconSnapEdge = v end)
+	U.toggleRow(cu, "HIDE ICON  (GHOST)", function() return U.iconHidden end, function(v) U.setIconHidden(v) end)
 	U.actionRow(cu, "RESET ICON POSITION", function()
 		minimized.Position = UDim2.new(0, 18, 0.5, -math.floor(Settings.IconSize / 2))
 		U.clampGui(minimized, 6)
 	end)
 	U.infoText(cu, function()
-		return "ICON MOVE = HOLD means you must press and hold the icon to drag it, so your joystick finger can never grab it by accident. A quick tap opens the menu. LOCKED = it never moves."
+		return "ICON MOVE = HOLD means you must press and hold the icon to drag it, so your joystick finger can never grab it by accident. A quick tap opens the menu. LOCKED = it never moves.\nICON HIDER: hold the icon for a moment without moving = a popup with HIDE / BACK. A hidden icon is invisible but you can still tap it; hold it again and press SHOW (or use the HIDE ICON switch)."
 	end, false, 10)
 
 	-- DATA: SAVE | RESET side by side
