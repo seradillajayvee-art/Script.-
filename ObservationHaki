@@ -1,5 +1,5 @@
 -- AI DODGE - DELTA MOBILE (Shadow edition: black & gray)
--- MODE: DASH (quick slip-step) / DODGE (body poses, no animation)
+-- MODE: DASH (quick slip-step) / DODGE (body poses, no animation) / RANDOM (reads the attack, picks dash or dodge)
 --   DODGE: LEFT / RIGHT = side lean
 --          BACK         = HAWK back dodge (Hajime no Ippo, Takamura style: arms down, bend way back)
 --          DUCK         = real duck (knees bent, body folded forward)
@@ -50,6 +50,18 @@ local DuckBend = 50           -- how far the body folds forward when ducking (de
 local DuckKnee = 55           -- how deep the knees bend when ducking (degrees)
 local AutoStyle = "MIX"       -- DODGE mode auto: "MIX", "SIDE", "BACK" (hawk), "DUCK"
 
+-- NEW: RANDOM mode (punch = dodge, heavy / bullet = dash or dodge)
+local HeavyTime = 0.75        -- enemy attack animation this long (seconds) or longer = HEAVY, shorter = PUNCH
+local ChargeSpeed = 30        -- enemy rushing at you faster than this (studs/s) counts as HEAVY
+local HeavyDashChance = 0.6   -- heavy attack: chance to DASH (otherwise dodge)
+local HeavyDelay = 0.12       -- heavy attack: wait a bit before reacting so you dodge closer to the hit
+local BulletDashChance = 0.6  -- bullet: chance to DASH (otherwise dodge: lean or duck)
+local BulletSpeed = 35        -- part must fly at least this fast (studs/s) to count as a bullet
+local BulletReact = 0.45      -- react when the bullet would hit in less than this many seconds
+local BulletMiss = 4.5        -- only dodge bullets that would pass within this many studs of you
+local BulletMaxSize = 12      -- ignore fast parts bigger than this (not bullets)
+local RequireAttackAnim = false -- true = RANDOM only reacts when it SEES an attack animation / bullet
+
 -- COLORS (black & gray only)
 local BLACK = Color3.fromRGB(10, 10, 10)
 local DARK = Color3.fromRGB(45, 45, 45)
@@ -58,6 +70,7 @@ local LIGHT = Color3.fromRGB(185, 185, 185)
 
 local Enabled = false
 local Busy = false
+local Pending = false      -- waiting to react to a heavy attack
 local Mode = "DASH"           -- "DASH" or "DODGE"
 local ShowCircle = true
 
@@ -569,13 +582,20 @@ end
 
 -- direction is in LOCAL space: X = right, Z = backward (forward is -Z)
 -- kind: "side" (default), "back" (hawk), "duck"  (back/duck only apply in DODGE mode, duck always ducks)
-local function perform(direction, kind)
+-- forcedMove: "DASH" or "DODGE" (RANDOM mode uses this); nil = use the current MODE
+-- manual buttons in RANDOM mode pick dash or dodge by coin flip
+local function perform(direction, kind, forcedMove)
     if Busy then return end
 
     local humanoid, root = getCharacter()
     if not humanoid or not root then return end
 
     kind = kind or "side"
+
+    local move = forcedMove or Mode
+    if move == "RANDOM" then
+        move = (math.random(1, 2) == 1) and "DASH" or "DODGE"
+    end
 
     local localDir = Vector3.new(0, 0, -1)
     local worldDir = Vector3.new(0, 0, 0)
@@ -596,7 +616,7 @@ local function perform(direction, kind)
 
     Busy = true
     local ok, err = pcall(function()
-        if Mode == "DASH" and kind ~= "duck" then
+        if move == "DASH" and kind ~= "duck" then
             cooldown = DashCooldown
             dashMove(character, humanoid, root, worldDir)
         else
@@ -788,7 +808,9 @@ end)
 
 local modeBtn
 modeBtn = button("MODE: DASH", 10, 78, 210, function()
-    Mode = (Mode == "DASH") and "DODGE" or "DASH"
+    local modes = {"DASH", "DODGE", "RANDOM"}
+    local index = table.find(modes, Mode) or 1
+    Mode = modes[index % #modes + 1]
     modeBtn.Text = "MODE: " .. Mode
 end)
 
@@ -883,12 +905,267 @@ end)
 -- AUTO DODGE: only enemies inside the circle count
 ---------------------------------------------------------------------
 
+-- world-space "away" direction -> local slip direction (sideways + a bit away)
+local function slipDirection(root, away, awayWeight)
+    local sign = (math.random(1, 2) == 1) and 1 or -1
+    local perp = Vector3.new(-away.Z, 0, away.X) * sign
+    local dir = (perp + away * awayWeight).Unit
+    return root.CFrame:VectorToObjectSpace(dir)
+end
+
+-- is the threat roughly in front of you? (away = direction from the threat to you)
+local function isInFront(root, away)
+    local look = root.CFrame.LookVector
+    local flatLook = Vector3.new(look.X, 0, look.Z)
+    return flatLook.Magnitude > 0.01 and flatLook.Unit:Dot(-away) > 0.5
+end
+
+-- which dodge pose to use (side lean / hawk back / duck), from the AUTO style button
+-- hawk + duck only when the attacker is in front of you
+local function pickDodgeKind(root, away)
+    local style = AutoStyle
+    if style == "MIX" then
+        local roll = math.random(1, 3)
+        if roll == 1 then
+            style = "SIDE"
+        elseif roll == 2 then
+            style = "BACK"
+        else
+            style = "DUCK"
+        end
+    end
+
+    if isInFront(root, away) then
+        if style == "BACK" then return "back" end
+        if style == "DUCK" then return "duck" end
+    end
+    return "side"
+end
+
+-- move = nil -> uses the current MODE
+local function performKind(root, away, kind, move, awayWeight)
+    if kind == "back" then
+        perform(Vector3.new(0, 0, 1), "back", move)
+    elseif kind == "duck" then
+        perform(Vector3.new(0, 0, -1), "duck", move)
+    else
+        perform(slipDirection(root, away, awayWeight or 0.35), "side", move)
+    end
+end
+
+---------------------------------------------------------------------
+-- RANDOM MODE: figure out WHAT is coming (punch / heavy / bullet)
+---------------------------------------------------------------------
+
+-- attack animation that just started on an enemy (short = punch, long = heavy)
+local seenTracks = setmetatable({}, {__mode = "k"})
+
+local function attackAnimation(oHumanoid)
+    local animator = oHumanoid:FindFirstChildOfClass("Animator")
+    if not animator then return nil end
+
+    local ok, tracks = pcall(function()
+        return animator:GetPlayingAnimationTracks()
+    end)
+    if not ok then return nil end
+
+    for _, track in ipairs(tracks) do
+        local p = track.Priority
+        if not track.Looped
+            and p ~= Enum.AnimationPriority.Core
+            and p ~= Enum.AnimationPriority.Idle
+            and p ~= Enum.AnimationPriority.Movement
+            and track.Length > 0.2
+            and track.TimePosition < 0.3
+            and not seenTracks[track] then
+            seenTracks[track] = true
+            if track.Length >= HeavyTime then
+                return "heavy"
+            end
+            return "punch"
+        end
+    end
+
+    return nil
+end
+
+-- nearest enemy inside the circle that is attacking (or charging at you)
+local function scanThreat(root)
+    local best = nil
+    local bestDist = math.huge
+
+    for _, other in ipairs(Players:GetPlayers()) do
+        if other ~= Player and other.Character then
+            local oHumanoid = other.Character:FindFirstChildOfClass("Humanoid")
+            local oRoot = other.Character:FindFirstChild("HumanoidRootPart")
+
+            if oHumanoid and oHumanoid.Health > 0 and oRoot then
+                local offset = root.Position - oRoot.Position
+                local flat = Vector3.new(offset.X, 0, offset.Z)
+                local dist = flat.Magnitude
+
+                if dist < Range and dist > 0.1 and dist < bestDist then
+                    local toMe = flat.Unit
+                    local closing = oRoot.AssemblyLinearVelocity:Dot(toMe)
+                    local facing = oRoot.CFrame.LookVector:Dot(toMe)
+
+                    local kind = nil
+                    local fromAnim = false
+
+                    if facing > 0.4 then
+                        kind = attackAnimation(oHumanoid)
+                        fromAnim = kind ~= nil
+                    end
+
+                    -- no animation seen: fall back to "enemy is rushing / right next to you"
+                    if not kind and not RequireAttackAnim and facing > 0.5
+                        and (closing > ApproachSpeed or dist < Range * 0.5) then
+                        kind = (closing > ChargeSpeed) and "heavy" or "punch"
+                    end
+
+                    if kind then
+                        bestDist = dist
+                        best = {kind = kind, away = toMe, anim = fromAnim}
+                    end
+                end
+            end
+        end
+    end
+
+    return best
+end
+
+-- fast small parts flying at you (bullets / projectiles)
+local bulletLastPos = setmetatable({}, {__mode = "k"})
+local bulletLastTime = setmetatable({}, {__mode = "k"})
+local bulletParams = OverlapParams.new()
+bulletParams.FilterType = Enum.RaycastFilterType.Exclude
+local lastBulletScan = 0
+
+local function scanBullet(character, root)
+    local now = os.clock()
+    if now - lastBulletScan < 0.05 then return nil end
+    lastBulletScan = now
+
+    bulletParams.FilterDescendantsInstances = {character}
+    local radius = math.max(Range + 10, 22)
+
+    local ok, parts = pcall(function()
+        return workspace:GetPartBoundsInRadius(root.Position, radius, bulletParams)
+    end)
+    if not ok then return nil end
+
+    local best = nil
+    local bestTime = math.huge
+
+    for _, part in ipairs(parts) do
+        local pos = part.Position
+        local v = part.AssemblyLinearVelocity
+
+        -- anchored / tweened bullets: work out the speed from how far it moved
+        if v.Magnitude < BulletSpeed then
+            local lastPos = bulletLastPos[part]
+            local lastTime = bulletLastTime[part]
+            if lastPos and lastTime and now - lastTime > 0.005 then
+                v = (pos - lastPos) / (now - lastTime)
+            end
+        end
+        bulletLastPos[part] = pos
+        bulletLastTime[part] = now
+
+        local speed = v.Magnitude
+        if speed >= BulletSpeed and part.Size.Magnitude <= BulletMaxSize then
+            local model = part:FindFirstAncestorOfClass("Model")
+            local skip = model and (model.Name == "AIDodgeGhost" or model:FindFirstChildOfClass("Humanoid"))
+
+            if not skip then
+                local dir = v / speed
+                local toMe = root.Position - pos
+                local along = toMe:Dot(dir)
+
+                if along > 0 then
+                    local lateral = toMe - dir * along
+                    local tti = along / speed
+
+                    if lateral.Magnitude < BulletMiss and tti < BulletReact and tti < bestTime then
+                        -- step off the line of fire
+                        local away = Vector3.new(lateral.X, 0, lateral.Z)
+                        if away.Magnitude < 0.5 then
+                            local sign = (math.random(1, 2) == 1) and 1 or -1
+                            away = Vector3.new(-dir.Z, 0, dir.X) * sign
+                        end
+                        if away.Magnitude > 0.01 then
+                            bestTime = tti
+                            best = {kind = "bullet", away = away.Unit, anim = false}
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return best
+end
+
+-- RANDOM decision:
+--   punch  -> always a dodge (side / hawk back / duck)
+--   heavy  -> dash (mostly) or dodge
+--   bullet -> step off the line: dash (mostly) or dodge (side lean / duck)
+local function react(root, threat)
+    if threat.kind == "punch" then
+        performKind(root, threat.away, pickDodgeKind(root, threat.away), "DODGE", 0.35)
+
+    elseif threat.kind == "heavy" then
+        if math.random() < HeavyDashChance then
+            perform(slipDirection(root, threat.away, 0.8), "side", "DASH")
+        else
+            performKind(root, threat.away, pickDodgeKind(root, threat.away), "DODGE", 0.35)
+        end
+
+    else
+        local localDir = root.CFrame:VectorToObjectSpace(threat.away)
+        if math.random() < BulletDashChance then
+            perform(localDir, "side", "DASH")
+        elseif math.random(1, 3) == 1 then
+            perform(Vector3.new(0, 0, -1), "duck", "DODGE")
+        else
+            perform(localDir, "side", "DODGE")
+        end
+    end
+end
+
+-- heavy attacks (seen from the animation) get a tiny delay so you dodge closer to the hit
+local function reactRandom(root, threat)
+    if threat.kind == "heavy" and threat.anim and HeavyDelay > 0 then
+        Pending = true
+        task.delay(HeavyDelay, function()
+            Pending = false
+            local _, r = getCharacter()
+            if Enabled and r then
+                react(r, threat)
+            end
+        end)
+    else
+        react(root, threat)
+    end
+end
+
 local autoLoop = RunService.Heartbeat:Connect(function()
-    if not Enabled or Busy then return end
+    if not Enabled or Busy or Pending then return end
 
     local humanoid, root = getCharacter()
     if not humanoid then return end
 
+    -- RANDOM mode: read the threat first
+    if Mode == "RANDOM" then
+        local threat = scanBullet(Player.Character, root) or scanThreat(root)
+        if threat then
+            reactRandom(root, threat)
+        end
+        return
+    end
+
+    -- DASH / DODGE mode
     local bestDist = math.huge
     local bestDir = nil
 
@@ -918,43 +1195,10 @@ local autoLoop = RunService.Heartbeat:Connect(function()
 
     if bestDir then
         local kind = "side"
-
-        -- DODGE mode: hawk back / duck only when the attacker is in front of you
         if Mode == "DODGE" then
-            local style = AutoStyle
-            if style == "MIX" then
-                local roll = math.random(1, 3)
-                if roll == 1 then
-                    style = "SIDE"
-                elseif roll == 2 then
-                    style = "BACK"
-                else
-                    style = "DUCK"
-                end
-            end
-
-            local look = root.CFrame.LookVector
-            local flatLook = Vector3.new(look.X, 0, look.Z)
-            local inFront = flatLook.Magnitude > 0.01 and flatLook.Unit:Dot(-bestDir) > 0.5
-
-            if inFront and style == "BACK" then
-                kind = "back"
-            elseif inFront and style == "DUCK" then
-                kind = "duck"
-            end
+            kind = pickDodgeKind(root, bestDir)
         end
-
-        if kind == "back" then
-            perform(Vector3.new(0, 0, 1), "back")
-        elseif kind == "duck" then
-            perform(Vector3.new(0, 0, -1), "duck")
-        else
-            -- slip sideways and a little away from the attacker
-            local sign = (math.random(1, 2) == 1) and 1 or -1
-            local perp = Vector3.new(-bestDir.Z, 0, bestDir.X) * sign
-            local dir = (perp + bestDir * 0.35).Unit
-            perform(root.CFrame:VectorToObjectSpace(dir), "side")
-        end
+        performKind(root, bestDir, kind, nil, 0.35)
     end
 end)
 
