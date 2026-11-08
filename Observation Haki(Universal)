@@ -8,8 +8,22 @@ local UIS = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 local Lighting = game:GetService("Lighting")
+local StarterGui = game:GetService("StarterGui")
 
 local Player = Players.LocalPlayer
+
+local function notify(text)
+    print("[AI Dodge] " .. text)
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {
+            Title = "AI Dodge",
+            Text = text,
+            Duration = 6
+        })
+    end)
+end
+
+local function main()
 
 -- SETTINGS (tweak these)
 local Range = 10              -- auto dodge only triggers inside this circle (studs)
@@ -25,6 +39,7 @@ local DodgeCooldown = 0.4
 local ApproachSpeed = 3       -- enemy must move toward you at least this fast (or be very close)
 local FovKick = 8             -- camera FOV pulse (0 = off)
 local ScreenFX = true         -- quick grayscale flash + blur (set false if it lags)
+local HideUi = false           -- false = normal PlayerGui (always visible). true = hidden executor UI (gethui/CoreGui)
 
 -- COLORS (black & gray only)
 local BLACK = Color3.fromRGB(10, 10, 10)
@@ -433,13 +448,20 @@ local function perform(direction)
     local cooldown
 
     Busy = true
-    if Mode == "DASH" then
-        cooldown = DashCooldown
-        dashMove(character, humanoid, root, worldDir)
-    else
-        cooldown = DodgeCooldown
-        dodgeMove(character, humanoid, root, worldDir, localDir)
+    local ok, err = pcall(function()
+        if Mode == "DASH" then
+            cooldown = DashCooldown
+            dashMove(character, humanoid, root, worldDir)
+        else
+            cooldown = DodgeCooldown
+            dodgeMove(character, humanoid, root, worldDir, localDir)
+        end
+    end)
+
+    if not ok then
+        warn("[AI Dodge] " .. tostring(err))
     end
+    cooldown = cooldown or 0.5
 
     task.delay(cooldown, function()
         Busy = false
@@ -450,40 +472,111 @@ end
 -- UI
 ---------------------------------------------------------------------
 
-local function getGuiParent()
+local function clearOldUi()
+    local places = {}
+
     if gethui then
         local ok, ui = pcall(gethui)
-        if ok and ui then return ui end
+        if ok and ui then
+            table.insert(places, ui)
+        end
     end
 
-    local ok = pcall(function()
-        return game:GetService("CoreGui"):GetChildren()
+    pcall(function()
+        table.insert(places, game:GetService("CoreGui"))
     end)
-    if ok then
-        return game:GetService("CoreGui")
+
+    local pg = Player:FindFirstChildOfClass("PlayerGui")
+    if pg then
+        table.insert(places, pg)
     end
 
-    return Player:WaitForChild("PlayerGui")
+    for _, place in ipairs(places) do
+        pcall(function()
+            local old = place:FindFirstChild("AIDodgeUI")
+            if old then
+                old:Destroy()
+            end
+        end)
+    end
 end
 
-local guiParent = getGuiParent()
+local function getGuiParents()
+    local list = {}
 
--- remove old copy if the script is run again
-local old = guiParent:FindFirstChild("AIDodgeUI")
-if old then old:Destroy() end
+    if HideUi then
+        if gethui then
+            local ok, ui = pcall(gethui)
+            if ok and ui then
+                table.insert(list, ui)
+            end
+        end
+        pcall(function()
+            table.insert(list, game:GetService("CoreGui"))
+        end)
+    end
+
+    local pg = Player:FindFirstChildOfClass("PlayerGui") or Player:WaitForChild("PlayerGui", 10)
+    if pg then
+        table.insert(list, pg)
+    end
+
+    return list
+end
+
+-- remove old copies (from any previous run)
+clearOldUi()
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "AIDodgeUI"
 gui.ResetOnSpawn = false
-gui.Parent = guiParent
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.DisplayOrder = 999
+gui.IgnoreGuiInset = true
+
+local parented = false
+for _, parent in ipairs(getGuiParents()) do
+    local ok = pcall(function()
+        gui.Parent = parent
+    end)
+    if ok and gui.Parent == parent then
+        parented = true
+        break
+    end
+end
+
+if not parented then
+    error("could not put the UI on screen")
+end
 
 local frame = Instance.new("Frame")
 frame.Size = UDim2.fromOffset(230, 252)
-frame.Position = UDim2.new(0.5, -115, 0.5, -126)
+frame.Position = UDim2.new(0, 15, 0.5, -126)
 frame.BackgroundColor3 = BLACK
 frame.BorderSizePixel = 0
 frame.Active = true
 frame.Parent = gui
+
+-- small icon (right side) to hide / show the panel
+local icon = Instance.new("TextButton")
+icon.Name = "AIDodgeIcon"
+icon.Size = UDim2.fromOffset(40, 40)
+icon.Position = UDim2.new(1, -55, 0.5, -20)
+icon.BackgroundColor3 = BLACK
+icon.BorderSizePixel = 0
+icon.Font = Enum.Font.GothamBold
+icon.TextSize = 14
+icon.TextColor3 = LIGHT
+icon.Text = "AD"
+icon.Parent = gui
+
+local iconCorner = Instance.new("UICorner")
+iconCorner.CornerRadius = UDim.new(1, 0)
+iconCorner.Parent = icon
+
+icon.MouseButton1Click:Connect(function()
+    frame.Visible = not frame.Visible
+end)
 
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, 0, 0, 30)
@@ -677,4 +770,15 @@ gui.Destroying:Connect(function()
     pcall(restoreJoints)
 end)
 
-print("AI Dodge (Shadow edition) loaded")
+notify("Loaded! Tap the AD icon (right side) to hide/show the panel.")
+
+end -- main
+
+local ok, err = xpcall(main, function(e)
+    return tostring(e) .. "\n" .. debug.traceback()
+end)
+
+if not ok then
+    warn("[AI Dodge] ERROR: " .. tostring(err))
+    notify("Error: " .. tostring(err):sub(1, 140))
+end
