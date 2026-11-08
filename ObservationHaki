@@ -1,571 +1,784 @@
--- AI DODGE (compact, Delta mobile) - black & gray
--- DASH = quick slip-step, DODGE = body lean. Only reacts to enemies INSIDE the range circle.
-if not game:IsLoaded() then game.Loaded:Wait() end
+-- AI DODGE - DELTA MOBILE (Shadow edition: black & gray)
+-- MODE: DASH (quick slip-step) / DODGE (body lean, no animation)
+-- Auto dodge only reacts to enemies INSIDE the range circle
 
 local Players = game:GetService("Players")
-local RS = game:GetService("RunService")
+local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
-local TS = game:GetService("TweenService")
+local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 local Lighting = game:GetService("Lighting")
-local SG = game:GetService("StarterGui")
-local P = Players.LocalPlayer
+local StarterGui = game:GetService("StarterGui")
+
+local Player = Players.LocalPlayer
+
+local function notify(text)
+    print("[AI Dodge] " .. text)
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {
+            Title = "AI Dodge",
+            Text = text,
+            Duration = 6
+        })
+    end)
+end
+
+local function main()
 
 -- SETTINGS (tweak these)
-local S = {
-    Range = 10, RangeMin = 4, RangeMax = 30, RangeStep = 2,
-    DashDist = 5, DashTime = 0.12, DashCD = 0.45,
-    Lean = 35, Shift = 1.5, DodgeCD = 0.4,
-    Approach = 3,    -- enemy must move toward you this fast (studs/s)...
-    Close = 5,       -- ...or be this close
-    Back = 0.35,     -- 0 = pure sidestep, higher = also steps away
-    Scan = 0.05,
-    Teams = true,    -- ignore teammates
-    Fov = 8,         -- camera FOV pulse, 0 = off
-    FX = true,       -- grayscale flash + blur (set false if it lags)
-    HideUi = false,  -- false = PlayerGui (always visible)
-}
+local Range = 10              -- auto dodge only triggers inside this circle (studs)
+local RangeMin = 4
+local RangeMax = 30
+local RangeStep = 2
+local DashDistance = 5        -- how far the dash goes (studs)
+local DashTime = 0.12         -- how long the dash lasts (seconds)
+local DashCooldown = 0.45
+local LeanAngle = 35          -- degrees the body leans in DODGE mode
+local DodgeShift = 1.5        -- tiny slide during the lean (studs)
+local DodgeCooldown = 0.4
+local ApproachSpeed = 3       -- enemy must move toward you at least this fast (or be very close)
+local FovKick = 8             -- camera FOV pulse (0 = off)
+local ScreenFX = true         -- quick grayscale flash + blur (set false if it lags)
+local HideUi = false           -- false = normal PlayerGui (always visible). true = hidden executor UI (gethui/CoreGui)
 
+-- COLORS (black & gray only)
 local BLACK = Color3.fromRGB(10, 10, 10)
 local DARK = Color3.fromRGB(45, 45, 45)
 local GRAY = Color3.fromRGB(120, 120, 120)
 local LIGHT = Color3.fromRGB(185, 185, 185)
 
-local function notify(text)
-print("[AI Dodge] " .. text)
-pcall(function()
-SG:SetCore("SendNotification", {Title = "AI Dodge", Text = text, Duration = 6})
-end)
+local Enabled = false
+local Busy = false
+local Mode = "DASH"           -- "DASH" or "DODGE"
+local ShowCircle = true
+
+local function getCharacter()
+    local character = Player.Character
+    if not character then return end
+
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local root = character:FindFirstChild("HumanoidRootPart")
+
+    if humanoid and root and humanoid.Health > 0 then
+        return humanoid, root
+    end
 end
-local function new(class, props, parent)
-local i = Instance.new(class)
-for k, v in pairs(props) do
-i[k] = v
+
+local function feetOffset(humanoid, root)
+    if humanoid.RigType == Enum.HumanoidRigType.R6 then
+        return 3
+    end
+    return humanoid.HipHeight + root.Size.Y / 2
 end
-i.Parent = parent
-return i
+
+local function getFeet(character, humanoid, root)
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {character}
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    local result = workspace:Raycast(root.Position, Vector3.new(0, -8, 0), params)
+    if result then
+        return result.Position
+    end
+    return root.Position - Vector3.new(0, feetOffset(humanoid, root), 0)
 end
-local function main()
-local on, busy, mode, showCircle = false, false, "DASH", true
-local conns = {}
-local unload, circle
-if _G.AIDodgeUnload then
-pcall(_G.AIDodgeUnload)
-_G.AIDodgeUnload = nil
+
+---------------------------------------------------------------------
+-- EFFECTS (black & gray)
+---------------------------------------------------------------------
+
+-- silhouette copy of your body: solid color + outline, shrinks and fades
+local function makeGhost(character, bodyColor, outlineColor, life, startTransparency)
+    local model = Instance.new("Model")
+    model.Name = "AIDodgeGhost"
+
+    for _, part in ipairs(character:GetChildren()) do
+        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" and part.Transparency < 1 then
+            local ok, ghost = pcall(function()
+                return part:Clone()
+            end)
+            if ok and ghost then
+                ghost:ClearAllChildren()
+                ghost.Anchored = true
+                ghost.CanCollide = false
+                ghost.CanQuery = false
+                ghost.CanTouch = false
+                ghost.Massless = true
+                ghost.Material = Enum.Material.SmoothPlastic
+                ghost.Color = bodyColor
+                ghost.Transparency = startTransparency
+                if ghost:IsA("MeshPart") then
+                    ghost.TextureID = ""
+                end
+                ghost.CFrame = part.CFrame
+                ghost.Parent = model
+                TweenService:Create(ghost, TweenInfo.new(life, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+                    Transparency = 1,
+                    Size = ghost.Size * 0.6
+                }):Play()
+            end
+        end
+    end
+
+    local hl = Instance.new("Highlight")
+    hl.Adornee = model
+    hl.FillTransparency = 1
+    hl.OutlineColor = outlineColor
+    hl.OutlineTransparency = 0.1
+    hl.DepthMode = Enum.HighlightDepthMode.Occluded
+    hl.Parent = model
+
+    model.Parent = workspace
+    TweenService:Create(hl, TweenInfo.new(life), {OutlineTransparency = 1}):Play()
+    Debris:AddItem(model, life + 0.1)
 end
-local function containers()
-local list = {}
-local pg = P:FindFirstChildOfClass("PlayerGui") or P:WaitForChild("PlayerGui", 10)
-local function add(f)
-local ok, v = pcall(f)
-if ok and v then
-list[#list + 1] = v
+
+-- the "mirage": a black silhouette left standing where you were
+local function mirage(character)
+    makeGhost(character, BLACK, LIGHT, 0.8, 0.1)
 end
+
+-- trail ghosts alternate black / gray
+local function trailGhost(character, alt)
+    if alt then
+        makeGhost(character, GRAY, BLACK, 0.35, 0.3)
+    else
+        makeGhost(character, BLACK, GRAY, 0.35, 0.2)
+    end
 end
-if S.HideUi then
-add(function() return gethui() end)
-add(function() return game:GetService("CoreGui") end)
-add(function() return pg end)
-else
-add(function() return pg end)
-add(function() return gethui() end)
-add(function() return game:GetService("CoreGui") end)
+
+-- flat black + gray shockwave on the ground
+local function groundBurst(position, radius)
+    local layers = {
+        {color = BLACK, size = radius, height = 0.08},
+        {color = GRAY, size = radius * 0.6, height = 0.14},
+    }
+    for _, layer in ipairs(layers) do
+        local disc = Instance.new("Part")
+        disc.Shape = Enum.PartType.Cylinder
+        disc.Anchored = true
+        disc.CanCollide = false
+        disc.CanQuery = false
+        disc.CanTouch = false
+        disc.Material = Enum.Material.SmoothPlastic
+        disc.Color = layer.color
+        disc.Transparency = 0.2
+        disc.Size = Vector3.new(0.12, 1, 1)
+        disc.CFrame = CFrame.new(position + Vector3.new(0, layer.height, 0)) * CFrame.Angles(0, 0, math.pi / 2)
+        disc.Parent = workspace
+        TweenService:Create(disc, TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Size = Vector3.new(0.12, layer.size * 2, layer.size * 2),
+            Transparency = 1
+        }):Play()
+        Debris:AddItem(disc, 0.5)
+    end
 end
-return list
+
+-- gray / black smoke puff
+local function smoke(position, amount)
+    local p = Instance.new("Part")
+    p.Anchored = true
+    p.CanCollide = false
+    p.CanQuery = false
+    p.CanTouch = false
+    p.Transparency = 1
+    p.Size = Vector3.new(1, 1, 1)
+    p.CFrame = CFrame.new(position)
+    p.Parent = workspace
+
+    local e = Instance.new("ParticleEmitter")
+    e.Texture = "rbxasset://textures/particles/smoke_main.dds"
+    e.Color = ColorSequence.new(GRAY, BLACK)
+    e.Size = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 1.5),
+        NumberSequenceKeypoint.new(1, 4)
+    })
+    e.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.35),
+        NumberSequenceKeypoint.new(1, 1)
+    })
+    e.Lifetime = NumberRange.new(0.4, 0.8)
+    e.Speed = NumberRange.new(6, 14)
+    e.SpreadAngle = Vector2.new(70, 70)
+    e.Rotation = NumberRange.new(0, 360)
+    e.RotSpeed = NumberRange.new(-60, 60)
+    e.Rate = 0
+    e.Parent = p
+    e:Emit(amount)
+
+    Debris:AddItem(p, 1.5)
 end
-local places = containers()
-for _, par in ipairs(places) do
-pcall(function()
-local old = par:FindFirstChild("AIDodgeUI")
-if old then
-old:Destroy()
+
+-- ribbon trail on your body during the dash
+local function ribbon(root, duration)
+    local a0 = Instance.new("Attachment")
+    a0.Position = Vector3.new(0, 1.2, 0)
+    a0.Parent = root
+
+    local a1 = Instance.new("Attachment")
+    a1.Position = Vector3.new(0, -1.2, 0)
+    a1.Parent = root
+
+    local tr = Instance.new("Trail")
+    tr.Attachment0 = a0
+    tr.Attachment1 = a1
+    tr.Lifetime = 0.4
+    tr.MinLength = 0.05
+    tr.FaceCamera = true
+    tr.Color = ColorSequence.new(BLACK, GRAY)
+    tr.Transparency = NumberSequence.new(0.1, 1)
+    tr.Parent = root
+
+    task.delay(duration, function()
+        tr.Enabled = false
+        Debris:AddItem(tr, 0.6)
+        Debris:AddItem(a0, 0.6)
+        Debris:AddItem(a1, 0.6)
+    end)
 end
-end)
+
+local function fovPulse()
+    if FovKick <= 0 then return end
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+
+    local base = cam.FieldOfView
+    TweenService:Create(cam, TweenInfo.new(0.07, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        FieldOfView = base + FovKick
+    }):Play()
+
+    task.delay(0.07, function()
+        TweenService:Create(cam, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            FieldOfView = base
+        }):Play()
+    end)
 end
-local oldCircle = workspace:FindFirstChild("AIDodgeRange")
-if oldCircle then
-oldCircle:Destroy()
+
+-- quick grayscale flash + blur
+local function screenFx()
+    if not ScreenFX then return end
+
+    local cc = Instance.new("ColorCorrectionEffect")
+    cc.Name = "AIDodgeCC"
+    cc.Saturation = -1
+    cc.Contrast = 0.4
+    cc.Brightness = -0.08
+    cc.Parent = Lighting
+    TweenService:Create(cc, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        Saturation = 0,
+        Contrast = 0,
+        Brightness = 0
+    }):Play()
+    Debris:AddItem(cc, 0.45)
+
+    local blur = Instance.new("BlurEffect")
+    blur.Name = "AIDodgeBlur"
+    blur.Size = 8
+    blur.Parent = Lighting
+    TweenService:Create(blur, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        Size = 0
+    }):Play()
+    Debris:AddItem(blur, 0.35)
 end
-local gui = new("ScreenGui", {
-Name = "AIDodgeUI", ResetOnSpawn = false, DisplayOrder = 999,
-IgnoreGuiInset = true, ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-})
+
+---------------------------------------------------------------------
+-- MOVEMENT
+---------------------------------------------------------------------
+
+-- fast start, smooth stop; total distance = distance
+local function slide(root, humanoid, worldDir, distance, duration, onStep)
+    local speed = distance / duration
+    local startTime = os.clock()
+
+    local conn
+    conn = RunService.Heartbeat:Connect(function()
+        local t = os.clock() - startTime
+        if t >= duration or humanoid.Health <= 0 or not root.Parent then
+            conn:Disconnect()
+            return
+        end
+
+        local mult = 2 * (1 - t / duration)
+        local v = root.AssemblyLinearVelocity
+        root.AssemblyLinearVelocity = Vector3.new(worldDir.X * speed * mult, v.Y, worldDir.Z * speed * mult)
+
+        if onStep then
+            onStep(t)
+        end
+    end)
+end
+
+-- joints used for the lean (no animation, just tilts the body)
+local function getLeanJoints(character)
+    local joints = {}
+    local lower = character:FindFirstChild("LowerTorso")
+    local upper = character:FindFirstChild("UpperTorso")
+
+    if lower and upper then -- R15
+        local rootJoint = lower:FindFirstChild("Root")
+        local waist = upper:FindFirstChild("Waist")
+        if rootJoint then
+            table.insert(joints, {joint = rootJoint, share = 0.3})
+        end
+        if waist then
+            table.insert(joints, {joint = waist, share = 0.7})
+        end
+    else -- R6
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        local rootJoint = hrp and hrp:FindFirstChild("RootJoint")
+        if rootJoint then
+            table.insert(joints, {joint = rootJoint, share = 0.7})
+        end
+    end
+
+    return joints
+end
+
+-- original joint position is saved on the joint so it can always be restored
+local function baseC0(joint)
+    local saved = joint:GetAttribute("AIDodgeC0")
+    if typeof(saved) ~= "CFrame" then
+        saved = joint.C0
+        joint:SetAttribute("AIDodgeC0", saved)
+    end
+    return saved
+end
+
+local function rotatedC0(c0, axis, angle)
+    local rotOnly = c0 - c0.Position
+    return CFrame.new(c0.Position) * CFrame.fromAxisAngle(axis, angle) * rotOnly
+end
+
+-- localDir = direction to lean toward (local space, X = right, Z = back)
+local function leanBody(character, localDir)
+    local joints = getLeanJoints(character)
+    if #joints == 0 then return end
+
+    local axis = Vector3.new(0, 1, 0):Cross(localDir)
+    if axis.Magnitude < 0.01 then return end
+    axis = axis.Unit
+
+    for _, j in ipairs(joints) do
+        local target = rotatedC0(baseC0(j.joint), axis, math.rad(LeanAngle * j.share))
+        TweenService:Create(j.joint, TweenInfo.new(0.09, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            C0 = target
+        }):Play()
+    end
+
+    task.wait(0.19)
+
+    -- springs back with a little overshoot (the "lean lean" feel)
+    for _, j in ipairs(joints) do
+        if j.joint.Parent then
+            TweenService:Create(j.joint, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                C0 = baseC0(j.joint)
+            }):Play()
+        end
+    end
+end
+
+local function restoreJoints()
+    local character = Player.Character
+    if not character then return end
+    for _, j in ipairs(getLeanJoints(character)) do
+        local saved = j.joint:GetAttribute("AIDodgeC0")
+        if typeof(saved) == "CFrame" then
+            j.joint.C0 = saved
+        end
+    end
+end
+
+local function dashMove(character, humanoid, root, worldDir)
+    local feet = getFeet(character, humanoid, root)
+
+    pcall(mirage, character)
+    pcall(groundBurst, feet, 7)
+    pcall(smoke, feet, 14)
+    pcall(ribbon, root, DashTime)
+    pcall(fovPulse)
+    pcall(screenFx)
+
+    local last = 0
+    local count = 0
+    slide(root, humanoid, worldDir, DashDistance, DashTime, function(t)
+        if t - last >= 0.025 then
+            last = t
+            count = count + 1
+            pcall(trailGhost, character, count % 2 == 0)
+        end
+    end)
+end
+
+local function dodgeMove(character, humanoid, root, worldDir, localDir)
+    local feet = getFeet(character, humanoid, root)
+
+    pcall(mirage, character)
+    pcall(groundBurst, feet, 4)
+    pcall(smoke, feet, 8)
+    pcall(fovPulse)
+    pcall(screenFx)
+
+    slide(root, humanoid, worldDir, DodgeShift, 0.12)
+
+    task.spawn(function()
+        pcall(leanBody, character, localDir)
+    end)
+
+    task.delay(0.09, function()
+        pcall(trailGhost, character, true)
+    end)
+end
+
+-- direction is in LOCAL space: X = right, Z = backward (forward is -Z)
+local function perform(direction)
+    if Busy then return end
+
+    local humanoid, root = getCharacter()
+    if not humanoid or not root then return end
+
+    local flatLocal = Vector3.new(direction.X, 0, direction.Z)
+    if flatLocal.Magnitude < 0.01 then return end
+    local localDir = flatLocal.Unit
+
+    local worldDir = root.CFrame:VectorToWorldSpace(localDir)
+    worldDir = Vector3.new(worldDir.X, 0, worldDir.Z)
+    if worldDir.Magnitude < 0.01 then return end
+    worldDir = worldDir.Unit
+
+    local character = Player.Character
+    local cooldown
+
+    Busy = true
+    local ok, err = pcall(function()
+        if Mode == "DASH" then
+            cooldown = DashCooldown
+            dashMove(character, humanoid, root, worldDir)
+        else
+            cooldown = DodgeCooldown
+            dodgeMove(character, humanoid, root, worldDir, localDir)
+        end
+    end)
+
+    if not ok then
+        warn("[AI Dodge] " .. tostring(err))
+    end
+    cooldown = cooldown or 0.5
+
+    task.delay(cooldown, function()
+        Busy = false
+    end)
+end
+
+---------------------------------------------------------------------
+-- UI
+---------------------------------------------------------------------
+
+local function clearOldUi()
+    local places = {}
+
+    if gethui then
+        local ok, ui = pcall(gethui)
+        if ok and ui then
+            table.insert(places, ui)
+        end
+    end
+
+    pcall(function()
+        table.insert(places, game:GetService("CoreGui"))
+    end)
+
+    local pg = Player:FindFirstChildOfClass("PlayerGui")
+    if pg then
+        table.insert(places, pg)
+    end
+
+    for _, place in ipairs(places) do
+        pcall(function()
+            local old = place:FindFirstChild("AIDodgeUI")
+            if old then
+                old:Destroy()
+            end
+        end)
+    end
+end
+
+local function getGuiParents()
+    local list = {}
+
+    if HideUi then
+        if gethui then
+            local ok, ui = pcall(gethui)
+            if ok and ui then
+                table.insert(list, ui)
+            end
+        end
+        pcall(function()
+            table.insert(list, game:GetService("CoreGui"))
+        end)
+    end
+
+    local pg = Player:FindFirstChildOfClass("PlayerGui") or Player:WaitForChild("PlayerGui", 10)
+    if pg then
+        table.insert(list, pg)
+    end
+
+    return list
+end
+
+-- remove old copies (from any previous run)
+clearOldUi()
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "AIDodgeUI"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.DisplayOrder = 999
+gui.IgnoreGuiInset = true
+
 local parented = false
-for _, par in ipairs(places) do
-local ok = pcall(function()
-gui.Parent = par
-end)
-if ok and gui.Parent == par then
-parented = true
-break
+for _, parent in ipairs(getGuiParents()) do
+    local ok = pcall(function()
+        gui.Parent = parent
+    end)
+    if ok and gui.Parent == parent then
+        parented = true
+        break
+    end
 end
-end
+
 if not parented then
-error("could not put the UI on screen")
+    error("could not put the UI on screen")
 end
-local frame = new("Frame", {
-Size = UDim2.fromOffset(230, 252), Position = UDim2.new(0, 15, 0.5, -126),
-BackgroundColor3 = BLACK, BorderSizePixel = 0, Active = true,
-}, gui)
-local icon = new("TextButton", {
-Size = UDim2.fromOffset(40, 40), Position = UDim2.new(1, -55, 0.5, -20),
-BackgroundColor3 = BLACK, BorderSizePixel = 0, Font = Enum.Font.GothamBold,
-TextSize = 14, TextColor3 = LIGHT, Text = "AD",
-}, gui)
-new("UICorner", {CornerRadius = UDim.new(1, 0)}, icon)
-icon.Activated:Connect(function()
-frame.Visible = not frame.Visible
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.fromOffset(230, 252)
+frame.Position = UDim2.new(0, 15, 0.5, -126)
+frame.BackgroundColor3 = BLACK
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.Parent = gui
+
+-- small icon (right side) to hide / show the panel
+local icon = Instance.new("TextButton")
+icon.Name = "AIDodgeIcon"
+icon.Size = UDim2.fromOffset(40, 40)
+icon.Position = UDim2.new(1, -55, 0.5, -20)
+icon.BackgroundColor3 = BLACK
+icon.BorderSizePixel = 0
+icon.Font = Enum.Font.GothamBold
+icon.TextSize = 14
+icon.TextColor3 = LIGHT
+icon.Text = "AD"
+icon.Parent = gui
+
+local iconCorner = Instance.new("UICorner")
+iconCorner.CornerRadius = UDim.new(1, 0)
+iconCorner.Parent = icon
+
+icon.MouseButton1Click:Connect(function()
+    frame.Visible = not frame.Visible
 end)
-local title = new("TextLabel", {
-Size = UDim2.new(1, 0, 0, 30), Text = "AI AUTO DODGE", Font = Enum.Font.GothamBold,
-TextSize = 16, TextColor3 = LIGHT, BackgroundTransparency = 1, Active = true,
-}, frame)
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 30)
+title.Text = "AI AUTO DODGE"
+title.Font = Enum.Font.GothamBold
+title.TextSize = 16
+title.TextColor3 = LIGHT
+title.BackgroundTransparency = 1
+title.Active = true
+title.Parent = frame
+
+-- drag by the title (works with touch)
 local dragging, dragStart, startPos
+
 title.InputBegan:Connect(function(input)
-if input.UserInputType == Enum.UserInputType.MouseButton1
-or input.UserInputType == Enum.UserInputType.Touch then
-dragging, dragStart, startPos = true, input.Position, frame.Position
-input.Changed:Connect(function()
-if input.UserInputState == Enum.UserInputState.End then
-dragging = false
-end
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = frame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
 end)
-end
+
+UIS.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
 end)
-conns[#conns + 1] = UIS.InputChanged:Connect(function(input)
-if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-or input.UserInputType == Enum.UserInputType.Touch) then
-local d = input.Position - dragStart
-frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X,
-startPos.Y.Scale, startPos.Y.Offset + d.Y)
-end
-end)
+
 local function button(text, x, y, w, callback)
-local b = new("TextButton", {
-Text = text, Font = Enum.Font.GothamBold, TextSize = 13,
-Size = UDim2.fromOffset(w, 35), Position = UDim2.fromOffset(x, y),
-BackgroundColor3 = DARK, TextColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0,
-}, frame)
-b.Activated:Connect(callback)
-return b
+    local b = Instance.new("TextButton")
+    b.Text = text
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 13
+    b.Size = UDim2.fromOffset(w, 35)
+    b.Position = UDim2.fromOffset(x, y)
+    b.BackgroundColor3 = DARK
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.BorderSizePixel = 0
+    b.Parent = frame
+    b.MouseButton1Click:Connect(callback)
+    return b
 end
-local toggle, modeBtn, circleBtn
+
+local toggle
 toggle = button("AUTO DODGE: OFF", 10, 35, 210, function()
-on = not on
-toggle.Text = on and "AUTO DODGE: ON" or "AUTO DODGE: OFF"
-toggle.BackgroundColor3 = on and GRAY or DARK
+    Enabled = not Enabled
+    toggle.Text = Enabled and "AUTO DODGE: ON" or "AUTO DODGE: OFF"
+    toggle.BackgroundColor3 = Enabled and GRAY or DARK
 end)
+
+local modeBtn
 modeBtn = button("MODE: DASH", 10, 78, 210, function()
-mode = (mode == "DASH") and "DODGE" or "DASH"
-modeBtn.Text = (mode == "DASH") and "MODE: DASH" or "MODE: DODGE (LEAN)"
+    Mode = (Mode == "DASH") and "DODGE" or "DASH"
+    modeBtn.Text = (Mode == "DASH") and "MODE: DASH" or "MODE: DODGE (LEAN)"
 end)
-local rangeLabel = new("TextLabel", {
-Size = UDim2.fromOffset(110, 35), Position = UDim2.fromOffset(60, 121),
-BackgroundColor3 = Color3.fromRGB(25, 25, 25), BorderSizePixel = 0,
-Font = Enum.Font.GothamBold, TextSize = 13, TextColor3 = LIGHT,
-Text = "RANGE: " .. S.Range,
-}, frame)
+
+-- range row: [-]  RANGE: 10  [+]
+local rangeLabel = Instance.new("TextLabel")
+rangeLabel.Size = UDim2.fromOffset(110, 35)
+rangeLabel.Position = UDim2.fromOffset(60, 121)
+rangeLabel.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+rangeLabel.BorderSizePixel = 0
+rangeLabel.Font = Enum.Font.GothamBold
+rangeLabel.TextSize = 13
+rangeLabel.TextColor3 = LIGHT
+rangeLabel.Text = "RANGE: " .. Range
+rangeLabel.Parent = frame
+
 button("-", 10, 121, 45, function()
-S.Range = math.max(S.RangeMin, S.Range - S.RangeStep)
-rangeLabel.Text = "RANGE: " .. S.Range
+    Range = math.max(RangeMin, Range - RangeStep)
+    rangeLabel.Text = "RANGE: " .. Range
 end)
+
 button("+", 175, 121, 45, function()
-S.Range = math.min(S.RangeMax, S.Range + S.RangeStep)
-rangeLabel.Text = "RANGE: " .. S.Range
+    Range = math.min(RangeMax, Range + RangeStep)
+    rangeLabel.Text = "RANGE: " .. Range
 end)
+
+local circleBtn
 circleBtn = button("CIRCLE: ON", 10, 164, 210, function()
-showCircle = not showCircle
-circleBtn.Text = showCircle and "CIRCLE: ON" or "CIRCLE: OFF"
-circleBtn.BackgroundColor3 = showCircle and GRAY or DARK
+    ShowCircle = not ShowCircle
+    circleBtn.Text = ShowCircle and "CIRCLE: ON" or "CIRCLE: OFF"
+    circleBtn.BackgroundColor3 = ShowCircle and GRAY or DARK
 end)
 circleBtn.BackgroundColor3 = GRAY
-button("UNLOAD", 10, 207, 210, function()
-if unload then
-unload()
-else
-gui:Destroy()
-end
+
+button("LEFT", 10, 207, 66, function()
+    perform(Vector3.new(-1, 0, 0))
 end)
-local ok, err = pcall(function()
-local function me()
-local c = P.Character
-local h = c and c:FindFirstChildOfClass("Humanoid")
-local r = c and c:FindFirstChild("HumanoidRootPart")
-if h and r and h.Health > 0 then
-return h, r, c
-end
-end
-local function footOff(hum, root)
-if hum.RigType == Enum.HumanoidRigType.R6 then
-return 3
-end
-return hum.HipHeight + root.Size.Y / 2
-end
-local function rayParams(char)
-local rp = RaycastParams.new()
-rp.FilterDescendantsInstances = {char}
-rp.FilterType = Enum.RaycastFilterType.Exclude
-return rp
-end
-local function feet(char, hum, root)
-local r = workspace:Raycast(root.Position, Vector3.new(0, -8, 0), rayParams(char))
-if r then
-return r.Position
-end
-return root.Position - Vector3.new(0, footOff(hum, root), 0)
-end
-local function ghost(char, col, line, life, tr)
-local m = Instance.new("Model")
-m.Name = "AIDodgeGhost"
-for _, p in ipairs(char:GetChildren()) do
-if p:IsA("BasePart") and p.Name ~= "HumanoidRootPart" and p.Transparency < 1 then
-local okc, g = pcall(p.Clone, p)
-if okc and g then
-for _, c in ipairs(g:GetChildren()) do
-if c:IsA("SpecialMesh") then
-c.TextureId = ""
-else
-c:Destroy()
-end
-end
-g.Anchored = true
-g.CanCollide = false
-g.CanQuery = false
-g.CanTouch = false
-g.Massless = true
-g.Material = Enum.Material.SmoothPlastic
-g.Color = col
-g.Transparency = tr
-if g:IsA("MeshPart") then
-g.TextureID = ""
-end
-g.CFrame = p.CFrame
-g.Parent = m
-TS:Create(g, TweenInfo.new(life, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-{Transparency = 1, Size = g.Size * 0.6}):Play()
-end
-end
-end
-local h = new("Highlight", {
-Adornee = m, FillTransparency = 1, OutlineColor = line,
-OutlineTransparency = 0.1, DepthMode = Enum.HighlightDepthMode.Occluded,
-}, m)
-m.Parent = workspace
-TS:Create(h, TweenInfo.new(life), {OutlineTransparency = 1}):Play()
-Debris:AddItem(m, life + 0.1)
-end
-local function burst(pos, r)
-for _, l in ipairs({{BLACK, r, 0.08}, {GRAY, r * 0.6, 0.14}}) do
-local d = new("Part", {
-Shape = Enum.PartType.Cylinder, Anchored = true, CanCollide = false,
-CanQuery = false, CanTouch = false, Material = Enum.Material.SmoothPlastic,
-Color = l[1], Transparency = 0.2, Size = Vector3.new(0.12, 1, 1),
-CFrame = CFrame.new(pos + Vector3.new(0, l[3], 0)) * CFrame.Angles(0, 0, math.pi / 2),
-}, workspace)
-TS:Create(d, TweenInfo.new(0.45, Enum.EasingStyle.Quad),
-{Size = Vector3.new(0.12, l[2] * 2, l[2] * 2), Transparency = 1}):Play()
-Debris:AddItem(d, 0.5)
-end
-end
-local function smoke(pos, n)
-local p = new("Part", {
-Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false,
-Transparency = 1, Size = Vector3.new(1, 1, 1), CFrame = CFrame.new(pos),
-}, workspace)
-local e = new("ParticleEmitter", {
-Texture = "rbxasset://textures/particles/smoke_main.dds",
-Color = ColorSequence.new(GRAY, BLACK), Size = NumberSequence.new(1.5, 4),
-Transparency = NumberSequence.new(0.35, 1), Lifetime = NumberRange.new(0.4, 0.8),
-Speed = NumberRange.new(6, 14), SpreadAngle = Vector2.new(70, 70),
-Rotation = NumberRange.new(0, 360), RotSpeed = NumberRange.new(-60, 60), Rate = 0,
-}, p)
-e:Emit(n)
-Debris:AddItem(p, 1.5)
-end
-local function ribbon(root, dur)
-local a0 = new("Attachment", {Position = Vector3.new(0, 1.2, 0)}, root)
-local a1 = new("Attachment", {Position = Vector3.new(0, -1.2, 0)}, root)
-local t = new("Trail", {
-Attachment0 = a0, Attachment1 = a1, Lifetime = 0.4, MinLength = 0.05,
-FaceCamera = true, Color = ColorSequence.new(BLACK, GRAY),
-Transparency = NumberSequence.new(0.1, 1),
-}, root)
-task.delay(dur, function()
-t.Enabled = false
-Debris:AddItem(t, 0.6)
-Debris:AddItem(a0, 0.6)
-Debris:AddItem(a1, 0.6)
+
+button("RIGHT", 82, 207, 66, function()
+    perform(Vector3.new(1, 0, 0))
 end)
-end
-local fovBusy = false
-local function fov()
-local cam = workspace.CurrentCamera
-if S.Fov <= 0 or fovBusy or not cam then
-return
-end
-fovBusy = true
-local base = cam.FieldOfView
-TS:Create(cam, TweenInfo.new(0.07), {FieldOfView = base + S.Fov}):Play()
-task.delay(0.07, function()
-TS:Create(cam, TweenInfo.new(0.25), {FieldOfView = base}):Play()
-task.delay(0.26, function()
-fovBusy = false
+
+button("BACK", 154, 207, 66, function()
+    perform(Vector3.new(0, 0, 1))
 end)
+
+---------------------------------------------------------------------
+-- RANGE CIRCLE (ring on the ground around you)
+---------------------------------------------------------------------
+
+local ring = Instance.new("CylinderHandleAdornment")
+ring.Name = "AIDodgeRange"
+ring.Height = 0.15
+ring.Color3 = GRAY
+ring.Transparency = 0.35
+ring.AlwaysOnTop = false
+ring.Visible = false
+ring.Parent = workspace
+
+local ringLoop = RunService.Heartbeat:Connect(function()
+    local humanoid, root = getCharacter()
+    if not humanoid or not ShowCircle then
+        ring.Visible = false
+        return
+    end
+
+    if ring.Adornee ~= root then
+        ring.Adornee = root
+    end
+
+    ring.Radius = Range
+    ring.InnerRadius = math.max(Range - 0.3, 0)
+    ring.CFrame = CFrame.new(0, -(feetOffset(humanoid, root) - 0.1), 0) * CFrame.Angles(math.pi / 2, 0, 0)
+    ring.Visible = true
 end)
-end
-local function screenFx()
-if not S.FX then
-return
-end
-local cc = new("ColorCorrectionEffect", {Saturation = -1, Contrast = 0.4, Brightness = -0.08}, Lighting)
-TS:Create(cc, TweenInfo.new(0.35), {Saturation = 0, Contrast = 0, Brightness = 0}):Play()
-Debris:AddItem(cc, 0.45)
-local b = new("BlurEffect", {Size = 8}, Lighting)
-TS:Create(b, TweenInfo.new(0.25), {Size = 0}):Play()
-Debris:AddItem(b, 0.35)
-end
-local function slide(root, hum, dir, dist, dur, step)
-local sp, t0 = dist / dur, os.clock()
-local conn
-conn = RS.Heartbeat:Connect(function()
-local t = os.clock() - t0
-if t >= dur or hum.Health <= 0 or not root.Parent then
-conn:Disconnect()
-return
-end
-local m, v = 2 * (1 - t / dur), root.AssemblyLinearVelocity
-root.AssemblyLinearVelocity = Vector3.new(dir.X * sp * m, v.Y, dir.Z * sp * m)
-if step then
-step(t)
-end
+
+---------------------------------------------------------------------
+-- AUTO DODGE: only enemies inside the circle count
+---------------------------------------------------------------------
+
+local autoLoop = RunService.Heartbeat:Connect(function()
+    if not Enabled or Busy then return end
+
+    local humanoid, root = getCharacter()
+    if not humanoid then return end
+
+    local bestDist = math.huge
+    local bestDir = nil
+
+    for _, other in ipairs(Players:GetPlayers()) do
+        if other ~= Player and other.Character then
+            local oHumanoid = other.Character:FindFirstChildOfClass("Humanoid")
+            local oRoot = other.Character:FindFirstChild("HumanoidRootPart")
+
+            if oHumanoid and oHumanoid.Health > 0 and oRoot then
+                local offset = root.Position - oRoot.Position
+                local flat = Vector3.new(offset.X, 0, offset.Z)
+                local dist = flat.Magnitude
+
+                if dist < Range and dist > 0.1 and dist < bestDist then
+                    local toMe = flat.Unit
+                    local closing = oRoot.AssemblyLinearVelocity:Dot(toMe)
+                    local facing = oRoot.CFrame.LookVector:Dot(toMe)
+
+                    if facing > 0.5 and (closing > ApproachSpeed or dist < Range * 0.5) then
+                        bestDist = dist
+                        bestDir = toMe
+                    end
+                end
+            end
+        end
+    end
+
+    if bestDir then
+        -- slip sideways and a little away from the attacker
+        local sign = (math.random(1, 2) == 1) and 1 or -1
+        local perp = Vector3.new(-bestDir.Z, 0, bestDir.X) * sign
+        local dir = (perp + bestDir * 0.35).Unit
+        perform(root.CFrame:VectorToObjectSpace(dir))
+    end
 end)
-end
-local function leanJoints(char)
-local j = {}
-local lo, up = char:FindFirstChild("LowerTorso"), char:FindFirstChild("UpperTorso")
-if lo and up then
-local r, w = lo:FindFirstChild("Root"), up:FindFirstChild("Waist")
-if r then j[#j + 1] = {r, 0.3} end
-if w then j[#j + 1] = {w, 0.7} end
-else
-local h = char:FindFirstChild("HumanoidRootPart")
-local r = h and h:FindFirstChild("RootJoint")
-if r then j[#j + 1] = {r, 0.7} end
-end
-return j
-end
-local function baseC0(j)
-local s = j:GetAttribute("AIDodgeC0")
-if typeof(s) ~= "CFrame" then
-s = j.C0
-j:SetAttribute("AIDodgeC0", s)
-end
-return s
-end
-local function lean(char, ld)
-local js = leanJoints(char)
-local axis = Vector3.new(0, 1, 0):Cross(ld)
-if #js == 0 or axis.Magnitude < 0.01 then
-return
-end
-axis = axis.Unit
-for _, e in ipairs(js) do
-local c0 = baseC0(e[1])
-local rot = c0 - c0.Position
-TS:Create(e[1], TweenInfo.new(0.09, Enum.EasingStyle.Quad), {
-C0 = CFrame.new(c0.Position) * CFrame.fromAxisAngle(axis, math.rad(S.Lean * e[2])) * rot,
-}):Play()
-end
-task.wait(0.19)
-for _, e in ipairs(js) do
-if e[1].Parent then
-TS:Create(e[1], TweenInfo.new(0.3, Enum.EasingStyle.Back), {C0 = baseC0(e[1])}):Play()
-end
-end
-end
-local function restore()
-local c = P.Character
-if not c then
-return
-end
-for _, e in ipairs(leanJoints(c)) do
-local s = e[1]:GetAttribute("AIDodgeC0")
-if typeof(s) == "CFrame" then
-e[1].C0 = s
-end
-end
-end
-local function perform(ld)
-if busy then
-return
-end
-local hum, root, char = me()
-if not hum then
-return
-end
-ld = Vector3.new(ld.X, 0, ld.Z)
-if ld.Magnitude < 0.01 then
-return
-end
-ld = ld.Unit
-local wd = root.CFrame:VectorToWorldSpace(ld)
-wd = Vector3.new(wd.X, 0, wd.Z)
-if wd.Magnitude < 0.01 then
-return
-end
-wd = wd.Unit
-busy = true
-local dash = (mode == "DASH")
-local okp, errp = pcall(function()
-local f = feet(char, hum, root)
-pcall(ghost, char, BLACK, LIGHT, 0.8, 0.1)
-pcall(burst, f, dash and 7 or 4)
-pcall(smoke, f, dash and 14 or 8)
-pcall(fov)
-pcall(screenFx)
-if dash then
-pcall(ribbon, root, S.DashTime)
-local last, n = 0, 0
-slide(root, hum, wd, S.DashDist, S.DashTime, function(t)
-if t - last >= 0.025 then
-last, n = t, n + 1
-local alt = (n % 2 == 0)
-pcall(ghost, char, alt and GRAY or BLACK, alt and BLACK or GRAY, 0.35, alt and 0.3 or 0.2)
-end
+
+-- cleanup if the UI is removed (e.g. script re-run)
+gui.Destroying:Connect(function()
+    autoLoop:Disconnect()
+    ringLoop:Disconnect()
+    ring:Destroy()
+    pcall(restoreJoints)
 end)
-else
-slide(root, hum, wd, S.Shift, 0.12)
-task.spawn(pcall, lean, char, ld)
-task.delay(0.09, function()
-pcall(ghost, char, GRAY, BLACK, 0.35, 0.3)
+
+notify("Loaded! Tap the AD icon (right side) to hide/show the panel.")
+
+end -- main
+
+local ok, err = xpcall(main, function(e)
+    return tostring(e) .. "\n" .. debug.traceback()
 end)
-end
-end)
-if not okp then
-warn("[AI Dodge] " .. tostring(errp))
-end
-task.delay(dash and S.DashCD or S.DodgeCD, function()
-busy = false
-end)
-end
-circle = new("Part", {
-Name = "AIDodgeRange", Shape = Enum.PartType.Cylinder, Anchored = true,
-CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false,
-Material = Enum.Material.SmoothPlastic, Color = GRAY, Transparency = 1,
-Size = Vector3.new(0.1, S.Range * 2, S.Range * 2),
-}, workspace)
-local lastScan, lastSide = 0, 1
-local function pathClear(char, root, dir, dist)
-local rp = rayParams(char)
-rp.RespectCanCollide = true
-return workspace:Raycast(root.Position, dir * (dist + 1.5), rp) == nil
-end
-local function findThreat(root)
-local best, bestDist = nil, math.huge
-for _, other in ipairs(Players:GetPlayers()) do
-local mate = S.Teams and P.Team ~= nil and other.Team == P.Team
-if other ~= P and not mate then
-local ch = other.Character
-local eh = ch and ch:FindFirstChildOfClass("Humanoid")
-local er = ch and ch:FindFirstChild("HumanoidRootPart")
-if eh and er and eh.Health > 0 then
-local off = root.Position - er.Position
-local flat = Vector3.new(off.X, 0, off.Z)
-local dist = flat.Magnitude
-if dist <= S.Range and dist > 0.01 and math.abs(off.Y) <= 10 then
-local v = er.AssemblyLinearVelocity
-local approach = Vector3.new(v.X, 0, v.Z):Dot(flat.Unit)
-if (approach >= S.Approach or dist <= S.Close) and dist < bestDist then
-best, bestDist = er, dist
-end
-end
-end
-end
-end
-return best
-end
-local function pickDir(char, root, er)
-local to = er.Position - root.Position
-to = Vector3.new(to.X, 0, to.Z)
-if to.Magnitude < 0.01 then
-return
-end
-to = to.Unit
-local side = Vector3.new(-to.Z, 0, to.X)
-local v = er.AssemblyLinearVelocity
-local lateral = v.X * side.X + v.Z * side.Z
-local s
-if math.abs(lateral) > 1 then
-s = lateral > 0 and -1 or 1
-else
-lastSide = -lastSide
-s = lastSide
-end
-for _, sg in ipairs({s, -s}) do
-local dir = side * sg - to * S.Back
-if dir.Magnitude > 0.01 then
-dir = dir.Unit
-if pathClear(char, root, dir, S.DashDist) then
-return dir
-end
-end
-end
-end
-conns[#conns + 1] = RS.Heartbeat:Connect(function()
-local hum, root, char = me()
-if hum and showCircle then
-circle.Transparency = 0.82
-circle.Size = Vector3.new(0.1, S.Range * 2, S.Range * 2)
-circle.CFrame = CFrame.new(root.Position - Vector3.new(0, footOff(hum, root) - 0.15, 0))
-* CFrame.Angles(0, 0, math.pi / 2)
-else
-circle.Transparency = 1
-end
-if not on or busy or not hum then
-return
-end
-local now = os.clock()
-if now - lastScan < S.Scan then
-return
-end
-lastScan = now
-local threat = findThreat(root)
-if not threat then
-return
-end
-local dir = pickDir(char, root, threat)
-if dir then
-perform(root.CFrame:VectorToObjectSpace(dir))
-end
-end)
-conns[#conns + 1] = P.CharacterAdded:Connect(function()
-busy = false
-end)
-unload = function()
-on = false
-for _, c in ipairs(conns) do
-pcall(function()
-c:Disconnect()
-end)
-end
-pcall(restore)
-pcall(function()
-circle:Destroy()
-end)
-pcall(function()
-gui:Destroy()
-end)
-end
-_G.AIDodgeUnload = unload
-end)
-if ok then
-notify("Loaded! Tap the AD icon to hide / show the panel.")
-else
-title.Text = "AI DODGE - ERROR"
-notify("Error: " .. tostring(err))
-end
-end
-local okMain, errMain = pcall(main)
-if not okMain then
-notify("Failed to start: " .. tostring(errMain))
+
+if not ok then
+    warn("[AI Dodge] ERROR: " .. tostring(err))
+    notify("Error: " .. tostring(err):sub(1, 140))
 end
