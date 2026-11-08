@@ -75,6 +75,10 @@ local HulkDamageMin = 1
 local HulkDamageMax = 5
 local HulkDamageAttributes = {"Damage", "DamageMultiplier", "DamageMulti", "Strength", "Power"}
 
+-- NEW: no-hit frames (your hitbox is turned off while you dash / dodge, client-side)
+local IFrames = true
+local IFrameExtra = 0.1       -- extra seconds of no-hit after the move ends
+
 -- COLORS (black & gray only)
 local BLACK = Color3.fromRGB(10, 10, 10)
 local DARK = Color3.fromRGB(45, 45, 45)
@@ -333,7 +337,8 @@ local function slide(root, humanoid, worldDir, distance, duration, onStep)
             return
         end
 
-        local mult = 2 * (1 - t / duration)
+        local u = t / duration
+        local mult = 6 * u * (1 - u) -- smooth bell curve, total distance stays the same
         local v = root.AssemblyLinearVelocity
         root.AssemblyLinearVelocity = Vector3.new(worldDir.X * speed * mult, v.Y, worldDir.Z * speed * mult)
 
@@ -350,35 +355,113 @@ end
 --   - = top tips FORWARD (bow / fold)
 ---------------------------------------------------------------------
 
+-- Axes are in CHARACTER space: X = right, Y = up, Z = back (forward is -Z)
 local X_AXIS = Vector3.new(1, 0, 0)
+local Y_AXIS = Vector3.new(0, 1, 0)
+local Z_AXIS = Vector3.new(0, 0, 1)
 local NO_OFFSET = Vector3.new(0, 0, 0)
 
--- every Motor6D of the character by name
-local function mapJoints(character)
-    local map = {}
-    for _, d in ipairs(character:GetDescendants()) do
-        if d:IsA("Motor6D") and not map[d.Name] then
-            map[d.Name] = d
+local function getRootPart(character)
+    local hum = character:FindFirstChildOfClass("Humanoid")
+    return character:FindFirstChild("HumanoidRootPart") or (hum and hum.RootPart) or character.PrimaryPart
+end
+
+-- body joints only (not hat / tool welds)
+local function isBodyJoint(j)
+    if not j.Part0 or not j.Part1 then return false end
+    for _, part in ipairs({j.Part0, j.Part1}) do
+        if part:FindFirstAncestorOfClass("Accessory") or part:FindFirstAncestorOfClass("Tool") then
+            return false
         end
     end
-    return map
+    return true
 end
 
-local function isR15(character)
-    return character:FindFirstChild("UpperTorso") ~= nil
+local function sideOf(joint, root)
+    local n = string.lower(joint.Part1.Name .. joint.Name)
+    if n:find("left") then return "L" end
+    if n:find("right") then return "R" end
+    -- unknown names: use which side of the body the part sits on
+    local rel = root.CFrame:PointToObjectSpace(joint.Part1.Position)
+    return (rel.X < 0) and "L" or "R"
 end
 
-local function addTilt(list, joint, axis, degrees, offset)
-    if joint then
-        table.insert(list, {
-            joint = joint,
-            axis = axis,
-            angle = math.rad(degrees),
-            offset = offset or NO_OFFSET
-        })
+-- Finds the important joints of ANY humanoid rig (R6, R15, custom) by looking at
+-- the names of the parts each joint connects. Result keys:
+--   root, waist, neck, shoulderL/R, elbowL/R, hipL/R, kneeL/R   (missing ones are nil)
+local function rigJoints(character)
+    local rig = {}
+    local root = getRootPart(character)
+
+    for _, d in ipairs(character:GetDescendants()) do
+        if d:IsA("JointInstance") and isBodyJoint(d) then
+            local n = string.lower((d.Part1.Name:gsub("[%s_]", "")))
+            local role = nil
+
+            if root and d.Part0 == root and not rig.root then
+                rig.root = d
+            elseif n:find("head") then
+                role = "neck"
+            elseif n:find("uppertorso") or n:find("chest") or n:find("spine") then
+                role = "waist"
+            elseif n:find("lowerarm") or n:find("forearm") then
+                role = "elbow"
+            elseif n:find("arm") and not n:find("hand") then
+                role = "shoulder"
+            elseif n:find("lowerleg") or n:find("calf") or n:find("shin") then
+                role = "knee"
+            elseif n:find("leg") or n:find("thigh") then
+                role = "hip"
+            end
+
+            if role then
+                local key = role
+                if role ~= "neck" and role ~= "waist" then
+                    key = role .. sideOf(d, root or d.Part0)
+                end
+                if not rig[key] then
+                    rig[key] = d
+                end
+            end
+        end
     end
+
+    return rig
 end
 
+local function newPose(character)
+    return {root = getRootPart(character)}
+end
+
+-- axis / offset are in CHARACTER space; they are converted to the joint's own space,
+-- so this works even if a rig's parts are rotated differently.
+local function addTilt(list, joint, axis, degrees, offset)
+    if not joint or not joint.Part0 then return end
+
+    local axisLocal = axis
+    local offsetLocal = offset or NO_OFFSET
+
+    local root = list.root
+    if root then
+        local rc = root.CFrame
+        local pc = joint.Part0.CFrame
+        axisLocal = pc:VectorToObjectSpace(rc:VectorToWorldSpace(axis))
+        offsetLocal = pc:VectorToObjectSpace(rc:VectorToWorldSpace(offsetLocal))
+    end
+
+    if axisLocal.Magnitude < 0.01 then return end
+
+    table.insert(list, {
+        joint = joint,
+        axis = axisLocal.Unit,
+        angle = math.rad(degrees),
+        offset = offsetLocal
+    })
+end
+
+-- Pitch: degrees around the body's X axis.
+--   + = top tips BACK (and the bottom swings FORWARD: knees up, arms forward)
+--   - = top tips FORWARD (bow / fold)
 local function addPitch(list, joint, degrees, offset)
     addTilt(list, joint, X_AXIS, degrees, offset)
 end
@@ -442,14 +525,16 @@ local function playPose(entries, tIn, hold, tOut)
         end
     end
 
+    -- smooth in (fast start, soft landing), a tiny settle while holding, smooth out
     local function weight(t)
         if t < tIn then
-            return TweenService:GetValue(t / tIn, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+            return TweenService:GetValue(t / tIn, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
         elseif t < tIn + hold then
-            return 1
+            local k = (t - tIn) / hold
+            return 1 + 0.04 * math.sin(math.pi * k)
         end
         local k = (t - tIn - hold) / tOut
-        return 1 - TweenService:GetValue(k, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        return 1 - TweenService:GetValue(k, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
     end
 
     activePoses[name] = true
@@ -478,18 +563,18 @@ end
 
 -- SIDE LEAN: localDir = direction to lean toward (local space, X = right, Z = back)
 local function leanPose(character, localDir)
-    local j = mapJoints(character)
-    local list = {}
+    local rig = rigJoints(character)
+    local list = newPose(character)
 
-    local axis = Vector3.new(0, 1, 0):Cross(localDir)
+    local axis = Y_AXIS:Cross(localDir)
     if axis.Magnitude < 0.01 then return list end
     axis = axis.Unit
 
-    if isR15(character) then
-        addTilt(list, j.Root, axis, LeanAngle * 0.3)
-        addTilt(list, j.Waist, axis, LeanAngle * 0.7)
+    if rig.waist then
+        addTilt(list, rig.root, axis, LeanAngle * 0.3)
+        addTilt(list, rig.waist, axis, LeanAngle * 0.7)
     else
-        addTilt(list, j.RootJoint, axis, LeanAngle * 0.7)
+        addTilt(list, rig.root, axis, LeanAngle * 0.7)
     end
 
     return list
@@ -497,73 +582,83 @@ end
 
 -- HAWK BACK DODGE: arms hang down, body bends way back from the waist, head keeps looking forward
 local function hawkPose(character)
-    local j = mapJoints(character)
-    local list = {}
-    local sc = charScale(character)
+    local rig = rigJoints(character)
+    local list = newPose(character)
 
-    if isR15(character) then
-        local rootA = HawkAngle * 0.25
-        local waistA = HawkAngle * 0.75
-
-        addPitch(list, j.Root, rootA)
-        addPitch(list, j.Waist, waistA)
-        addPitch(list, j.Neck, -HawkAngle * 0.6)       -- head comes forward, eyes stay on the enemy
-        addPitch(list, j.LeftHip, -rootA)              -- legs stay straight
-        addPitch(list, j.RightHip, -rootA)
-        addPitch(list, j.LeftShoulder, -HawkAngle)     -- arms drop and hang
-        addPitch(list, j.RightShoulder, -HawkAngle)
-    else
-        local a = math.rad(HawkAngle)
-        -- hips get pushed forward a bit as the torso goes back
-        addPitch(list, j.RootJoint, HawkAngle, Vector3.new(0, -(1 - math.cos(a)) * sc, 0))
-        addPitch(list, j.Neck, -HawkAngle * 0.5)
-        addPitch(list, j["Left Hip"], -HawkAngle)
-        addPitch(list, j["Right Hip"], -HawkAngle)
-        addPitch(list, j["Left Shoulder"], -HawkAngle)
-        addPitch(list, j["Right Shoulder"], -HawkAngle)
+    local function both(prefix, degrees)
+        addPitch(list, rig[prefix .. "L"], degrees)
+        addPitch(list, rig[prefix .. "R"], degrees)
     end
 
+    if rig.waist then
+        -- split spine (R15 style): hips take a little, the waist does most of the bend
+        local rootA = HawkAngle * 0.25
+        addPitch(list, rig.root, rootA)
+        addPitch(list, rig.waist, HawkAngle * 0.75)
+        addPitch(list, rig.neck, -HawkAngle * 0.6)       -- head comes forward, eyes stay on the enemy
+        both("hip", -rootA)                              -- legs stay straight
+    else
+        -- single torso (R6 style): the whole torso tips back, hips get pushed forward
+        local half = (rig.root and rig.root.Part1.Size.Y / 2) or 1
+        local a = math.rad(HawkAngle)
+        addPitch(list, rig.root, HawkAngle, Vector3.new(0, -half * (1 - math.cos(a)), 0))
+        addPitch(list, rig.neck, -HawkAngle * 0.5)
+        both("hip", -HawkAngle)
+    end
+
+    both("shoulder", -HawkAngle)                         -- arms drop and hang
     return list
 end
 
 -- DUCK DODGE: knees bent, hips sink back, chest folds forward, guard up
 local function duckPose(character)
-    local j = mapJoints(character)
-    local list = {}
-    local sc = charScale(character)
+    local rig = rigJoints(character)
+    local list = newPose(character)
 
-    if isR15(character) then
-        local leg = character:FindFirstChild("LeftUpperLeg")
-        local thigh = (leg and leg.Size.Y or 1.2 * sc) * 0.85   -- hip-to-knee is a bit shorter than the part
+    local function both(prefix, degrees)
+        addPitch(list, rig[prefix .. "L"], degrees)
+        addPitch(list, rig[prefix .. "R"], degrees)
+    end
+
+    local hip = rig.hipL or rig.hipR
+    local knee = rig.kneeL or rig.kneeR
+    local half = (rig.root and rig.root.Part1.Size.Y / 2) or 1
+
+    if hip and knee then
+        -- legs with knees (R15 style): thighs forward, shins straight, hips sink down and back
+        local thigh = hip.Part1.Size.Y * 0.85            -- hip-to-knee is a bit shorter than the part
         local a = math.rad(DuckKnee)
+        local rootPitch = rig.waist and 0 or -DuckBend * 0.8
 
-        -- sink the hips down and back so the feet stay planted
-        addPitch(list, j.Root, 0, Vector3.new(0, -thigh * (1 - math.cos(a)), thigh * math.sin(a)))
-        addPitch(list, j.LeftHip, DuckKnee)            -- thighs forward
-        addPitch(list, j.RightHip, DuckKnee)
-        addPitch(list, j.LeftKnee, -DuckKnee)          -- shins stay straight up
-        addPitch(list, j.RightKnee, -DuckKnee)
-        addPitch(list, j.Waist, -DuckBend)             -- fold forward (nakayuko)
-        addPitch(list, j.Neck, DuckBend * 0.7)         -- head comes up, eyes on the enemy
-        addPitch(list, j.LeftShoulder, DuckBend + 20)  -- guard
-        addPitch(list, j.RightShoulder, DuckBend + 20)
-        addPitch(list, j.LeftElbow, 85)
-        addPitch(list, j.RightElbow, 85)
-    else
-        -- R6 legs are one piece (no knees): torso sinks, legs swing forward
+        addPitch(list, rig.root, rootPitch, Vector3.new(0, -thigh * (1 - math.cos(a)), thigh * math.sin(a)))
+        both("hip", DuckKnee - rootPitch)
+        both("knee", -DuckKnee)
+        addPitch(list, rig.waist, -DuckBend)             -- fold forward (nakayuko)
+        addPitch(list, rig.neck, DuckBend * 0.7)         -- head comes up, eyes on the enemy
+        both("shoulder", DuckBend + 20)                  -- guard
+        both("elbow", 85)
+
+    elseif hip then
+        -- one-piece legs (R6 style): torso sinks and folds, legs swing forward
         local torsoDeg = DuckBend * 0.8
         local legDeg = 30
+        local legLen = hip.Part1.Size.Y
         local torso = math.rad(torsoDeg)
         local legA = math.rad(legDeg)
-        local offY = (-3 + math.cos(torso) + 2 * math.cos(legA)) * sc
-        local offZ = (-math.sin(torso) + 2 * math.sin(legA)) * sc
+        local offY = -(half + legLen) + half * math.cos(torso) + legLen * math.cos(legA)
+        local offZ = -half * math.sin(torso) + legLen * math.sin(legA)
 
-        addPitch(list, j.RootJoint, -torsoDeg, Vector3.new(0, offY, offZ))
-        addPitch(list, j.Neck, torsoDeg * 0.7)
-        addPitch(list, j["Left Hip"], torsoDeg + legDeg)
-        addPitch(list, j["Right Hip"], torsoDeg + legDeg)
-        addPitch(list, j["Left Shoulder"], torsoDeg + 20)
-        addPitch(list, j["Right Shoulder"], torsoDeg + 20)
+        addPitch(list, rig.root, -torsoDeg, Vector3.new(0, offY, offZ))
+        addPitch(list, rig.neck, torsoDeg * 0.7)
+        both("hip", torsoDeg + legDeg)
+        both("shoulder", torsoDeg + 20)
+
+    else
+        -- unknown rig (no legs found): at least fold and sink the whole body
+        addPitch(list, rig.root, -DuckBend * 0.6, Vector3.new(0, -half * 0.4, 0))
+        addPitch(list, rig.waist, -DuckBend * 0.5)
+        addPitch(list, rig.neck, DuckBend * 0.5)
+        both("shoulder", DuckBend)
     end
 
     return list
@@ -589,8 +684,61 @@ local function restoreJoints()
     end
 end
 
+---------------------------------------------------------------------
+-- NO-HIT FRAMES: your hitbox is turned off while you dash / dodge.
+-- Client-side: it only stops hits that are detected on YOUR side (Touched on your
+-- parts, checks done by your own client). Hits that the game's server decides
+-- can't be changed from here.
+---------------------------------------------------------------------
+
+local iframeCount = 0
+local iframeSaved = {}
+
+local function iframesOn(character)
+    iframeCount = iframeCount + 1
+    if iframeCount > 1 then return end
+
+    iframeSaved = {}
+    for _, d in ipairs(character:GetDescendants()) do
+        if d:IsA("BasePart") then
+            iframeSaved[d] = {d.CanTouch, d.CanQuery}
+            d.CanTouch = false
+            d.CanQuery = false
+        end
+    end
+end
+
+local function iframesRestore()
+    for part, v in pairs(iframeSaved) do
+        if part.Parent then
+            part.CanTouch = v[1]
+            part.CanQuery = v[2]
+        end
+    end
+    iframeSaved = {}
+end
+
+local function iframesOff()
+    iframeCount = math.max(0, iframeCount - 1)
+    if iframeCount == 0 then
+        iframesRestore()
+    end
+end
+
+local function iframesReset()
+    iframeCount = 0
+    iframesRestore()
+end
+
+local function startIFrames(character, seconds)
+    if not IFrames or not character then return end
+    iframesOn(character)
+    task.delay(seconds, iframesOff)
+end
+
 local function dashMove(character, humanoid, root, worldDir)
     local feet = getFeet(character, humanoid, root)
+    startIFrames(character, DashTime + IFrameExtra)
 
     pcall(mirage, character)
     pcall(groundBurst, feet, 7)
@@ -656,6 +804,8 @@ local function dodgeMove(character, humanoid, root, worldDir, localDir, kind)
         tIn, hold, tOut = 0.09, 0.19, 0.3
         slide(root, humanoid, worldDir, DodgeShift, 0.12)
     end
+
+    startIFrames(character, tIn + hold + IFrameExtra)
 
     if #entries == 0 then
         notify("Pose failed: no body joints found (custom rig?)")
@@ -901,7 +1051,8 @@ end
 local function addEyes(character)
     removeEyes()
 
-    local head = character:FindFirstChild("Head")
+    local rigH = rigJoints(character)
+    local head = character:FindFirstChild("Head") or (rigH.neck and rigH.neck.Part1)
     if not head or not head:IsA("BasePart") then return end
 
     local s = head.Size.Y
@@ -1010,22 +1161,19 @@ end
 
 -- the roar: chest out, head back, both arms out with the elbows up (double bicep flex)
 local function hulkPose(character)
-    local j = mapJoints(character)
-    local list = {}
+    local rig = rigJoints(character)
+    local list = newPose(character)
 
-    if isR15(character) then
-        addPitch(list, j.Waist, 18)
-        addPitch(list, j.Neck, 28)
-        addTilt(list, j.RightShoulder, Z_AXIS, 80)
-        addTilt(list, j.LeftShoulder, Z_AXIS, -80)
-        addTilt(list, j.RightElbow, Z_AXIS, 100)
-        addTilt(list, j.LeftElbow, Z_AXIS, -100)
-        addTilt(list, j.RightHip, Z_AXIS, 10)           -- wide stance
-        addTilt(list, j.LeftHip, Z_AXIS, -10)
-    else
-        addPitch(list, j.Neck, 28)
-        addTilt(list, j["Right Shoulder"], Z_AXIS, 80)
-        addTilt(list, j["Left Shoulder"], Z_AXIS, -80)
+    addPitch(list, rig.waist, 18)
+    addPitch(list, rig.neck, 28)
+    addTilt(list, rig.shoulderR, Z_AXIS, 80)
+    addTilt(list, rig.shoulderL, Z_AXIS, -80)
+    addTilt(list, rig.elbowR, Z_AXIS, 100)
+    addTilt(list, rig.elbowL, Z_AXIS, -100)
+
+    if rig.waist then
+        addTilt(list, rig.hipR, Z_AXIS, 10)              -- wide stance
+        addTilt(list, rig.hipL, Z_AXIS, -10)
     end
 
     return list
@@ -1435,12 +1583,21 @@ button("+", 175, 121, 45, function()
 end)
 
 local circleBtn
-circleBtn = button("CIRCLE: ON", 10, 164, 210, function()
+circleBtn = button("CIRCLE: ON", 10, 164, 100, function()
     ShowCircle = not ShowCircle
     circleBtn.Text = ShowCircle and "CIRCLE: ON" or "CIRCLE: OFF"
     circleBtn.BackgroundColor3 = ShowCircle and GRAY or DARK
 end)
 circleBtn.BackgroundColor3 = GRAY
+
+-- NO-HIT: hitbox off while you dash / dodge
+local hitBtn
+hitBtn = button("NO-HIT: ON", 116, 164, 104, function()
+    IFrames = not IFrames
+    hitBtn.Text = IFrames and "NO-HIT: ON" or "NO-HIT: OFF"
+    hitBtn.BackgroundColor3 = IFrames and GRAY or DARK
+end)
+hitBtn.BackgroundColor3 = IFrames and GRAY or DARK
 
 button("LEFT", 10, 207, 66, function()
     perform(Vector3.new(-1, 0, 0), "side")
@@ -1912,6 +2069,7 @@ gui.Destroying:Connect(function()
     ring:Destroy()
     pcall(restoreJoints)
     pcall(hulkInstantOff)
+    pcall(iframesReset)
     hulkRemoving:Disconnect()
 end)
 
