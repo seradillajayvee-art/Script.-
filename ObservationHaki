@@ -37,9 +37,13 @@ local LeanAngle = 35          -- degrees the body leans in DODGE mode
 local DodgeShift = 1.5        -- tiny slide during the lean (studs)
 local DodgeCooldown = 0.4
 local ApproachSpeed = 3       -- enemy must move toward you at least this fast (or be very close)
+local VeryClose = 5           -- inside this distance an enemy always counts as a threat
+local BackBias = 0.35         -- 0 = pure sidestep, higher = also steps away from the enemy
+local ScanRate = 0.05         -- seconds between enemy scans
+local IgnoreTeammates = true  -- skip players on your team
 local FovKick = 8             -- camera FOV pulse (0 = off)
 local ScreenFX = true         -- quick grayscale flash + blur (set false if it lags)
-local HideUi = false           -- false = normal PlayerGui (always visible). true = hidden executor UI (gethui/CoreGui)
+local HideUi = false          -- false = normal PlayerGui (always visible). true = hidden executor UI (gethui/CoreGui)
 
 -- COLORS (black & gray only)
 local BLACK = Color3.fromRGB(10, 10, 10)
@@ -51,6 +55,8 @@ local Enabled = false
 local Busy = false
 local Mode = "DASH"           -- "DASH" or "DODGE"
 local ShowCircle = true
+
+local connections = {}        -- everything we connect, so UNLOAD can clean it up
 
 local function getCharacter()
     local character = Player.Character
@@ -97,7 +103,14 @@ local function makeGhost(character, bodyColor, outlineColor, life, startTranspar
                 return part:Clone()
             end)
             if ok and ghost then
-                ghost:ClearAllChildren()
+                -- strip everything except the head mesh (R6 heads need it to stay round)
+                for _, child in ipairs(ghost:GetChildren()) do
+                    if child:IsA("SpecialMesh") then
+                        child.TextureId = ""
+                    else
+                        child:Destroy()
+                    end
+                end
                 ghost.Anchored = true
                 ghost.CanCollide = false
                 ghost.CanQuery = false
@@ -236,11 +249,14 @@ local function ribbon(root, duration)
     end)
 end
 
+-- FOV pulse (guarded so two pulses can never stack and leave the FOV stuck)
+local fovBusy = false
 local function fovPulse()
-    if FovKick <= 0 then return end
+    if FovKick <= 0 or fovBusy then return end
     local cam = workspace.CurrentCamera
     if not cam then return end
 
+    fovBusy = true
     local base = cam.FieldOfView
     TweenService:Create(cam, TweenInfo.new(0.07, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
         FieldOfView = base + FovKick
@@ -250,6 +266,9 @@ local function fovPulse()
         TweenService:Create(cam, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             FieldOfView = base
         }):Play()
+        task.delay(0.26, function()
+            fovBusy = false
+        end)
     end)
 end
 
@@ -524,8 +543,18 @@ local function getGuiParents()
     return list
 end
 
+-- stop any previous run first (otherwise its loop keeps running and dodges twice)
+if _G.AIDodgeUnload then
+    pcall(_G.AIDodgeUnload)
+    _G.AIDodgeUnload = nil
+end
+
 -- remove old copies (from any previous run)
 clearOldUi()
+local oldCircle = workspace:FindFirstChild("AIDodgeRange")
+if oldCircle then
+    oldCircle:Destroy()
+end
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "AIDodgeUI"
@@ -574,7 +603,7 @@ local iconCorner = Instance.new("UICorner")
 iconCorner.CornerRadius = UDim.new(1, 0)
 iconCorner.Parent = icon
 
-icon.MouseButton1Click:Connect(function()
+icon.Activated:Connect(function()
     frame.Visible = not frame.Visible
 end)
 
@@ -605,7 +634,7 @@ title.InputBegan:Connect(function(input)
     end
 end)
 
-UIS.InputChanged:Connect(function(input)
+table.insert(connections, UIS.InputChanged:Connect(function(input)
     if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
         or input.UserInputType == Enum.UserInputType.Touch) then
         local delta = input.Position - dragStart
@@ -614,7 +643,7 @@ UIS.InputChanged:Connect(function(input)
             startPos.Y.Scale, startPos.Y.Offset + delta.Y
         )
     end
-end)
+end))
 
 local function button(text, x, y, w, callback)
     local b = Instance.new("TextButton")
@@ -627,7 +656,7 @@ local function button(text, x, y, w, callback)
     b.TextColor3 = Color3.new(1, 1, 1)
     b.BorderSizePixel = 0
     b.Parent = frame
-    b.MouseButton1Click:Connect(callback)
+    b.Activated:Connect(callback)
     return b
 end
 
@@ -656,14 +685,18 @@ rangeLabel.TextColor3 = LIGHT
 rangeLabel.Text = "RANGE: " .. Range
 rangeLabel.Parent = frame
 
+local function refreshRange()
+    rangeLabel.Text = "RANGE: " .. Range
+end
+
 button("-", 10, 121, 45, function()
     Range = math.max(RangeMin, Range - RangeStep)
-    rangeLabel.Text = "RANGE: " .. Range
+    refreshRange()
 end)
 
 button("+", 175, 121, 45, function()
     Range = math.min(RangeMax, Range + RangeStep)
-    rangeLabel.Text = "RANGE: " .. Range
+    refreshRange()
 end)
 
 local circleBtn
@@ -674,111 +707,166 @@ circleBtn = button("CIRCLE: ON", 10, 164, 210, function()
 end)
 circleBtn.BackgroundColor3 = GRAY
 
-button("LEFT", 10, 207, 66, function()
-    perform(Vector3.new(-1, 0, 0))
-end)
-
-button("RIGHT", 82, 207, 66, function()
-    perform(Vector3.new(1, 0, 0))
-end)
-
-button("BACK", 154, 207, 66, function()
-    perform(Vector3.new(0, 0, 1))
-end)
-
 ---------------------------------------------------------------------
--- RANGE CIRCLE (ring on the ground around you)
+-- RANGE CIRCLE
 ---------------------------------------------------------------------
 
-local ring = Instance.new("CylinderHandleAdornment")
-ring.Name = "AIDodgeRange"
-ring.Height = 0.15
-ring.Color3 = GRAY
-ring.Transparency = 0.35
-ring.AlwaysOnTop = false
-ring.Visible = false
-ring.Parent = workspace
-
-local ringLoop = RunService.Heartbeat:Connect(function()
-    local humanoid, root = getCharacter()
-    if not humanoid or not ShowCircle then
-        ring.Visible = false
-        return
-    end
-
-    if ring.Adornee ~= root then
-        ring.Adornee = root
-    end
-
-    ring.Radius = Range
-    ring.InnerRadius = math.max(Range - 0.3, 0)
-    ring.CFrame = CFrame.new(0, -(feetOffset(humanoid, root) - 0.1), 0) * CFrame.Angles(math.pi / 2, 0, 0)
-    ring.Visible = true
-end)
+local circle = Instance.new("Part")
+circle.Name = "AIDodgeRange"
+circle.Shape = Enum.PartType.Cylinder
+circle.Anchored = true
+circle.CanCollide = false
+circle.CanQuery = false
+circle.CanTouch = false
+circle.CastShadow = false
+circle.Material = Enum.Material.SmoothPlastic
+circle.Color = GRAY
+circle.Transparency = 1
+circle.Size = Vector3.new(0.1, Range * 2, Range * 2)
+circle.Parent = workspace
 
 ---------------------------------------------------------------------
--- AUTO DODGE: only enemies inside the circle count
+-- AUTO DODGE (enemy detection)
 ---------------------------------------------------------------------
 
-local autoLoop = RunService.Heartbeat:Connect(function()
-    if not Enabled or Busy then return end
+local lastScan = 0
+local lastSide = 1
 
-    local humanoid, root = getCharacter()
-    if not humanoid then return end
+-- true if nothing solid is in the way of a dash in this direction
+local function pathClear(character, root, dir, distance)
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {character}
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.RespectCanCollide = true
+    return workspace:Raycast(root.Position, dir * (distance + 1.5), params) == nil
+end
 
-    local bestDist = math.huge
-    local bestDir = nil
+-- closest enemy that is inside the circle AND coming at you (or very close)
+local function findThreat(root)
+    local best, bestDist = nil, math.huge
 
     for _, other in ipairs(Players:GetPlayers()) do
-        if other ~= Player and other.Character then
-            local oHumanoid = other.Character:FindFirstChildOfClass("Humanoid")
-            local oRoot = other.Character:FindFirstChild("HumanoidRootPart")
+        local sameTeam = IgnoreTeammates and Player.Team ~= nil and other.Team == Player.Team
 
-            if oHumanoid and oHumanoid.Health > 0 and oRoot then
-                local offset = root.Position - oRoot.Position
+        if other ~= Player and not sameTeam then
+            local char = other.Character
+            local eHum = char and char:FindFirstChildOfClass("Humanoid")
+            local eRoot = char and char:FindFirstChild("HumanoidRootPart")
+
+            if eHum and eRoot and eHum.Health > 0 then
+                local offset = root.Position - eRoot.Position
                 local flat = Vector3.new(offset.X, 0, offset.Z)
                 local dist = flat.Magnitude
 
-                if dist < Range and dist > 0.1 and dist < bestDist then
-                    local toMe = flat.Unit
-                    local closing = oRoot.AssemblyLinearVelocity:Dot(toMe)
-                    local facing = oRoot.CFrame.LookVector:Dot(toMe)
+                if dist <= Range and dist > 0.01 and math.abs(offset.Y) <= 10 then
+                    local v = eRoot.AssemblyLinearVelocity
+                    local approach = Vector3.new(v.X, 0, v.Z):Dot(flat.Unit)
 
-                    if facing > 0.5 and (closing > ApproachSpeed or dist < Range * 0.5) then
-                        bestDist = dist
-                        bestDir = toMe
+                    if (approach >= ApproachSpeed or dist <= VeryClose) and dist < bestDist then
+                        best, bestDist = eRoot, dist
                     end
                 end
             end
         end
     end
 
-    if bestDir then
-        -- slip sideways and a little away from the attacker
-        local sign = (math.random(1, 2) == 1) and 1 or -1
-        local perp = Vector3.new(-bestDir.Z, 0, bestDir.X) * sign
-        local dir = (perp + bestDir * 0.35).Unit
+    return best
+end
+
+-- sidestep (slightly backward) away from the enemy's line of approach, in WORLD space
+local function pickDirection(character, root, eRoot)
+    local toEnemy = eRoot.Position - root.Position
+    toEnemy = Vector3.new(toEnemy.X, 0, toEnemy.Z)
+    if toEnemy.Magnitude < 0.01 then return end
+    toEnemy = toEnemy.Unit
+
+    local sideAxis = Vector3.new(-toEnemy.Z, 0, toEnemy.X)
+
+    -- dodge away from the side the enemy is drifting toward; if they come straight, alternate
+    local v = eRoot.AssemblyLinearVelocity
+    local lateral = v.X * sideAxis.X + v.Z * sideAxis.Z
+    local side
+    if math.abs(lateral) > 1 then
+        side = lateral > 0 and -1 or 1
+    else
+        lastSide = -lastSide
+        side = lastSide
+    end
+
+    for _, s in ipairs({side, -side}) do
+        local dir = sideAxis * s - toEnemy * BackBias
+        if dir.Magnitude > 0.01 then
+            dir = dir.Unit
+            if pathClear(character, root, dir, DashDistance) then
+                return dir
+            end
+        end
+    end
+    -- walls on both sides: skip this dodge
+end
+
+table.insert(connections, RunService.Heartbeat:Connect(function()
+    local humanoid, root = getCharacter()
+
+    -- range circle follows your feet
+    if humanoid and root and ShowCircle then
+        circle.Transparency = 0.82
+        circle.Size = Vector3.new(0.1, Range * 2, Range * 2)
+        local down = feetOffset(humanoid, root) - 0.15
+        circle.CFrame = CFrame.new(root.Position - Vector3.new(0, down, 0)) * CFrame.Angles(0, 0, math.pi / 2)
+    else
+        circle.Transparency = 1
+    end
+
+    if not Enabled or Busy or not humanoid or not root then return end
+
+    local now = os.clock()
+    if now - lastScan < ScanRate then return end
+    lastScan = now
+
+    local threat = findThreat(root)
+    if not threat then return end
+
+    local dir = pickDirection(Player.Character, root, threat)
+    if dir then
         perform(root.CFrame:VectorToObjectSpace(dir))
     end
-end)
+end))
 
--- cleanup if the UI is removed (e.g. script re-run)
-gui.Destroying:Connect(function()
-    autoLoop:Disconnect()
-    ringLoop:Disconnect()
-    ring:Destroy()
+-- new body after respawn: never stay stuck on cooldown
+table.insert(connections, Player.CharacterAdded:Connect(function()
+    Busy = false
+end))
+
+---------------------------------------------------------------------
+-- UNLOAD
+---------------------------------------------------------------------
+
+local function unload()
+    Enabled = false
+    for _, c in ipairs(connections) do
+        pcall(function()
+            c:Disconnect()
+        end)
+    end
     pcall(restoreJoints)
-end)
+    pcall(function()
+        circle:Destroy()
+    end)
+    pcall(function()
+        gui:Destroy()
+    end)
+end
 
-notify("Loaded! Tap the AD icon (right side) to hide/show the panel.")
+_G.AIDodgeUnload = unload
+
+button("UNLOAD", 10, 207, 210, unload)
 
 end -- main
 
-local ok, err = xpcall(main, function(e)
-    return tostring(e) .. "\n" .. debug.traceback()
-end)
-
-if not ok then
-    warn("[AI Dodge] ERROR: " .. tostring(err))
-    notify("Error: " .. tostring(err):sub(1, 140))
+local ok, err = pcall(main)
+if ok then
+    notify("Loaded. Tap the AD icon to hide / show the panel.")
+else
+    notify("Failed to start: " .. tostring(err))
 end
