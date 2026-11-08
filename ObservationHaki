@@ -1,5 +1,8 @@
 -- AI DODGE - DELTA MOBILE (Shadow edition: black & gray)
--- MODE: DASH (quick slip-step) / DODGE (body lean, no animation)
+-- MODE: DASH (quick slip-step) / DODGE (body poses, no animation)
+--   DODGE: LEFT / RIGHT = side lean
+--          BACK         = HAWK back dodge (Hajime no Ippo, Takamura style: arms down, bend way back)
+--          DUCK         = real duck (knees bent, body folded forward)
 -- Auto dodge only reacts to enemies INSIDE the range circle
 
 local Players = game:GetService("Players")
@@ -33,13 +36,19 @@ local RangeStep = 2
 local DashDistance = 5        -- how far the dash goes (studs)
 local DashTime = 0.12         -- how long the dash lasts (seconds)
 local DashCooldown = 0.45
-local LeanAngle = 35          -- degrees the body leans in DODGE mode
+local LeanAngle = 35          -- degrees the body leans sideways in DODGE mode
 local DodgeShift = 1.5        -- tiny slide during the lean (studs)
 local DodgeCooldown = 0.4
 local ApproachSpeed = 3       -- enemy must move toward you at least this fast (or be very close)
 local FovKick = 8             -- camera FOV pulse (0 = off)
 local ScreenFX = true         -- quick grayscale flash + blur (set false if it lags)
-local HideUi = false           -- false = normal PlayerGui (always visible). true = hidden executor UI (gethui/CoreGui)
+local HideUi = false          -- false = normal PlayerGui (always visible). true = hidden executor UI (gethui/CoreGui)
+
+-- NEW: hawk back dodge + duck dodge
+local HawkAngle = 55          -- how far you bend BACK in the hawk dodge (degrees, bigger = deeper)
+local DuckBend = 50           -- how far the body folds forward when ducking (degrees)
+local DuckKnee = 55           -- how deep the knees bend when ducking (degrees)
+local AutoStyle = "MIX"       -- DODGE mode auto: "MIX", "SIDE", "BACK" (hawk), "DUCK"
 
 -- COLORS (black & gray only)
 local BLACK = Color3.fromRGB(10, 10, 10)
@@ -307,30 +316,44 @@ local function slide(root, humanoid, worldDir, distance, duration, onStep)
     end)
 end
 
--- joints used for the lean (no animation, just tilts the body)
-local function getLeanJoints(character)
-    local joints = {}
-    local lower = character:FindFirstChild("LowerTorso")
-    local upper = character:FindFirstChild("UpperTorso")
+---------------------------------------------------------------------
+-- BODY POSES (no animation, just bends the joints)
+-- Pitch: degrees around the body's X axis.
+--   + = top tips BACK (and the bottom swings FORWARD: knees up, arms forward)
+--   - = top tips FORWARD (bow / fold)
+---------------------------------------------------------------------
 
-    if lower and upper then -- R15
-        local rootJoint = lower:FindFirstChild("Root")
-        local waist = upper:FindFirstChild("Waist")
-        if rootJoint then
-            table.insert(joints, {joint = rootJoint, share = 0.3})
-        end
-        if waist then
-            table.insert(joints, {joint = waist, share = 0.7})
-        end
-    else -- R6
-        local hrp = character:FindFirstChild("HumanoidRootPart")
-        local rootJoint = hrp and hrp:FindFirstChild("RootJoint")
-        if rootJoint then
-            table.insert(joints, {joint = rootJoint, share = 0.7})
+local X_AXIS = Vector3.new(1, 0, 0)
+local NO_OFFSET = Vector3.new(0, 0, 0)
+
+-- every Motor6D of the character by name
+local function mapJoints(character)
+    local map = {}
+    for _, d in ipairs(character:GetDescendants()) do
+        if d:IsA("Motor6D") and not map[d.Name] then
+            map[d.Name] = d
         end
     end
+    return map
+end
 
-    return joints
+local function isR15(character)
+    return character:FindFirstChild("UpperTorso") ~= nil
+end
+
+local function addTilt(list, joint, axis, degrees, offset)
+    if joint then
+        table.insert(list, {
+            joint = joint,
+            axis = axis,
+            angle = math.rad(degrees),
+            offset = offset or NO_OFFSET
+        })
+    end
+end
+
+local function addPitch(list, joint, degrees, offset)
+    addTilt(list, joint, X_AXIS, degrees, offset)
 end
 
 -- original joint position is saved on the joint so it can always be restored
@@ -343,46 +366,128 @@ local function baseC0(joint)
     return saved
 end
 
-local function rotatedC0(c0, axis, angle)
-    local rotOnly = c0 - c0.Position
-    return CFrame.new(c0.Position) * CFrame.fromAxisAngle(axis, angle) * rotOnly
-end
-
--- localDir = direction to lean toward (local space, X = right, Z = back)
-local function leanBody(character, localDir)
-    local joints = getLeanJoints(character)
-    if #joints == 0 then return end
-
-    local axis = Vector3.new(0, 1, 0):Cross(localDir)
-    if axis.Magnitude < 0.01 then return end
-    axis = axis.Unit
-
-    for _, j in ipairs(joints) do
-        local target = rotatedC0(baseC0(j.joint), axis, math.rad(LeanAngle * j.share))
-        TweenService:Create(j.joint, TweenInfo.new(0.09, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+-- tween into the pose, hold it, then spring back with a little overshoot
+local function playPose(entries, tIn, hold, tOut)
+    for _, e in ipairs(entries) do
+        local base = baseC0(e.joint)
+        local rotOnly = base - base.Position
+        local target = CFrame.new(base.Position + e.offset) * CFrame.fromAxisAngle(e.axis, e.angle) * rotOnly
+        TweenService:Create(e.joint, TweenInfo.new(tIn, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
             C0 = target
         }):Play()
     end
 
-    task.wait(0.19)
+    task.wait(tIn + hold)
 
-    -- springs back with a little overshoot (the "lean lean" feel)
-    for _, j in ipairs(joints) do
-        if j.joint.Parent then
-            TweenService:Create(j.joint, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-                C0 = baseC0(j.joint)
+    for _, e in ipairs(entries) do
+        if e.joint.Parent then
+            TweenService:Create(e.joint, TweenInfo.new(tOut, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                C0 = baseC0(e.joint)
             }):Play()
         end
     end
 end
 
+-- SIDE LEAN: localDir = direction to lean toward (local space, X = right, Z = back)
+local function leanPose(character, localDir)
+    local j = mapJoints(character)
+    local list = {}
+
+    local axis = Vector3.new(0, 1, 0):Cross(localDir)
+    if axis.Magnitude < 0.01 then return list end
+    axis = axis.Unit
+
+    if isR15(character) then
+        addTilt(list, j.Root, axis, LeanAngle * 0.3)
+        addTilt(list, j.Waist, axis, LeanAngle * 0.7)
+    else
+        addTilt(list, j.RootJoint, axis, LeanAngle * 0.7)
+    end
+
+    return list
+end
+
+-- HAWK BACK DODGE: arms hang down, body bends way back from the waist, head keeps looking forward
+local function hawkPose(character)
+    local j = mapJoints(character)
+    local list = {}
+
+    if isR15(character) then
+        local rootA = HawkAngle * 0.25
+        local waistA = HawkAngle * 0.75
+
+        addPitch(list, j.Root, rootA)
+        addPitch(list, j.Waist, waistA)
+        addPitch(list, j.Neck, -HawkAngle * 0.6)       -- head comes forward, eyes stay on the enemy
+        addPitch(list, j.LeftHip, -rootA)              -- legs stay straight
+        addPitch(list, j.RightHip, -rootA)
+        addPitch(list, j.LeftShoulder, -HawkAngle)     -- arms drop and hang
+        addPitch(list, j.RightShoulder, -HawkAngle)
+    else
+        local a = math.rad(HawkAngle)
+        -- hips get pushed forward a bit as the torso goes back
+        addPitch(list, j.RootJoint, HawkAngle, Vector3.new(0, -(1 - math.cos(a)), 0))
+        addPitch(list, j.Neck, -HawkAngle * 0.5)
+        addPitch(list, j["Left Hip"], -HawkAngle)
+        addPitch(list, j["Right Hip"], -HawkAngle)
+        addPitch(list, j["Left Shoulder"], -HawkAngle)
+        addPitch(list, j["Right Shoulder"], -HawkAngle)
+    end
+
+    return list
+end
+
+-- DUCK DODGE: knees bent, hips sink back, chest folds forward, guard up
+local function duckPose(character)
+    local j = mapJoints(character)
+    local list = {}
+
+    if isR15(character) then
+        local leg = character:FindFirstChild("LeftUpperLeg")
+        local thigh = (leg and leg.Size.Y or 1.2) * 0.85   -- hip-to-knee is a bit shorter than the part
+        local a = math.rad(DuckKnee)
+
+        -- sink the hips down and back so the feet stay planted
+        addPitch(list, j.Root, 0, Vector3.new(0, -thigh * (1 - math.cos(a)), thigh * math.sin(a)))
+        addPitch(list, j.LeftHip, DuckKnee)            -- thighs forward
+        addPitch(list, j.RightHip, DuckKnee)
+        addPitch(list, j.LeftKnee, -DuckKnee)          -- shins stay straight up
+        addPitch(list, j.RightKnee, -DuckKnee)
+        addPitch(list, j.Waist, -DuckBend)             -- fold forward (nakayuko)
+        addPitch(list, j.Neck, DuckBend * 0.7)         -- head comes up, eyes on the enemy
+        addPitch(list, j.LeftShoulder, DuckBend + 20)  -- guard
+        addPitch(list, j.RightShoulder, DuckBend + 20)
+        addPitch(list, j.LeftElbow, 85)
+        addPitch(list, j.RightElbow, 85)
+    else
+        -- R6 legs are one piece (no knees): torso sinks, legs swing forward
+        local torsoDeg = DuckBend * 0.8
+        local legDeg = 30
+        local torso = math.rad(torsoDeg)
+        local legA = math.rad(legDeg)
+        local offY = -3 + math.cos(torso) + 2 * math.cos(legA)
+        local offZ = -math.sin(torso) + 2 * math.sin(legA)
+
+        addPitch(list, j.RootJoint, -torsoDeg, Vector3.new(0, offY, offZ))
+        addPitch(list, j.Neck, torsoDeg * 0.7)
+        addPitch(list, j["Left Hip"], torsoDeg + legDeg)
+        addPitch(list, j["Right Hip"], torsoDeg + legDeg)
+        addPitch(list, j["Left Shoulder"], torsoDeg + 20)
+        addPitch(list, j["Right Shoulder"], torsoDeg + 20)
+    end
+
+    return list
+end
+
 local function restoreJoints()
     local character = Player.Character
     if not character then return end
-    for _, j in ipairs(getLeanJoints(character)) do
-        local saved = j.joint:GetAttribute("AIDodgeC0")
-        if typeof(saved) == "CFrame" then
-            j.joint.C0 = saved
+    for _, d in ipairs(character:GetDescendants()) do
+        if d:IsA("Motor6D") then
+            local saved = d:GetAttribute("AIDodgeC0")
+            if typeof(saved) == "CFrame" then
+                d.C0 = saved
+            end
         end
     end
 end
@@ -408,53 +513,96 @@ local function dashMove(character, humanoid, root, worldDir)
     end)
 end
 
-local function dodgeMove(character, humanoid, root, worldDir, localDir)
+-- kind: "side" (lean), "back" (hawk), "duck"
+-- returns how long the pose lasts (used for the cooldown)
+local function dodgeMove(character, humanoid, root, worldDir, localDir, kind)
     local feet = getFeet(character, humanoid, root)
 
     pcall(mirage, character)
-    pcall(groundBurst, feet, 4)
+    pcall(groundBurst, feet, kind == "duck" and 3 or 4)
     pcall(smoke, feet, 8)
     pcall(fovPulse)
     pcall(screenFx)
 
-    slide(root, humanoid, worldDir, DodgeShift, 0.12)
+    local entries = {}
+    local tIn, hold, tOut
 
-    task.spawn(function()
-        pcall(leanBody, character, localDir)
-    end)
+    if kind == "back" then
+        local ok, result = pcall(hawkPose, character)
+        entries = ok and result or {}
+        tIn, hold, tOut = 0.1, 0.3, 0.3
+        slide(root, humanoid, worldDir, DodgeShift * 1.7, 0.14)
+    elseif kind == "duck" then
+        local ok, result = pcall(duckPose, character)
+        entries = ok and result or {}
+        tIn, hold, tOut = 0.1, 0.45, 0.3
 
-    task.delay(0.09, function()
+        -- camera dips with you so the duck feels real
+        pcall(function()
+            local camBase = humanoid.CameraOffset
+            TweenService:Create(humanoid, TweenInfo.new(tIn), {
+                CameraOffset = camBase + Vector3.new(0, -0.6, 0)
+            }):Play()
+            task.delay(tIn + hold, function()
+                TweenService:Create(humanoid, TweenInfo.new(tOut), {CameraOffset = camBase}):Play()
+            end)
+        end)
+    else
+        local ok, result = pcall(leanPose, character, localDir)
+        entries = ok and result or {}
+        tIn, hold, tOut = 0.09, 0.19, 0.3
+        slide(root, humanoid, worldDir, DodgeShift, 0.12)
+    end
+
+    if #entries > 0 then
+        task.spawn(function()
+            pcall(playPose, entries, tIn, hold, tOut)
+        end)
+    end
+
+    task.delay(tIn, function()
         pcall(trailGhost, character, true)
     end)
+
+    return tIn + hold + tOut
 end
 
 -- direction is in LOCAL space: X = right, Z = backward (forward is -Z)
-local function perform(direction)
+-- kind: "side" (default), "back" (hawk), "duck"  (back/duck only apply in DODGE mode, duck always ducks)
+local function perform(direction, kind)
     if Busy then return end
 
     local humanoid, root = getCharacter()
     if not humanoid or not root then return end
 
-    local flatLocal = Vector3.new(direction.X, 0, direction.Z)
-    if flatLocal.Magnitude < 0.01 then return end
-    local localDir = flatLocal.Unit
+    kind = kind or "side"
 
-    local worldDir = root.CFrame:VectorToWorldSpace(localDir)
-    worldDir = Vector3.new(worldDir.X, 0, worldDir.Z)
-    if worldDir.Magnitude < 0.01 then return end
-    worldDir = worldDir.Unit
+    local localDir = Vector3.new(0, 0, -1)
+    local worldDir = Vector3.new(0, 0, 0)
+
+    if kind ~= "duck" then
+        local flatLocal = Vector3.new(direction.X, 0, direction.Z)
+        if flatLocal.Magnitude < 0.01 then return end
+        localDir = flatLocal.Unit
+
+        worldDir = root.CFrame:VectorToWorldSpace(localDir)
+        worldDir = Vector3.new(worldDir.X, 0, worldDir.Z)
+        if worldDir.Magnitude < 0.01 then return end
+        worldDir = worldDir.Unit
+    end
 
     local character = Player.Character
     local cooldown
 
     Busy = true
     local ok, err = pcall(function()
-        if Mode == "DASH" then
+        if Mode == "DASH" and kind ~= "duck" then
             cooldown = DashCooldown
             dashMove(character, humanoid, root, worldDir)
         else
             cooldown = DodgeCooldown
-            dodgeMove(character, humanoid, root, worldDir, localDir)
+            local length = dodgeMove(character, humanoid, root, worldDir, localDir, kind)
+            cooldown = math.max(cooldown, length or 0)
         end
     end)
 
@@ -550,8 +698,8 @@ if not parented then
 end
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.fromOffset(230, 252)
-frame.Position = UDim2.new(0, 15, 0.5, -126)
+frame.Size = UDim2.fromOffset(230, 295)
+frame.Position = UDim2.new(0, 15, 0.5, -148)
 frame.BackgroundColor3 = BLACK
 frame.BorderSizePixel = 0
 frame.Active = true
@@ -641,7 +789,7 @@ end)
 local modeBtn
 modeBtn = button("MODE: DASH", 10, 78, 210, function()
     Mode = (Mode == "DASH") and "DODGE" or "DASH"
-    modeBtn.Text = (Mode == "DASH") and "MODE: DASH" or "MODE: DODGE (LEAN)"
+    modeBtn.Text = "MODE: " .. Mode
 end)
 
 -- range row: [-]  RANGE: 10  [+]
@@ -675,15 +823,30 @@ end)
 circleBtn.BackgroundColor3 = GRAY
 
 button("LEFT", 10, 207, 66, function()
-    perform(Vector3.new(-1, 0, 0))
+    perform(Vector3.new(-1, 0, 0), "side")
 end)
 
 button("RIGHT", 82, 207, 66, function()
-    perform(Vector3.new(1, 0, 0))
+    perform(Vector3.new(1, 0, 0), "side")
 end)
 
+-- DASH mode: dashes back. DODGE mode: hawk back dodge
 button("BACK", 154, 207, 66, function()
-    perform(Vector3.new(0, 0, 1))
+    perform(Vector3.new(0, 0, 1), "back")
+end)
+
+-- always ducks (nakayuko), in any mode
+button("DUCK", 10, 250, 100, function()
+    perform(Vector3.new(0, 0, -1), "duck")
+end)
+
+-- which dodge the AUTO uses in DODGE mode
+local styles = {"MIX", "SIDE", "BACK", "DUCK"}
+local styleBtn
+styleBtn = button("AUTO: " .. AutoStyle, 116, 250, 104, function()
+    local index = table.find(styles, AutoStyle) or 1
+    AutoStyle = styles[index % #styles + 1]
+    styleBtn.Text = "AUTO: " .. AutoStyle
 end)
 
 ---------------------------------------------------------------------
@@ -754,11 +917,44 @@ local autoLoop = RunService.Heartbeat:Connect(function()
     end
 
     if bestDir then
-        -- slip sideways and a little away from the attacker
-        local sign = (math.random(1, 2) == 1) and 1 or -1
-        local perp = Vector3.new(-bestDir.Z, 0, bestDir.X) * sign
-        local dir = (perp + bestDir * 0.35).Unit
-        perform(root.CFrame:VectorToObjectSpace(dir))
+        local kind = "side"
+
+        -- DODGE mode: hawk back / duck only when the attacker is in front of you
+        if Mode == "DODGE" then
+            local style = AutoStyle
+            if style == "MIX" then
+                local roll = math.random(1, 3)
+                if roll == 1 then
+                    style = "SIDE"
+                elseif roll == 2 then
+                    style = "BACK"
+                else
+                    style = "DUCK"
+                end
+            end
+
+            local look = root.CFrame.LookVector
+            local flatLook = Vector3.new(look.X, 0, look.Z)
+            local inFront = flatLook.Magnitude > 0.01 and flatLook.Unit:Dot(-bestDir) > 0.5
+
+            if inFront and style == "BACK" then
+                kind = "back"
+            elseif inFront and style == "DUCK" then
+                kind = "duck"
+            end
+        end
+
+        if kind == "back" then
+            perform(Vector3.new(0, 0, 1), "back")
+        elseif kind == "duck" then
+            perform(Vector3.new(0, 0, -1), "duck")
+        else
+            -- slip sideways and a little away from the attacker
+            local sign = (math.random(1, 2) == 1) and 1 or -1
+            local perp = Vector3.new(-bestDir.Z, 0, bestDir.X) * sign
+            local dir = (perp + bestDir * 0.35).Unit
+            perform(root.CFrame:VectorToObjectSpace(dir), "side")
+        end
     end
 end)
 
