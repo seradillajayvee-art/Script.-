@@ -67,6 +67,10 @@ local RequireAttackAnim = false -- true = RANDOM only reacts when it SEES an att
 local HulkScale = 1.7         -- how big you get (x normal size)
 local HulkScaleMin = 1.2
 local HulkScaleMax = 3
+local HulkMode = "BODY"       -- which part: "BODY" (whole body), "HAND" (big green fists), "FEET" (big green feet)
+local HulkPartScale = 2       -- how big the hands / feet get (HAND and FEET modes)
+local HulkPartScaleMin = 1.3
+local HulkPartScaleMax = 4
 local HulkSkin = Color3.fromRGB(64, 160, 52)   -- skin color
 local HulkEyes = Color3.fromRGB(255, 20, 20)   -- eye color
 local HulkRipShirt = true     -- take your shirt off while hulked (so the green shows)
@@ -408,10 +412,14 @@ local function rigJoints(character)
                 role = "elbow"
             elseif n:find("arm") and not n:find("hand") then
                 role = "shoulder"
+            elseif n:find("hand") or n:find("wrist") then
+                role = "wrist"
             elseif n:find("lowerleg") or n:find("calf") or n:find("shin") then
                 role = "knee"
             elseif n:find("leg") or n:find("thigh") then
                 role = "hip"
+            elseif n:find("foot") or n:find("ankle") then
+                role = "ankle"
             end
 
             if role then
@@ -905,6 +913,10 @@ local hulk = {
     eyes = {},
     aura = nil,
     attrs = {},
+    mode = "BODY",
+    parts = {},
+    partS = 1,
+    hipBase = nil,
 }
 local hulkUi = {} -- filled in by the UI section
 
@@ -960,12 +972,12 @@ local function scaleTo(character, target, duration)
 end
 
 -- skin turns green (and back)
-local function paintSkin(character, on)
-    local bc = character:FindFirstChildOfClass("BodyColors")
+local function paintSkin(character, on, onlyParts)
+    local bc = (not onlyParts) and character:FindFirstChildOfClass("BodyColors") or nil
 
     if on then
         hulk.colors = {}
-        for _, p in ipairs(bodyParts(character)) do
+        for _, p in ipairs(onlyParts or bodyParts(character)) do
             hulk.colors[p] = p.Color
             TweenService:Create(p, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
                 Color = HulkSkin
@@ -1179,6 +1191,118 @@ local function hulkPose(character)
     return list
 end
 
+-- HAND / FEET modes: only those parts grow (the joint stays on the body)
+local function collectParts(character, mode)
+    local rig = rigJoints(character)
+    local entries = {}
+    local parts = {}
+
+    local function add(joint, kind)
+        if joint and joint.Part1 then
+            local part = joint.Part1
+            local atts = {}
+            for _, c in ipairs(part:GetChildren()) do
+                if c:IsA("Attachment") then
+                    atts[c] = c.Position
+                end
+            end
+            table.insert(entries, {
+                part = part, joint = joint, kind = kind,
+                size0 = part.Size, c10 = joint.C1, atts = atts
+            })
+            table.insert(parts, part)
+        end
+    end
+
+    for _, side in ipairs({"L", "R"}) do
+        if mode == "HAND" then
+            if rig["wrist" .. side] then
+                add(rig["wrist" .. side], "uniform")     -- real hands (R15 style): big fists
+            else
+                add(rig["shoulder" .. side], "thick")    -- one-piece arm (R6 style): thicker arm
+            end
+        else
+            if rig["ankle" .. side] then
+                add(rig["ankle" .. side], "foot")        -- real feet: wide, a bit taller
+            else
+                add(rig["hip" .. side], "thick")         -- one-piece leg: thicker leg
+            end
+        end
+    end
+
+    return entries, parts
+end
+
+-- s = 1 is normal size. The joint point is scaled too, so the part grows away from the body.
+local function applyPartScale(entry, s)
+    local part = entry.part
+    if not part or not part.Parent then return end
+
+    local fx, fy, fz = s, s, s
+    if entry.kind == "thick" then
+        fy = 1
+    elseif entry.kind == "foot" then
+        fy = 1 + (s - 1) * 0.4
+    end
+
+    local size0 = entry.size0
+    part.Size = Vector3.new(size0.X * fx, size0.Y * fy, size0.Z * fz)
+
+    local p = entry.c10.Position
+    entry.joint.C1 = CFrame.new(p.X * fx, p.Y * fy, p.Z * fz) * (entry.c10 - p)
+
+    for att, pos in pairs(entry.atts) do
+        if att.Parent then
+            att.Position = Vector3.new(pos.X * fx, pos.Y * fy, pos.Z * fz)
+        end
+    end
+end
+
+-- animate the growth (with a little overshoot). Taller feet lift the body so they don't sink.
+local function growParts(humanoid, entries, fromS, toS, duration)
+    local steps = math.max(1, math.floor(duration / 0.03))
+
+    local function apply(s)
+        local extra = 0
+        for _, e in ipairs(entries) do
+            applyPartScale(e, s)
+            if e.kind == "foot" then
+                extra = math.max(extra, e.size0.Y * (s - 1) * 0.4)
+            end
+        end
+        if humanoid.Parent and hulk.hipBase then
+            humanoid.HipHeight = hulk.hipBase + extra
+        end
+    end
+
+    for i = 1, steps do
+        local a = TweenService:GetValue(i / steps, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        apply(math.max(fromS + (toS - fromS) * a, 0.2))
+        task.wait(0.03)
+    end
+    apply(toS)
+end
+
+-- the pose for HAND (fists up, ready to smash) and FEET (big stomp)
+local function hulkPartPose(character, mode)
+    local rig = rigJoints(character)
+    local list = newPose(character)
+
+    if mode == "HAND" then
+        addPitch(list, rig.waist, 12)
+        addPitch(list, rig.neck, -10)
+        addPitch(list, rig.shoulderL, 150)
+        addPitch(list, rig.shoulderR, 150)
+    else
+        addPitch(list, rig.hipR, 70)
+        addPitch(list, rig.kneeR, -50)
+        addTilt(list, rig.shoulderR, Z_AXIS, 40)
+        addTilt(list, rig.shoulderL, Z_AXIS, -40)
+    end
+
+    return list
+end
+
 -- put everything back (no animation)
 local function restoreLook(character)
     pcall(removeEyes)
@@ -1192,11 +1316,22 @@ local function restoreLook(character)
 
     pcall(setDamage, nil, false)
 
+    -- HAND / FEET growth
+    for _, e in ipairs(hulk.parts) do
+        pcall(applyPartScale, e, 1)
+    end
+    hulk.parts = {}
+
     if character and hulk.char == character then
+        local hum = character:FindFirstChildOfClass("Humanoid")
+        if hum and hulk.hipBase then
+            hum.HipHeight = hulk.hipBase
+        end
         pcall(paintSkin, character, false)
         pcall(ripShirt, character, false)
     end
 
+    hulk.hipBase = nil
     hulk.colors = {}
     hulk.bodyColors = nil
     hulk.shirt = nil
@@ -1207,7 +1342,7 @@ end
 local function hulkInstantOff()
     local character = Player.Character
     restoreLook(character)
-    if character and hulk.char == character then
+    if character and hulk.char == character and hulk.mode == "BODY" then
         pcall(function()
             character:ScaleTo(hulk.baseScale)
         end)
@@ -1228,13 +1363,16 @@ local function hulkOn()
     local humanoid, root = getCharacter()
     if not humanoid or not root then return end
     local character = Player.Character
+    local mode = HulkMode
 
     waitForIdle()
     Busy = true
 
     local ok, err = pcall(function()
         hulk.char = character
+        hulk.mode = mode
         hulk.baseScale = charScale(character)
+        hulk.hipBase = humanoid.HipHeight
         hulkStatus("Transforming...")
 
         local feet = getFeet(character, humanoid, root)
@@ -1248,27 +1386,61 @@ local function hulkOn()
         pcall(groundBurst, feet, 6, DARK_GREEN, GREEN)
         task.wait(0.5)
 
-        -- 2) the change: green flash, shirt rips, skin turns green, body grows
+        -- 2) the change
         pcall(greenFlash)
         pcall(groundBurst, feet, 14, DARK_GREEN, GREEN)
         pcall(smoke, feet, 26, GREEN, DARK_GREEN)
-        pcall(ripShirt, character, true)
-        pcall(paintSkin, character, true)
-        local _, boosted = pcall(setDamage, character, true)
-        if not scaleTo(character, hulk.baseScale * HulkScale, 0.6) then
-            notify("Could not resize this character")
+
+        local boosted = 0
+        if mode == "BODY" then
+            -- whole body: shirt rips, skin turns green, everything grows
+            pcall(ripShirt, character, true)
+            pcall(paintSkin, character, true)
+            local okD, n = pcall(setDamage, character, true)
+            boosted = okD and n or 0
+            if not scaleTo(character, hulk.baseScale * HulkScale, 0.6) then
+                notify("Could not resize this character")
+            end
+            pcall(addEyes, character)  -- red eyes
+        else
+            -- only the hands (or feet) turn green and grow
+            local entries, parts = collectParts(character, mode)
+            if #entries == 0 then
+                error("no " .. string.lower(mode) .. " found on this rig")
+            end
+            hulk.parts = entries
+            hulk.partS = HulkPartScale
+            pcall(paintSkin, character, true, parts)
+            local okD, n = pcall(setDamage, character, true)
+            boosted = okD and n or 0
+            growParts(humanoid, entries, 1, HulkPartScale, 0.6)
         end
 
-        -- 3) red eyes + roar / flex
-        pcall(addEyes, character)
+        -- 3) roar (body) / smash (hand) / stomp (feet)
         task.spawn(function()
             pcall(shake, humanoid, 0.6, 0.35)
         end)
         pcall(fovPulse, 10)
 
-        local okPose, entries = pcall(hulkPose, character)
+        local okPose, entries = pcall(function()
+            if mode == "BODY" then
+                return hulkPose(character)
+            end
+            return hulkPartPose(character, mode)
+        end)
+
         if okPose and #entries > 0 then
-            playPose(entries, 0.25, 1.1, 0.4)
+            if mode == "BODY" then
+                playPose(entries, 0.25, 1.1, 0.4)
+            else
+                playPose(entries, 0.3, 0.12, 0.12)
+                pcall(groundBurst, feet, 12, DARK_GREEN, GREEN)
+                pcall(smoke, feet, 14, GREEN, DARK_GREEN)
+                task.spawn(function()
+                    pcall(shake, humanoid, 0.4, 0.5)
+                end)
+                task.wait(0.3)
+            end
         else
             task.wait(1)
         end
@@ -1278,10 +1450,10 @@ local function hulkOn()
         end
 
         HulkOn = true
-        if type(boosted) == "number" and boosted > 0 then
-            hulkStatus("HULK ON - damage x" .. HulkDamage)
+        if boosted > 0 then
+            hulkStatus("HULK " .. mode .. " ON - damage x" .. HulkDamage)
         else
-            hulkStatus("HULK ON. Damage stays normal: the game server decides damage.")
+            hulkStatus("HULK " .. mode .. " ON. Damage stays normal: the game server decides damage.")
         end
     end)
 
@@ -1305,10 +1477,19 @@ local function hulkOff()
 
         if humanoid and root and hulk.char == character then
             local feet = getFeet(character, humanoid, root)
-            restoreLook(character)
-            pcall(groundBurst, feet, 8, DARK_GREEN, GREEN)
-            pcall(smoke, feet, 18, GREEN, DARK_GREEN)
-            scaleTo(character, hulk.baseScale, 0.45)
+
+            if hulk.mode == "BODY" then
+                restoreLook(character)
+                pcall(groundBurst, feet, 8, DARK_GREEN, GREEN)
+                pcall(smoke, feet, 18, GREEN, DARK_GREEN)
+                scaleTo(character, hulk.baseScale, 0.45)
+            else
+                pcall(paintSkin, character, false)
+                pcall(groundBurst, feet, 8, DARK_GREEN, GREEN)
+                pcall(smoke, feet, 18, GREEN, DARK_GREEN)
+                growParts(humanoid, hulk.parts, hulk.partS or HulkPartScale, 1, 0.45)
+                restoreLook(character)
+            end
         else
             restoreLook(nil)
         end
@@ -1339,18 +1520,38 @@ local function hulkToggle()
     HulkWorking = false
 end
 
+-- changed the PART button while hulked: turn back, then transform again in the new mode
+local function hulkSwitch()
+    if HulkWorking or not HulkOn then return end
+    HulkWorking = true
+
+    hulkOff()
+    if not HulkOn then
+        hulkOn()
+    end
+
+    HulkWorking = false
+end
+
 -- SIZE +/- while hulked: re-grow to the new size
 local function hulkResize()
     if not HulkOn or HulkWorking then return end
 
-    local humanoid, root = getCharacter()
+    local humanoid = getCharacter()
     local character = Player.Character
     if not humanoid or hulk.char ~= character then return end
 
     HulkWorking = true
-    pcall(removeEyes) -- eyes are re-made after the resize so they stay on the face
-    scaleTo(character, hulk.baseScale * HulkScale, 0.4)
-    pcall(addEyes, character)
+    pcall(function()
+        if hulk.mode == "BODY" then
+            pcall(removeEyes) -- eyes are re-made after the resize so they stay on the face
+            scaleTo(character, hulk.baseScale * HulkScale, 0.4)
+            pcall(addEyes, character)
+        else
+            growParts(humanoid, hulk.parts, hulk.partS or 1, HulkPartScale, 0.4)
+            hulk.partS = HulkPartScale
+        end
+    end)
     HulkWorking = false
 end
 
@@ -1649,23 +1850,44 @@ end
 local hulkBtn
 local hulkStatusLabel
 
-hulkBtn = button("HULK: OFF", 10, 35, 210, function()
+hulkBtn = button("HULK: OFF", 10, 35, 100, function()
     task.spawn(hulkToggle)
 end)
 
--- size row: [-]  SIZE: x1.7  [+]
-local sizeLabel = infoLabel("SIZE: x" .. HulkScale, 60, 78, 110, 35)
+local sizeLabel
+
+-- which part turns into the Hulk: BODY (whole body) / HAND / FEET
+local hulkModes = {"BODY", "HAND", "FEET"}
+local partBtn
+partBtn = button("PART: " .. HulkMode, 116, 35, 104, function()
+    local index = table.find(hulkModes, HulkMode) or 1
+    HulkMode = hulkModes[index % #hulkModes + 1]
+    partBtn.Text = "PART: " .. HulkMode
+    sizeLabel.Text = "SIZE: x" .. ((HulkMode == "BODY") and HulkScale or HulkPartScale)
+    if HulkOn then
+        task.spawn(hulkSwitch)
+    end
+end)
+
+-- size row: [-]  SIZE: x1.7  [+]   (BODY uses the body size, HAND / FEET use the part size)
+sizeLabel = infoLabel("SIZE: x" .. ((HulkMode == "BODY") and HulkScale or HulkPartScale), 60, 78, 110, 35)
+
+local function stepSize(dir)
+    if HulkMode == "BODY" then
+        HulkScale = math.min(HulkScaleMax, math.max(HulkScaleMin, math.floor((HulkScale + dir * 0.2) * 100 + 0.5) / 100))
+    else
+        HulkPartScale = math.min(HulkPartScaleMax, math.max(HulkPartScaleMin, math.floor((HulkPartScale + dir * 0.25) * 100 + 0.5) / 100))
+    end
+    sizeLabel.Text = "SIZE: x" .. ((HulkMode == "BODY") and HulkScale or HulkPartScale)
+    task.spawn(hulkResize)
+end
 
 button("-", 10, 78, 45, function()
-    HulkScale = math.max(HulkScaleMin, math.floor((HulkScale - 0.2) * 10 + 0.5) / 10)
-    sizeLabel.Text = "SIZE: x" .. HulkScale
-    task.spawn(hulkResize)
+    stepSize(-1)
 end)
 
 button("+", 175, 78, 45, function()
-    HulkScale = math.min(HulkScaleMax, math.floor((HulkScale + 0.2) * 10 + 0.5) / 10)
-    sizeLabel.Text = "SIZE: x" .. HulkScale
-    task.spawn(hulkResize)
+    stepSize(1)
 end)
 
 -- damage row: [-]  DMG: x2  [+]  (only has an effect if the game exposes a damage value)
