@@ -1,4 +1,5 @@
 -- AI DODGE - DELTA MOBILE (Shadow edition: black & gray)
+-- TABS: DODGE (dash / dodge / random) and ABILITY (Hulk transform)
 -- MODE: DASH (quick slip-step) / DODGE (body poses, no animation) / RANDOM (reads the attack, picks dash or dodge)
 --   DODGE: LEFT / RIGHT = side lean
 --          BACK         = HAWK back dodge (Hajime no Ippo, Takamura style: arms down, bend way back)
@@ -46,8 +47,8 @@ local HideUi = false          -- false = normal PlayerGui (always visible). true
 
 -- NEW: hawk back dodge + duck dodge
 local HawkAngle = 55          -- how far you bend BACK in the hawk dodge (degrees, bigger = deeper)
-local DuckBend = 50           -- how far the body folds forward when ducking (degrees)
-local DuckKnee = 55           -- how deep the knees bend when ducking (degrees)
+local DuckBend = 60           -- how far the body folds forward when ducking (degrees)
+local DuckKnee = 65           -- how deep the knees bend when ducking (degrees)
 local AutoStyle = "MIX"       -- DODGE mode auto: "MIX", "SIDE", "BACK" (hawk), "DUCK"
 
 -- NEW: RANDOM mode (punch = dodge, heavy / bullet = dash or dodge)
@@ -61,6 +62,18 @@ local BulletReact = 0.45      -- react when the bullet would hit in less than th
 local BulletMiss = 4.5        -- only dodge bullets that would pass within this many studs of you
 local BulletMaxSize = 12      -- ignore fast parts bigger than this (not bullets)
 local RequireAttackAnim = false -- true = RANDOM only reacts when it SEES an attack animation / bullet
+
+-- NEW: ABILITY tab (HULK)
+local HulkScale = 1.7         -- how big you get (x normal size)
+local HulkScaleMin = 1.2
+local HulkScaleMax = 3
+local HulkSkin = Color3.fromRGB(64, 160, 52)   -- skin color
+local HulkEyes = Color3.fromRGB(255, 20, 20)   -- eye color
+local HulkRipShirt = true     -- take your shirt off while hulked (so the green shows)
+local HulkDamage = 2          -- damage multiplier (only works if the game exposes a client damage value)
+local HulkDamageMin = 1
+local HulkDamageMax = 5
+local HulkDamageAttributes = {"Damage", "DamageMultiplier", "DamageMulti", "Strength", "Power"}
 
 -- COLORS (black & gray only)
 local BLACK = Color3.fromRGB(10, 10, 10)
@@ -169,10 +182,10 @@ local function trailGhost(character, alt)
 end
 
 -- flat black + gray shockwave on the ground
-local function groundBurst(position, radius)
+local function groundBurst(position, radius, colorA, colorB)
     local layers = {
-        {color = BLACK, size = radius, height = 0.08},
-        {color = GRAY, size = radius * 0.6, height = 0.14},
+        {color = colorA or BLACK, size = radius, height = 0.08},
+        {color = colorB or GRAY, size = radius * 0.6, height = 0.14},
     }
     for _, layer in ipairs(layers) do
         local disc = Instance.new("Part")
@@ -196,7 +209,7 @@ local function groundBurst(position, radius)
 end
 
 -- gray / black smoke puff
-local function smoke(position, amount)
+local function smoke(position, amount, colorA, colorB)
     local p = Instance.new("Part")
     p.Anchored = true
     p.CanCollide = false
@@ -209,7 +222,7 @@ local function smoke(position, amount)
 
     local e = Instance.new("ParticleEmitter")
     e.Texture = "rbxasset://textures/particles/smoke_main.dds"
-    e.Color = ColorSequence.new(GRAY, BLACK)
+    e.Color = ColorSequence.new(colorA or GRAY, colorB or BLACK)
     e.Size = NumberSequence.new({
         NumberSequenceKeypoint.new(0, 1.5),
         NumberSequenceKeypoint.new(1, 4)
@@ -258,14 +271,15 @@ local function ribbon(root, duration)
     end)
 end
 
-local function fovPulse()
-    if FovKick <= 0 then return end
+local function fovPulse(extra)
+    local kick = extra or FovKick
+    if kick <= 0 then return end
     local cam = workspace.CurrentCamera
     if not cam then return end
 
     local base = cam.FieldOfView
     TweenService:Create(cam, TweenInfo.new(0.07, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-        FieldOfView = base + FovKick
+        FieldOfView = base + kick
     }):Play()
 
     task.delay(0.07, function()
@@ -369,36 +383,97 @@ local function addPitch(list, joint, degrees, offset)
     addTilt(list, joint, X_AXIS, degrees, offset)
 end
 
+-- scale of the character (1 = normal size). Hulk makes it bigger.
+local function charScale(model)
+    local ok, s = pcall(function()
+        return model:GetScale()
+    end)
+    if ok and type(s) == "number" then
+        return s
+    end
+    return 1
+end
+
 -- original joint position is saved on the joint so it can always be restored
+-- (saved again if the body was resized, so the Hulk size never breaks it)
 local function baseC0(joint)
+    local sc = charScale(joint:FindFirstAncestorOfClass("Model") or joint)
     local saved = joint:GetAttribute("AIDodgeC0")
-    if typeof(saved) ~= "CFrame" then
+    local savedScale = joint:GetAttribute("AIDodgeScale")
+
+    if typeof(saved) ~= "CFrame" or type(savedScale) ~= "number" or math.abs(savedScale - sc) > 0.001 then
         saved = joint.C0
         joint:SetAttribute("AIDodgeC0", saved)
+        joint:SetAttribute("AIDodgeScale", sc)
     end
+
     return saved
 end
 
--- tween into the pose, hold it, then spring back with a little overshoot
+local activePoses = {}
+local poseCounter = 0
+
+-- plays a pose: eases in, holds, springs back with a little overshoot.
+-- The joints are written EVERY frame, after the game's own scripts, so games that
+-- reset the joints can't cancel the pose.
 local function playPose(entries, tIn, hold, tOut)
-    for _, e in ipairs(entries) do
-        local base = baseC0(e.joint)
-        local rotOnly = base - base.Position
-        local target = CFrame.new(base.Position + e.offset) * CFrame.fromAxisAngle(e.axis, e.angle) * rotOnly
-        TweenService:Create(e.joint, TweenInfo.new(tIn, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-            C0 = target
-        }):Play()
+    poseCounter = poseCounter + 1
+    local name = "AIDodgePose" .. poseCounter
+    local total = tIn + hold + tOut
+    local startTime = os.clock()
+
+    local bases = {}
+    for i, e in ipairs(entries) do
+        bases[i] = baseC0(e.joint)
     end
 
-    task.wait(tIn + hold)
-
-    for _, e in ipairs(entries) do
-        if e.joint.Parent then
-            TweenService:Create(e.joint, TweenInfo.new(tOut, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-                C0 = baseC0(e.joint)
-            }):Play()
+    local finished = false
+    local function finish()
+        if finished then return end
+        finished = true
+        activePoses[name] = nil
+        pcall(function()
+            RunService:UnbindFromRenderStep(name)
+        end)
+        for i, e in ipairs(entries) do
+            if e.joint.Parent then
+                e.joint.C0 = bases[i]
+            end
         end
     end
+
+    local function weight(t)
+        if t < tIn then
+            return TweenService:GetValue(t / tIn, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        elseif t < tIn + hold then
+            return 1
+        end
+        local k = (t - tIn - hold) / tOut
+        return 1 - TweenService:GetValue(k, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    end
+
+    activePoses[name] = true
+    RunService:BindToRenderStep(name, Enum.RenderPriority.Last.Value, function()
+        local t = os.clock() - startTime
+        if t >= total then
+            finish()
+            return
+        end
+
+        local a = weight(t)
+        for i, e in ipairs(entries) do
+            if e.joint.Parent then
+                local b = bases[i]
+                local rotOnly = b - b.Position
+                e.joint.C0 = CFrame.new(b.Position + e.offset * a)
+                    * CFrame.fromAxisAngle(e.axis, e.angle * a)
+                    * rotOnly
+            end
+        end
+    end)
+
+    task.wait(total + 0.05)
+    finish() -- safety, in case rendering was paused
 end
 
 -- SIDE LEAN: localDir = direction to lean toward (local space, X = right, Z = back)
@@ -424,6 +499,7 @@ end
 local function hawkPose(character)
     local j = mapJoints(character)
     local list = {}
+    local sc = charScale(character)
 
     if isR15(character) then
         local rootA = HawkAngle * 0.25
@@ -439,7 +515,7 @@ local function hawkPose(character)
     else
         local a = math.rad(HawkAngle)
         -- hips get pushed forward a bit as the torso goes back
-        addPitch(list, j.RootJoint, HawkAngle, Vector3.new(0, -(1 - math.cos(a)), 0))
+        addPitch(list, j.RootJoint, HawkAngle, Vector3.new(0, -(1 - math.cos(a)) * sc, 0))
         addPitch(list, j.Neck, -HawkAngle * 0.5)
         addPitch(list, j["Left Hip"], -HawkAngle)
         addPitch(list, j["Right Hip"], -HawkAngle)
@@ -454,10 +530,11 @@ end
 local function duckPose(character)
     local j = mapJoints(character)
     local list = {}
+    local sc = charScale(character)
 
     if isR15(character) then
         local leg = character:FindFirstChild("LeftUpperLeg")
-        local thigh = (leg and leg.Size.Y or 1.2) * 0.85   -- hip-to-knee is a bit shorter than the part
+        local thigh = (leg and leg.Size.Y or 1.2 * sc) * 0.85   -- hip-to-knee is a bit shorter than the part
         local a = math.rad(DuckKnee)
 
         -- sink the hips down and back so the feet stay planted
@@ -478,8 +555,8 @@ local function duckPose(character)
         local legDeg = 30
         local torso = math.rad(torsoDeg)
         local legA = math.rad(legDeg)
-        local offY = -3 + math.cos(torso) + 2 * math.cos(legA)
-        local offZ = -math.sin(torso) + 2 * math.sin(legA)
+        local offY = (-3 + math.cos(torso) + 2 * math.cos(legA)) * sc
+        local offZ = (-math.sin(torso) + 2 * math.sin(legA)) * sc
 
         addPitch(list, j.RootJoint, -torsoDeg, Vector3.new(0, offY, offZ))
         addPitch(list, j.Neck, torsoDeg * 0.7)
@@ -493,6 +570,13 @@ local function duckPose(character)
 end
 
 local function restoreJoints()
+    for name in pairs(activePoses) do
+        pcall(function()
+            RunService:UnbindFromRenderStep(name)
+        end)
+        activePoses[name] = nil
+    end
+
     local character = Player.Character
     if not character then return end
     for _, d in ipairs(character:GetDescendants()) do
@@ -543,12 +627,18 @@ local function dodgeMove(character, humanoid, root, worldDir, localDir, kind)
     if kind == "back" then
         local ok, result = pcall(hawkPose, character)
         entries = ok and result or {}
+        if not ok then
+            notify("Hawk error: " .. tostring(result):sub(1, 100))
+        end
         tIn, hold, tOut = 0.1, 0.3, 0.3
         slide(root, humanoid, worldDir, DodgeShift * 1.7, 0.14)
     elseif kind == "duck" then
         local ok, result = pcall(duckPose, character)
         entries = ok and result or {}
-        tIn, hold, tOut = 0.1, 0.45, 0.3
+        if not ok then
+            notify("Duck error: " .. tostring(result):sub(1, 100))
+        end
+        tIn, hold, tOut = 0.12, 0.6, 0.3
 
         -- camera dips with you so the duck feels real
         pcall(function()
@@ -567,9 +657,18 @@ local function dodgeMove(character, humanoid, root, worldDir, localDir, kind)
         slide(root, humanoid, worldDir, DodgeShift, 0.12)
     end
 
+    if #entries == 0 then
+        notify("Pose failed: no body joints found (custom rig?)")
+    elseif kind == "duck" and #entries < 6 then
+        notify("Duck: only " .. #entries .. " joints found - this rig may look wrong")
+    end
+
     if #entries > 0 then
         task.spawn(function()
-            pcall(playPose, entries, tIn, hold, tOut)
+            local okPose, errPose = pcall(playPose, entries, tIn, hold, tOut)
+            if not okPose then
+                warn("[AI Dodge] pose: " .. tostring(errPose))
+            end
         end)
     end
 
@@ -635,6 +734,487 @@ local function perform(direction, kind, forcedMove)
         Busy = false
     end)
 end
+
+---------------------------------------------------------------------
+-- ABILITY: HULK  (client-side: you see the change on your own screen)
+---------------------------------------------------------------------
+
+local GREEN = Color3.fromRGB(80, 200, 60)
+local DARK_GREEN = Color3.fromRGB(20, 70, 20)
+local Z_AXIS = Vector3.new(0, 0, 1)
+
+local HulkOn = false
+local HulkWorking = false
+local hulk = {
+    char = nil,
+    baseScale = 1,
+    colors = {},
+    bodyColors = nil,
+    shirt = nil,
+    tshirt = nil,
+    eyes = {},
+    aura = nil,
+    attrs = {},
+}
+local hulkUi = {} -- filled in by the UI section
+
+local function hulkStatus(text)
+    if hulkUi.refresh then
+        hulkUi.refresh(text)
+    end
+end
+
+-- body parts only (not accessories, not the root part, not the eyes)
+local function bodyParts(character)
+    local list = {}
+    for _, p in ipairs(character:GetChildren()) do
+        if p:IsA("BasePart") and p.Name ~= "HumanoidRootPart" and p.Name ~= "AIDodgeEye" then
+            table.insert(list, p)
+        end
+    end
+    return list
+end
+
+-- camera rumble
+local function shake(humanoid, duration, power)
+    local base = humanoid.CameraOffset
+    local startTime = os.clock()
+    while os.clock() - startTime < duration and humanoid.Parent do
+        humanoid.CameraOffset = base + Vector3.new((math.random() - 0.5) * power, (math.random() - 0.5) * power, 0)
+        task.wait()
+    end
+    humanoid.CameraOffset = base
+end
+
+-- grow / shrink the whole body (with a little overshoot)
+local function scaleTo(character, target, duration)
+    local start = charScale(character)
+    local steps = math.max(1, math.floor(duration / 0.03))
+
+    for i = 1, steps do
+        local a = TweenService:GetValue(i / steps, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        local s = math.max(start + (target - start) * a, 0.2)
+        local ok = pcall(function()
+            character:ScaleTo(s)
+        end)
+        if not ok then
+            return false
+        end
+        task.wait(0.03)
+    end
+
+    pcall(function()
+        character:ScaleTo(target)
+    end)
+    return true
+end
+
+-- skin turns green (and back)
+local function paintSkin(character, on)
+    local bc = character:FindFirstChildOfClass("BodyColors")
+
+    if on then
+        hulk.colors = {}
+        for _, p in ipairs(bodyParts(character)) do
+            hulk.colors[p] = p.Color
+            TweenService:Create(p, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                Color = HulkSkin
+            }):Play()
+        end
+
+        if bc then
+            hulk.bodyColors = {
+                bc.HeadColor3, bc.TorsoColor3, bc.LeftArmColor3,
+                bc.RightArmColor3, bc.LeftLegColor3, bc.RightLegColor3
+            }
+            task.delay(0.55, function()
+                if hulk.bodyColors and bc.Parent then
+                    bc.HeadColor3 = HulkSkin
+                    bc.TorsoColor3 = HulkSkin
+                    bc.LeftArmColor3 = HulkSkin
+                    bc.RightArmColor3 = HulkSkin
+                    bc.LeftLegColor3 = HulkSkin
+                    bc.RightLegColor3 = HulkSkin
+                end
+            end)
+        end
+    else
+        local saved = hulk.bodyColors
+        if bc and saved then
+            bc.HeadColor3 = saved[1]
+            bc.TorsoColor3 = saved[2]
+            bc.LeftArmColor3 = saved[3]
+            bc.RightArmColor3 = saved[4]
+            bc.LeftLegColor3 = saved[5]
+            bc.RightLegColor3 = saved[6]
+        end
+        for p, c in pairs(hulk.colors) do
+            if p.Parent then
+                TweenService:Create(p, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                    Color = c
+                }):Play()
+            end
+        end
+        hulk.colors = {}
+        hulk.bodyColors = nil
+    end
+end
+
+-- shirt gets ripped off (so the green skin shows)
+local function ripShirt(character, on)
+    if not HulkRipShirt then return end
+
+    local shirt = character:FindFirstChildOfClass("Shirt")
+    local tshirt = character:FindFirstChildOfClass("ShirtGraphic")
+
+    if on then
+        if shirt then
+            hulk.shirt = shirt.ShirtTemplate
+            shirt.ShirtTemplate = ""
+        end
+        if tshirt then
+            hulk.tshirt = tshirt.Graphic
+            tshirt.Graphic = ""
+        end
+    else
+        if shirt and hulk.shirt then
+            shirt.ShirtTemplate = hulk.shirt
+        end
+        if tshirt and hulk.tshirt then
+            tshirt.Graphic = hulk.tshirt
+        end
+        hulk.shirt = nil
+        hulk.tshirt = nil
+    end
+end
+
+-- glowing red eyes (two neon bars welded on the front of the head)
+local function removeEyes()
+    for _, eye in ipairs(hulk.eyes) do
+        pcall(function()
+            eye:Destroy()
+        end)
+    end
+    hulk.eyes = {}
+end
+
+local function addEyes(character)
+    removeEyes()
+
+    local head = character:FindFirstChild("Head")
+    if not head or not head:IsA("BasePart") then return end
+
+    local s = head.Size.Y
+    for _, side in ipairs({-1, 1}) do
+        local eye = Instance.new("Part")
+        eye.Name = "AIDodgeEye"
+        eye.Material = Enum.Material.Neon
+        eye.Color = HulkEyes
+        eye.Size = Vector3.new(0.22 * s, 0.12 * s, 0.05 * s)
+        eye.CanCollide = false
+        eye.CanQuery = false
+        eye.CanTouch = false
+        eye.Massless = true
+        eye.CastShadow = false
+        eye.CFrame = head.CFrame * CFrame.new(side * 0.24 * s, 0.08 * s, -(head.Size.Z / 2) - 0.1 * s)
+        eye.Parent = character
+
+        local weld = Instance.new("WeldConstraint")
+        weld.Part0 = head
+        weld.Part1 = eye
+        weld.Parent = eye
+
+        table.insert(hulk.eyes, eye)
+    end
+
+    local light = Instance.new("PointLight")
+    light.Color = HulkEyes
+    light.Brightness = 2
+    light.Range = 8 * s
+    light.Parent = hulk.eyes[1]
+end
+
+-- green rage smoke around the body
+local function makeAura(root)
+    local e = Instance.new("ParticleEmitter")
+    e.Name = "AIDodgeHulkAura"
+    e.Texture = "rbxasset://textures/particles/smoke_main.dds"
+    e.Color = ColorSequence.new(GREEN, DARK_GREEN)
+    e.Size = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 2.5),
+        NumberSequenceKeypoint.new(1, 0.5)
+    })
+    e.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.6),
+        NumberSequenceKeypoint.new(1, 1)
+    })
+    e.Lifetime = NumberRange.new(0.5, 0.9)
+    e.Speed = NumberRange.new(1, 4)
+    e.SpreadAngle = Vector2.new(180, 180)
+    e.LightEmission = 0.5
+    e.Rate = 25
+    e.Parent = root
+    return e
+end
+
+-- Damage boost (best effort): multiplies damage-like numbers the game keeps on your
+-- character / humanoid / player. Real damage is decided by the game's SERVER, so this
+-- only does something if the game reads one of these values. Returns how many were changed.
+local function setDamage(character, on)
+    if on then
+        hulk.attrs = {}
+
+        local holders = {character, Player}
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            table.insert(holders, humanoid)
+        end
+
+        for _, holder in ipairs(holders) do
+            for _, name in ipairs(HulkDamageAttributes) do
+                local v = holder:GetAttribute(name)
+                if type(v) == "number" then
+                    table.insert(hulk.attrs, {holder, name, v})
+                    holder:SetAttribute(name, v * HulkDamage)
+                end
+            end
+        end
+        return #hulk.attrs
+    end
+
+    for _, a in ipairs(hulk.attrs) do
+        pcall(function()
+            a[1]:SetAttribute(a[2], a[3])
+        end)
+    end
+    hulk.attrs = {}
+    return 0
+end
+
+local function greenFlash()
+    if not ScreenFX then return end
+
+    local cc = Instance.new("ColorCorrectionEffect")
+    cc.Name = "AIDodgeHulkCC"
+    cc.TintColor = Color3.fromRGB(110, 255, 110)
+    cc.Saturation = 0.3
+    cc.Brightness = 0.1
+    cc.Parent = Lighting
+    TweenService:Create(cc, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        TintColor = Color3.new(1, 1, 1),
+        Saturation = 0,
+        Brightness = 0
+    }):Play()
+    Debris:AddItem(cc, 0.8)
+end
+
+-- the roar: chest out, head back, both arms out with the elbows up (double bicep flex)
+local function hulkPose(character)
+    local j = mapJoints(character)
+    local list = {}
+
+    if isR15(character) then
+        addPitch(list, j.Waist, 18)
+        addPitch(list, j.Neck, 28)
+        addTilt(list, j.RightShoulder, Z_AXIS, 80)
+        addTilt(list, j.LeftShoulder, Z_AXIS, -80)
+        addTilt(list, j.RightElbow, Z_AXIS, 100)
+        addTilt(list, j.LeftElbow, Z_AXIS, -100)
+        addTilt(list, j.RightHip, Z_AXIS, 10)           -- wide stance
+        addTilt(list, j.LeftHip, Z_AXIS, -10)
+    else
+        addPitch(list, j.Neck, 28)
+        addTilt(list, j["Right Shoulder"], Z_AXIS, 80)
+        addTilt(list, j["Left Shoulder"], Z_AXIS, -80)
+    end
+
+    return list
+end
+
+-- put everything back (no animation)
+local function restoreLook(character)
+    pcall(removeEyes)
+
+    if hulk.aura then
+        pcall(function()
+            hulk.aura:Destroy()
+        end)
+        hulk.aura = nil
+    end
+
+    pcall(setDamage, nil, false)
+
+    if character and hulk.char == character then
+        pcall(paintSkin, character, false)
+        pcall(ripShirt, character, false)
+    end
+
+    hulk.colors = {}
+    hulk.bodyColors = nil
+    hulk.shirt = nil
+    hulk.tshirt = nil
+end
+
+-- used when the script is re-run / UI removed
+local function hulkInstantOff()
+    local character = Player.Character
+    restoreLook(character)
+    if character and hulk.char == character then
+        pcall(function()
+            character:ScaleTo(hulk.baseScale)
+        end)
+    end
+    hulk.char = nil
+    HulkOn = false
+end
+
+local function waitForIdle()
+    local waited = 0
+    while Busy and waited < 1 do
+        task.wait(0.05)
+        waited = waited + 0.05
+    end
+end
+
+local function hulkOn()
+    local humanoid, root = getCharacter()
+    if not humanoid or not root then return end
+    local character = Player.Character
+
+    waitForIdle()
+    Busy = true
+
+    local ok, err = pcall(function()
+        hulk.char = character
+        hulk.baseScale = charScale(character)
+        hulkStatus("Transforming...")
+
+        local feet = getFeet(character, humanoid, root)
+
+        -- 1) charge up: rumble, aura, shockwave
+        hulk.aura = makeAura(root)
+        task.spawn(function()
+            pcall(shake, humanoid, 0.8, 0.5)
+        end)
+        pcall(fovPulse, 14)
+        pcall(groundBurst, feet, 6, DARK_GREEN, GREEN)
+        task.wait(0.5)
+
+        -- 2) the change: green flash, shirt rips, skin turns green, body grows
+        pcall(greenFlash)
+        pcall(groundBurst, feet, 14, DARK_GREEN, GREEN)
+        pcall(smoke, feet, 26, GREEN, DARK_GREEN)
+        pcall(ripShirt, character, true)
+        pcall(paintSkin, character, true)
+        local _, boosted = pcall(setDamage, character, true)
+        if not scaleTo(character, hulk.baseScale * HulkScale, 0.6) then
+            notify("Could not resize this character")
+        end
+
+        -- 3) red eyes + roar / flex
+        pcall(addEyes, character)
+        task.spawn(function()
+            pcall(shake, humanoid, 0.6, 0.35)
+        end)
+        pcall(fovPulse, 10)
+
+        local okPose, entries = pcall(hulkPose, character)
+        if okPose and #entries > 0 then
+            playPose(entries, 0.25, 1.1, 0.4)
+        else
+            task.wait(1)
+        end
+
+        if hulk.aura then
+            hulk.aura.Rate = 10
+        end
+
+        HulkOn = true
+        if type(boosted) == "number" and boosted > 0 then
+            hulkStatus("HULK ON - damage x" .. HulkDamage)
+        else
+            hulkStatus("HULK ON. Damage stays normal: the game server decides damage.")
+        end
+    end)
+
+    Busy = false
+    if not ok then
+        warn("[AI Dodge] hulk: " .. tostring(err))
+        pcall(hulkInstantOff)
+        hulkStatus("Error: " .. tostring(err):sub(1, 70))
+    end
+end
+
+local function hulkOff()
+    local humanoid, root = getCharacter()
+    local character = Player.Character
+
+    waitForIdle()
+    Busy = true
+
+    local ok, err = pcall(function()
+        hulkStatus("Reverting...")
+
+        if humanoid and root and hulk.char == character then
+            local feet = getFeet(character, humanoid, root)
+            restoreLook(character)
+            pcall(groundBurst, feet, 8, DARK_GREEN, GREEN)
+            pcall(smoke, feet, 18, GREEN, DARK_GREEN)
+            scaleTo(character, hulk.baseScale, 0.45)
+        else
+            restoreLook(nil)
+        end
+
+        hulk.char = nil
+        HulkOn = false
+        hulkStatus("Ready")
+    end)
+
+    Busy = false
+    if not ok then
+        warn("[AI Dodge] hulk: " .. tostring(err))
+        pcall(hulkInstantOff)
+        hulkStatus("Error: " .. tostring(err):sub(1, 70))
+    end
+end
+
+local function hulkToggle()
+    if HulkWorking then return end
+    HulkWorking = true
+
+    if HulkOn then
+        hulkOff()
+    else
+        hulkOn()
+    end
+
+    HulkWorking = false
+end
+
+-- SIZE +/- while hulked: re-grow to the new size
+local function hulkResize()
+    if not HulkOn or HulkWorking then return end
+
+    local humanoid, root = getCharacter()
+    local character = Player.Character
+    if not humanoid or hulk.char ~= character then return end
+
+    HulkWorking = true
+    pcall(removeEyes) -- eyes are re-made after the resize so they stay on the face
+    scaleTo(character, hulk.baseScale * HulkScale, 0.4)
+    pcall(addEyes, character)
+    HulkWorking = false
+end
+
+-- dying / respawning: the new body is normal again
+local hulkRemoving = Player.CharacterRemoving:Connect(function()
+    if HulkOn or hulk.char then
+        restoreLook(nil)
+        hulk.char = nil
+        HulkOn = false
+        hulkStatus("Ready")
+    end
+end)
 
 ---------------------------------------------------------------------
 -- UI
@@ -718,8 +1298,8 @@ if not parented then
 end
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.fromOffset(230, 295)
-frame.Position = UDim2.new(0, 15, 0.5, -148)
+frame.Size = UDim2.fromOffset(230, 323)
+frame.Position = UDim2.new(0, 15, 0.5, -161)
 frame.BackgroundColor3 = BLACK
 frame.BorderSizePixel = 0
 frame.Active = true
@@ -784,6 +1364,24 @@ UIS.InputChanged:Connect(function(input)
     end
 end)
 
+-- tabs: DODGE page and ABILITY page (the tab buttons are made at the bottom of the UI code)
+local dodgePage = Instance.new("Frame")
+dodgePage.Name = "DodgePage"
+dodgePage.BackgroundTransparency = 1
+dodgePage.Position = UDim2.fromOffset(0, 28)
+dodgePage.Size = UDim2.new(1, 0, 1, -28)
+dodgePage.Parent = frame
+
+local abilityPage = Instance.new("Frame")
+abilityPage.Name = "AbilityPage"
+abilityPage.BackgroundTransparency = 1
+abilityPage.Position = UDim2.fromOffset(0, 28)
+abilityPage.Size = UDim2.new(1, 0, 1, -28)
+abilityPage.Visible = false
+abilityPage.Parent = frame
+
+local pageParent = dodgePage -- button() puts new buttons on this page
+
 local function button(text, x, y, w, callback)
     local b = Instance.new("TextButton")
     b.Text = text
@@ -794,7 +1392,7 @@ local function button(text, x, y, w, callback)
     b.BackgroundColor3 = DARK
     b.TextColor3 = Color3.new(1, 1, 1)
     b.BorderSizePixel = 0
-    b.Parent = frame
+    b.Parent = pageParent
     b.MouseButton1Click:Connect(callback)
     return b
 end
@@ -824,7 +1422,7 @@ rangeLabel.Font = Enum.Font.GothamBold
 rangeLabel.TextSize = 13
 rangeLabel.TextColor3 = LIGHT
 rangeLabel.Text = "RANGE: " .. Range
-rangeLabel.Parent = frame
+rangeLabel.Parent = dodgePage
 
 button("-", 10, 121, 45, function()
     Range = math.max(RangeMin, Range - RangeStep)
@@ -870,6 +1468,111 @@ styleBtn = button("AUTO: " .. AutoStyle, 116, 250, 104, function()
     AutoStyle = styles[index % #styles + 1]
     styleBtn.Text = "AUTO: " .. AutoStyle
 end)
+
+---------------------------------------------------------------------
+-- ABILITY TAB (Hulk) + tab buttons
+---------------------------------------------------------------------
+
+pageParent = abilityPage
+
+local function infoLabel(text, x, y, w, h)
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.fromOffset(w, h)
+    l.Position = UDim2.fromOffset(x, y)
+    l.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    l.BorderSizePixel = 0
+    l.Font = Enum.Font.GothamBold
+    l.TextSize = 13
+    l.TextColor3 = LIGHT
+    l.Text = text
+    l.Parent = abilityPage
+    return l
+end
+
+local hulkBtn
+local hulkStatusLabel
+
+hulkBtn = button("HULK: OFF", 10, 35, 210, function()
+    task.spawn(hulkToggle)
+end)
+
+-- size row: [-]  SIZE: x1.7  [+]
+local sizeLabel = infoLabel("SIZE: x" .. HulkScale, 60, 78, 110, 35)
+
+button("-", 10, 78, 45, function()
+    HulkScale = math.max(HulkScaleMin, math.floor((HulkScale - 0.2) * 10 + 0.5) / 10)
+    sizeLabel.Text = "SIZE: x" .. HulkScale
+    task.spawn(hulkResize)
+end)
+
+button("+", 175, 78, 45, function()
+    HulkScale = math.min(HulkScaleMax, math.floor((HulkScale + 0.2) * 10 + 0.5) / 10)
+    sizeLabel.Text = "SIZE: x" .. HulkScale
+    task.spawn(hulkResize)
+end)
+
+-- damage row: [-]  DMG: x2  [+]  (only has an effect if the game exposes a damage value)
+local dmgLabel = infoLabel("DMG: x" .. HulkDamage, 60, 121, 110, 35)
+
+button("-", 10, 121, 45, function()
+    HulkDamage = math.max(HulkDamageMin, HulkDamage - 0.5)
+    dmgLabel.Text = "DMG: x" .. HulkDamage
+end)
+
+button("+", 175, 121, 45, function()
+    HulkDamage = math.min(HulkDamageMax, HulkDamage + 0.5)
+    dmgLabel.Text = "DMG: x" .. HulkDamage
+end)
+
+hulkStatusLabel = infoLabel("Ready", 10, 164, 210, 48)
+hulkStatusLabel.TextSize = 11
+hulkStatusLabel.TextWrapped = true
+hulkStatusLabel.Font = Enum.Font.Gotham
+
+hulkUi.refresh = function(text)
+    hulkBtn.Text = HulkOn and "HULK: ON" or "HULK: OFF"
+    hulkBtn.BackgroundColor3 = HulkOn and GRAY or DARK
+    if text then
+        hulkStatusLabel.Text = text
+    end
+end
+
+-- tab buttons
+local tabDodge
+local tabAbility
+
+local function showTab(name)
+    dodgePage.Visible = (name == "DODGE")
+    abilityPage.Visible = (name == "ABILITY")
+    tabDodge.BackgroundColor3 = (name == "DODGE") and GRAY or DARK
+    tabAbility.BackgroundColor3 = (name == "ABILITY") and GRAY or DARK
+    frame.Size = UDim2.fromOffset(230, (name == "DODGE") and 323 or 250)
+end
+
+local function tabButton(text, x, callback)
+    local b = Instance.new("TextButton")
+    b.Text = text
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 12
+    b.Size = UDim2.fromOffset(100, 24)
+    b.Position = UDim2.fromOffset(x, 30)
+    b.BackgroundColor3 = DARK
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.BorderSizePixel = 0
+    b.Parent = frame
+    b.MouseButton1Click:Connect(callback)
+    return b
+end
+
+tabDodge = tabButton("DODGE", 10, function()
+    showTab("DODGE")
+end)
+
+tabAbility = tabButton("ABILITY", 120, function()
+    showTab("ABILITY")
+end)
+
+showTab("DODGE")
 
 ---------------------------------------------------------------------
 -- RANGE CIRCLE (ring on the ground around you)
@@ -1208,6 +1911,8 @@ gui.Destroying:Connect(function()
     ringLoop:Disconnect()
     ring:Destroy()
     pcall(restoreJoints)
+    pcall(hulkInstantOff)
+    hulkRemoving:Disconnect()
 end)
 
 notify("Loaded! Tap the AD icon (right side) to hide/show the panel.")
