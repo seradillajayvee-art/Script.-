@@ -67,8 +67,9 @@ local RequireAttackAnim = false -- true = RANDOM only reacts when it SEES an att
 local HulkScale = 1.7         -- how big you get (x normal size)
 local HulkScaleMin = 1.2
 local HulkScaleMax = 3
-local HulkMode = "BODY"       -- which part: "BODY" (whole body), "HAND" (big green fists), "FEET" (big green feet)
-local HulkPartScale = 2       -- how big the hands / feet get (HAND and FEET modes)
+local HulkMode = "BODY"       -- which part: "BODY" (whole body), "ARM" (both arms), "LEG" (both legs)
+local HulkPartScale = 2       -- how FAT the arms / legs get (ARM and LEG modes)
+local HulkLimbLength = 0.2    -- arms / legs also get a bit longer (0 = only fat, 0.2 = fat and a bit bigger)
 local HulkPartScaleMin = 1.3
 local HulkPartScaleMax = 4
 local HulkSkin = Color3.fromRGB(64, 160, 52)   -- skin color
@@ -1191,41 +1192,51 @@ local function hulkPose(character)
     return list
 end
 
--- HAND / FEET modes: only those parts grow (the joint stays on the body)
+-- ARM / LEG modes: the WHOLE limb (upper arm, forearm, hand / thigh, shin, foot) turns green
+-- and gets fat. Every part grows around its joint, so the limb stays attached to the body.
 local function collectParts(character, mode)
     local rig = rigJoints(character)
+    local root = getRootPart(character)
+    local kind = (mode == "ARM") and "arm" or "leg"
+    local roles = (mode == "ARM") and {"shoulder", "elbow", "wrist"} or {"hip", "knee", "ankle"}
+
     local entries = {}
     local parts = {}
 
-    local function add(joint, kind)
-        if joint and joint.Part1 then
-            local part = joint.Part1
-            local atts = {}
-            for _, c in ipairs(part:GetChildren()) do
-                if c:IsA("Attachment") then
-                    atts[c] = c.Position
-                end
-            end
-            table.insert(entries, {
-                part = part, joint = joint, kind = kind,
-                size0 = part.Size, c10 = joint.C1, atts = atts
-            })
-            table.insert(parts, part)
-        end
-    end
-
     for _, side in ipairs({"L", "R"}) do
-        if mode == "HAND" then
-            if rig["wrist" .. side] then
-                add(rig["wrist" .. side], "uniform")     -- real hands (R15 style): big fists
-            else
-                add(rig["shoulder" .. side], "thick")    -- one-piece arm (R6 style): thicker arm
-            end
-        else
-            if rig["ankle" .. side] then
-                add(rig["ankle" .. side], "foot")        -- real feet: wide, a bit taller
-            else
-                add(rig["hip" .. side], "thick")         -- one-piece leg: thicker leg
+        for i, role in ipairs(roles) do
+            local joint = rig[role .. side]
+            if joint and joint.Part1 then
+                local part = joint.Part1
+
+                local atts = {}
+                for _, c in ipairs(part:GetChildren()) do
+                    if c:IsA("Attachment") then
+                        atts[c] = c.Position
+                    end
+                end
+
+                -- joints that hang off this part (elbow / wrist / ankle / tool grip)
+                local children = {}
+                for _, d in ipairs(character:GetDescendants()) do
+                    if d:IsA("JointInstance") and d.Part0 == part and d ~= joint then
+                        table.insert(children, {joint = d, c00 = d.C0})
+                    end
+                end
+
+                -- the first part of the limb also slides outward so a fat limb doesn't sink into the body
+                local spreadDir = nil
+                if i == 1 and root and joint.Part0 then
+                    local sign = (side == "R") and 1 or -1
+                    spreadDir = joint.Part0.CFrame:VectorToObjectSpace(root.CFrame.RightVector * sign)
+                end
+
+                table.insert(entries, {
+                    part = part, joint = joint, kind = kind, side = side,
+                    size0 = part.Size, c10 = joint.C1, c00 = joint.C0,
+                    spreadDir = spreadDir, atts = atts, children = children
+                })
+                table.insert(parts, part)
             end
         end
     end
@@ -1233,23 +1244,38 @@ local function collectParts(character, mode)
     return entries, parts
 end
 
--- s = 1 is normal size. The joint point is scaled too, so the part grows away from the body.
+-- fat: x and z grow by s. A little longer too (HulkLimbLength: 0 = only fat, 0.2 = a bit bigger overall)
+local function limbScale(s)
+    return s, 1 + (s - 1) * HulkLimbLength, s
+end
+
+-- s = 1 is normal. Scales the part, the point where it joins the body, the joints hanging off it
+-- and its attachments, all in the part's own axes (same idea as Model:ScaleTo, but per limb).
 local function applyPartScale(entry, s)
     local part = entry.part
     if not part or not part.Parent then return end
 
-    local fx, fy, fz = s, s, s
-    if entry.kind == "thick" then
-        fy = 1
-    elseif entry.kind == "foot" then
-        fy = 1 + (s - 1) * 0.4
-    end
-
+    local fx, fy, fz = limbScale(s)
     local size0 = entry.size0
     part.Size = Vector3.new(size0.X * fx, size0.Y * fy, size0.Z * fz)
 
     local p = entry.c10.Position
     entry.joint.C1 = CFrame.new(p.X * fx, p.Y * fy, p.Z * fz) * (entry.c10 - p)
+
+    if entry.spreadDir then
+        local c0 = entry.c00
+        local grow = (fx - 1) * size0.X * 0.5
+        entry.joint.C0 = CFrame.new(c0.Position + entry.spreadDir * grow) * (c0 - c0.Position)
+        entry.joint:SetAttribute("AIDodgeC0", nil) -- dodge poses re-read the new joint position
+    end
+
+    for _, c in ipairs(entry.children) do
+        if c.joint.Parent then
+            local q = c.c00.Position
+            c.joint.C0 = CFrame.new(q.X * fx, q.Y * fy, q.Z * fz) * (c.c00 - q)
+            c.joint:SetAttribute("AIDodgeC0", nil)
+        end
+    end
 
     for att, pos in pairs(entry.atts) do
         if att.Parent then
@@ -1258,17 +1284,23 @@ local function applyPartScale(entry, s)
     end
 end
 
--- animate the growth (with a little overshoot). Taller feet lift the body so they don't sink.
+-- animate the growth (with a little overshoot). Longer legs lift the body so the feet don't sink.
 local function growParts(humanoid, entries, fromS, toS, duration)
     local steps = math.max(1, math.floor(duration / 0.03))
 
     local function apply(s)
-        local extra = 0
+        local _, fy = limbScale(s)
+        local legs = {}
         for _, e in ipairs(entries) do
             applyPartScale(e, s)
-            if e.kind == "foot" then
-                extra = math.max(extra, e.size0.Y * (s - 1) * 0.4)
+            if e.kind == "leg" then
+                legs[e.side] = (legs[e.side] or 0) + e.size0.Y * (fy - 1)
             end
+        end
+
+        local extra = 0
+        for _, v in pairs(legs) do
+            extra = math.max(extra, v)
         end
         if humanoid.Parent and hulk.hipBase then
             humanoid.HipHeight = hulk.hipBase + extra
@@ -1283,12 +1315,12 @@ local function growParts(humanoid, entries, fromS, toS, duration)
     apply(toS)
 end
 
--- the pose for HAND (fists up, ready to smash) and FEET (big stomp)
+-- the pose for ARM (fists up, ready to smash) and LEG (big stomp)
 local function hulkPartPose(character, mode)
     local rig = rigJoints(character)
     local list = newPose(character)
 
-    if mode == "HAND" then
+    if mode == "ARM" then
         addPitch(list, rig.waist, 12)
         addPitch(list, rig.neck, -10)
         addPitch(list, rig.shoulderL, 150)
@@ -1403,7 +1435,7 @@ local function hulkOn()
             end
             pcall(addEyes, character)  -- red eyes
         else
-            -- only the hands (or feet) turn green and grow
+            -- only the arms (or legs) turn green and get fat
             local entries, parts = collectParts(character, mode)
             if #entries == 0 then
                 error("no " .. string.lower(mode) .. " found on this rig")
@@ -1416,7 +1448,7 @@ local function hulkOn()
             growParts(humanoid, entries, 1, HulkPartScale, 0.6)
         end
 
-        -- 3) roar (body) / smash (hand) / stomp (feet)
+        -- 3) roar (body) / smash (arms) / stomp (legs)
         task.spawn(function()
             pcall(shake, humanoid, 0.6, 0.35)
         end)
@@ -1856,8 +1888,8 @@ end)
 
 local sizeLabel
 
--- which part turns into the Hulk: BODY (whole body) / HAND / FEET
-local hulkModes = {"BODY", "HAND", "FEET"}
+-- which part turns into the Hulk: BODY (whole body) / ARM / LEG
+local hulkModes = {"BODY", "ARM", "LEG"}
 local partBtn
 partBtn = button("PART: " .. HulkMode, 116, 35, 104, function()
     local index = table.find(hulkModes, HulkMode) or 1
@@ -1869,7 +1901,7 @@ partBtn = button("PART: " .. HulkMode, 116, 35, 104, function()
     end
 end)
 
--- size row: [-]  SIZE: x1.7  [+]   (BODY uses the body size, HAND / FEET use the part size)
+-- size row: [-]  SIZE: x1.7  [+]   (BODY uses the body size, ARM / LEG use the fatness)
 sizeLabel = infoLabel("SIZE: x" .. ((HulkMode == "BODY") and HulkScale or HulkPartScale), 60, 78, 110, 35)
 
 local function stepSize(dir)
