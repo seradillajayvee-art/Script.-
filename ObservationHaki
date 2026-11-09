@@ -1,4 +1,6 @@
 -- AI DODGE v8 - DELTA MOBILE (Shadow edition)
+-- v8.1 FIX: the script could not even load because main() had too many local variables for Luau
+--           (over the 200 limit). The UI and the auto dodge now live in their own functions.
 -- TABS: HOME / DODGE / ABILITY / SETTINGS / INFO  +  search bar  +  hideable AD icon
 -- DODGE modes: DASH / DODGE (side lean, hawk back, duck) / RANDOM (reads punch / heavy / bullet)
 -- ABILITY: HULK (body / arms / legs) + SHADOW FORM
@@ -131,7 +133,6 @@ local SoundIds = {
 
 -- COLORS (black & gray only)
 local BLACK = Color3.fromRGB(10, 10, 10)
-local DARK = Color3.fromRGB(45, 45, 45)
 local GRAY = Color3.fromRGB(120, 120, 120)
 local LIGHT = Color3.fromRGB(185, 185, 185)
 
@@ -1037,7 +1038,6 @@ end
 
 local GREEN = Color3.fromRGB(80, 200, 60)
 local DARK_GREEN = Color3.fromRGB(20, 70, 20)
-local Z_AXIS = Vector3.new(0, 0, 1)
 
 local HulkOn = false
 local HulkWorking = false
@@ -1930,8 +1930,10 @@ end
 
 ---------------------------------------------------------------------
 -- KNOCKDOWN / RAGDOLL MONITOR: auto dodge stays OFF while you can't move properly
+-- (wrapped in do ... end so its helper locals are freed afterwards)
 ---------------------------------------------------------------------
 
+do
 local downNames = {}
 for _, n in ipairs({"ragdoll", "ragdolled", "isragdoll", "inragdoll", "stunned", "stun", "isstunned",
     "knockeddown", "knocked", "knockdown", "downed", "dazed", "frozen", "paralyzed", "grabbed",
@@ -2040,6 +2042,7 @@ track(RunService.Heartbeat:Connect(function()
         end
     end
 end))
+end
 
 ---------------------------------------------------------------------
 -- HELPERS: team / friend filter, smart dodge, keys, anti-AFK
@@ -2130,8 +2133,12 @@ end))
 
 ---------------------------------------------------------------------
 -- CONFIG: your settings are saved (executor files) and loaded next time
+-- (wrapped in do ... end: only saveConfig / resetConfig / configLoaded are used outside)
 ---------------------------------------------------------------------
 
+local saveConfig, resetConfig, configLoaded
+
+do
 local ConfigFile = "AIDodge_v8.json"
 
 local configItems = {
@@ -2168,7 +2175,7 @@ local function canUseFiles()
     return type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
 end
 
-local function saveConfig(silent)
+function saveConfig(silent)
     if not canUseFiles() then
         if not silent then notify("This executor can't save files") end
         return false
@@ -2220,7 +2227,7 @@ local function loadConfig()
     return true
 end
 
-local function resetConfig()
+function resetConfig()
     for _, item in ipairs(configItems) do
         item[3](configDefaults[item[1]])
     end
@@ -2241,12 +2248,15 @@ track(RunService.Heartbeat:Connect(function()
     end
 end))
 
-local configLoaded = loadConfig()
+configLoaded = loadConfig()
 setAntiAfk(AntiAfk)
+end
 
 ---------------------------------------------------------------------
--- UI
+-- UI  (everything in buildUi so its ~90 locals don't count toward main's local limit)
 ---------------------------------------------------------------------
+
+local function buildUi()
 
 local function clearOldUi()
     local places = {}
@@ -3517,11 +3527,18 @@ task.delay(0.2, function()
     setWindow(true)
 end)
 
+return gui
+end -- buildUi
+
+local gui = buildUi()
 
 ---------------------------------------------------------------------
+-- RANGE CIRCLE + AUTO DODGE  (in their own function: keeps main under the local limit)
+---------------------------------------------------------------------
+
+local function startAutoDodge()
+
 -- RANGE CIRCLE (ring on the ground around you)
----------------------------------------------------------------------
-
 local ring = Instance.new("CylinderHandleAdornment")
 ring.Name = "AIDodgeRange"
 ring.Height = 0.15
@@ -3853,6 +3870,11 @@ end)
 -- everything below stops when the window is closed (UNLOAD), or when the script is run again
 track(autoLoop)
 track(ringLoop)
+
+return ring
+end -- startAutoDodge
+
+local ring = startAutoDodge()
 
 gui.Destroying:Connect(function()
     for _, c in ipairs(connections) do
